@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Iniciar sesión · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="css/tokens.css" />
+<link rel="stylesheet" href="css/base.css" />
+<link rel="stylesheet" href="css/components.css" />
+<link rel="stylesheet" href="css/screens.css" />
+</head>
+<body>
+
+<div class="auth-shell">
+  <div class="auth-panel">
+    <div class="auth-form-wrap animate-in">
+      <div class="auth-logo">
+        <span class="brand-mark">B</span>
+        <span>Blanc</span>
+      </div>
+      <h1>Inicia sesión</h1>
+      <p class="sub">Plataforma interna de agendamiento y atención conversacional.</p>
+
+      <form id="login-form" onsubmit="return handleLogin(event)">
+        <div class="field mb-4">
+          <label for="email">Correo</label>
+          <div class="input-icon-wrap">
+            <span id="email-icon"></span>
+            <input class="input" id="email" type="email" placeholder="tú@blanc.mx" value="karla@blanc.mx" required />
+          </div>
+        </div>
+        <div class="field mb-4">
+          <label for="pass">Contraseña</label>
+          <input class="input" id="pass" type="password" placeholder="••••••••" value="demo-1234" required />
+        </div>
+
+        <div class="field mb-6">
+          <label>Rol (demo)</label>
+          <div class="auth-role-grid" id="role-grid"></div>
+        </div>
+
+        <button class="btn btn-primary btn-block btn-lg" id="login-btn" type="submit">
+          Iniciar sesión
+        </button>
+      </form>
+
+      <div class="demo-box">
+        <strong>Mockup visual —</strong> cualquier correo/contraseña te dejará entrar. No hay autenticación real, backend ni persistencia. Elige un rol para simular la vista de ese usuario.
+      </div>
+
+      <div class="flex items-center justify-between mt-6">
+        <span class="text-xs text-tertiary">© Blanc · Prototipo interno</span>
+        <button class="icon-btn" onclick="App.toggleTheme()" title="Cambiar tema" id="theme-toggle-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="auth-visual">
+    <div class="auth-visual-content animate-in">
+      <p class="quote">"El bot entiende que quiero gelish con dos uñas de diseño francés y una con piedras — y ya sabe cuánto tiempo y cuánto cuesta."</p>
+      <p class="cite">— Flujo conversacional de agendamiento, Blanc</p>
+    </div>
+  </div>
+</div>
+
+<script src="js/utils.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/data.js"></script>
+<script src="js/components.js"></script>
+<script src="js/app.js"></script>
+<script src="js/pwa.js"></script>
+<script>
+  App.init(null);
+  document.getElementById("email-icon").innerHTML = ICONS.user;
+
+  const ROLES = ["Super Admin", "Administrador", "Gerente", "Recepcionista", "Manicurista", "Analista", "Solo lectura"];
+  // Restaura el rol elegido la última vez (si lo hay), en vez de asumir
+  // siempre "Super Admin" — el resto de la app sí depende de este valor
+  // (identidad en el sidebar, panel del empleado, agente del chat).
+  let selectedRole = localStorage.getItem("blanc-role") || "Super Admin";
+  document.getElementById("role-grid").innerHTML = ROLES.map((r) =>
+    `<div class="role-pill ${r === selectedRole ? "active" : ""}" data-role="${r}">${r}</div>`
+  ).join("");
+  Utils.qsa(".role-pill").forEach(p => p.addEventListener("click", () => {
+    Utils.qsa(".role-pill").forEach(x => x.classList.remove("active"));
+    p.classList.add("active");
+    selectedRole = p.dataset.role;
+  }));
+
+  function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById("login-btn");
+    btn.classList.add("btn-loading");
+    btn.disabled = true;
+    localStorage.setItem("blanc-role", selectedRole);
+    // Cada rol del selector coincide 1:1 con un usuario de ejemplo en
+    // DB.usuarios — así el sidebar, el panel del empleado y la identidad
+    // usada en el chat reflejan el rol elegido en vez de un usuario fijo.
+    const matchedUser = DB.usuarios.find(u => u.rol === selectedRole) || DB.usuarios[0];
+    localStorage.setItem("blanc-user-id", matchedUser.id);
+    setTimeout(() => { window.location.href = "screens/dashboard.html"; }, 700);
+    return false;
+  }
+</script>
+</body>
+</html>

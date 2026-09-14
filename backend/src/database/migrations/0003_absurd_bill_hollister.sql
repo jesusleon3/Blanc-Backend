@@ -1,0 +1,1 @@
+ALTER TABLE "catalogo_cotizacion"."modificadores_diseno" ADD COLUMN "activo" boolean DEFAULT true NOT NULL;

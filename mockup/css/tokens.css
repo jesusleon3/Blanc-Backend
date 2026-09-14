@@ -1,0 +1,163 @@
+/* ==========================================================================
+   Blanc — Design Tokens
+   Mockup visual únicamente. Ver /mockup/README.md
+   ========================================================================== */
+
+:root {
+  /* Tipografía */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.9375rem;
+  --fs-md: 1.0625rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.5rem;
+  --fs-2xl: 1.875rem;
+  --fs-3xl: 2.25rem;
+
+  --lh-tight: 1.2;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.65;
+
+  /* Espaciado */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radios */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* Layout */
+  --sidebar-w: 264px;
+  --sidebar-w-collapsed: 76px;
+  --topbar-h: 64px;
+  --content-max: 1360px;
+
+  /* Transiciones */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+
+  /* Acento de marca — Blanc (rosa profundo / burdeos) */
+  --accent-h: 340;
+  --accent-50: #fdf2f6;
+  --accent-100: #fce7ee;
+  --accent-200: #f9cedd;
+  --accent-300: #f2a3c0;
+  --accent-400: #e56e9a;
+  --accent-500: #cf3f77;
+  --accent-600: #ad2860;
+  --accent-700: #8c1e4e;
+  --accent-800: #711b41;
+  --accent-900: #5f1938;
+
+  /* Estados */
+  --success-500: #17a673;
+  --success-100: #e0f7ee;
+  --warning-500: #d68a13;
+  --warning-100: #fdf1dc;
+  --danger-500: #dc3545;
+  --danger-100: #fbe4e6;
+  --info-500: #2b6ee0;
+  --info-100: #e5eefc;
+}
+
+/* ---------- Light theme (default) ---------- */
+:root,
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-subtle: #f8f7f9;
+  --bg-muted: #f1f0f3;
+  --bg-elevated: #ffffff;
+  --bg-overlay: rgba(24, 20, 24, 0.48);
+
+  --border: #e7e5ea;
+  --border-strong: #d7d4dc;
+
+  --text: #18151b;
+  --text-secondary: #625d6a;
+  --text-tertiary: #9a95a3;
+  --text-on-accent: #ffffff;
+
+  --accent: var(--accent-600);
+  --accent-hover: var(--accent-700);
+  --accent-subtle: var(--accent-50);
+  --accent-subtle-text: var(--accent-700);
+
+  --shadow-sm: 0 1px 2px rgba(20, 15, 25, 0.05);
+  --shadow-md: 0 4px 12px rgba(20, 15, 25, 0.06), 0 1px 2px rgba(20, 15, 25, 0.04);
+  --shadow-lg: 0 12px 32px rgba(20, 15, 25, 0.10), 0 2px 6px rgba(20, 15, 25, 0.05);
+  --shadow-focus: 0 0 0 3px var(--accent-100);
+}
+
+/* ---------- Dark theme ---------- */
+:root[data-theme="dark"] {
+  --bg: #0c0b0e;
+  --bg-subtle: #131218;
+  --bg-muted: #1a1820;
+  --bg-elevated: #17161c;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --border: #27242e;
+  --border-strong: #37333f;
+
+  --text: #f3f1f5;
+  --text-secondary: #a8a3b3;
+  --text-tertiary: #716c7c;
+  --text-on-accent: #ffffff;
+
+  --accent: var(--accent-400);
+  --accent-hover: var(--accent-300);
+  --accent-subtle: #2a1721;
+  --accent-subtle-text: var(--accent-300);
+
+  --success-100: #0f2a20;
+  --warning-100: #2e230d;
+  --danger-100: #2e1417;
+  --info-100: #101f33;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-focus: 0 0 0 3px rgba(229, 110, 154, 0.28);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c0b0e;
+    --bg-subtle: #131218;
+    --bg-muted: #1a1820;
+    --bg-elevated: #17161c;
+    --bg-overlay: rgba(0, 0, 0, 0.6);
+    --border: #27242e;
+    --border-strong: #37333f;
+    --text: #f3f1f5;
+    --text-secondary: #a8a3b3;
+    --text-tertiary: #716c7c;
+    --accent: var(--accent-400);
+    --accent-hover: var(--accent-300);
+    --accent-subtle: #2a1721;
+    --accent-subtle-text: var(--accent-300);
+    --success-100: #0f2a20;
+    --warning-100: #2e230d;
+    --danger-100: #2e1417;
+    --info-100: #101f33;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+}

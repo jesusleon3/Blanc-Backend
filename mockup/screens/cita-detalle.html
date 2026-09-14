@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Detalle de cita · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="../manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="../assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/screens.css" />
+</head>
+<body>
+<div class="app-shell">
+  <div id="sidebar-mount"></div>
+  <div class="main-area">
+    <div id="topbar-mount"></div>
+    <div class="page-content" id="content"></div>
+  </div>
+</div>
+
+<script src="../js/utils.js"></script>
+<script src="../js/icons.js"></script>
+<script src="../js/data.js"></script>
+<script src="../js/components.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/pwa.js"></script>
+<script>
+  App.init("agenda", "cita-detalle");
+  const id = Utils.param("id");
+  const cita = DB.citas.find(c => c.id === id) || DB.citas[0];
+  const cli = DB.cliente(cita.clientaId);
+  const suc = DB.sucursal(cita.sucursalId);
+  const mani = DB.manicurista(cita.manicuristaId);
+  const anticipo = DB.anticipos.find(a => a.citaId === cita.id);
+  const notifs = DB.notificaciones.filter(n => n.citaId === cita.id);
+
+  const EVENTOS = [
+    { icon: "plus", variant: "accent", title: "CitaSolicitada", meta: Utils.dateTimeLabel(new Date(cita.inicio.getTime() - 86400000)), desc: "Solicitada por la clienta vía conversación de WhatsApp." },
+    ...(cita.estado !== "pendiente" ? [{ icon: "check", variant: "success", title: "CitaConfirmada", meta: Utils.dateTimeLabel(new Date(cita.inicio.getTime() - 80000000)), desc: "Snapshot de cotización congelado." }] : []),
+    ...(cita.estado === "completada" ? [{ icon: "checkCircle", variant: "success", title: "CitaCompletada", meta: Utils.dateTimeLabel(cita.fin), desc: "Servicio finalizado." }] : []),
+    ...(cita.estado === "no_show" ? [{ icon: "alert", variant: "danger", title: "ClienteNoShow", meta: Utils.dateTimeLabel(cita.fin), desc: "La clienta no se presentó." }] : []),
+    ...(cita.estado === "cancelada" ? [{ icon: "x", variant: "danger", title: "CitaCancelada", meta: Utils.dateTimeLabel(cita.inicio), desc: "Cancelada por la clienta." }] : []),
+  ];
+
+  document.getElementById("content").innerHTML = `
+    <div class="page-header">
+      <div>
+        <a href="agenda.html" class="text-sm text-secondary flex items-center gap-1 mb-2">${ICONS.chevronLeft} Volver a la agenda</a>
+        <h1 class="flex items-center gap-3">Cita ${cita.id.replace("cit-","#")} ${Components.badgeCitaEstado(cita.estado)}</h1>
+        <div class="desc">${suc.nombre} · ${Utils.dateTimeLabel(cita.inicio)}</div>
+      </div>
+      <div class="dropdown" id="acciones-dd">
+        <button class="btn btn-secondary" onclick="App.toggleDropdown('acciones-dd', event)">Acciones ${ICONS.chevronDown}</button>
+        <div class="dropdown-menu">
+          <div class="dropdown-item" onclick="accion('Reprogramación')">${ICONS.calendar} Reprogramar</div>
+          <div class="dropdown-item" onclick="accion('Marcada como completada')">${ICONS.check} Marcar completada</div>
+          <div class="dropdown-item" onclick="accion('Marcada como no-show')">${ICONS.alert} Marcar no-show</div>
+          <div class="dropdown-divider"></div>
+          <div class="dropdown-item danger" onclick="accion('Cancelación')">${ICONS.x} Cancelar cita</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="workspace">
+      <div class="flex flex-col gap-6">
+        <div class="card animate-in">
+          <div class="card-header"><h3>Composición del servicio</h3></div>
+          <div class="card-body">
+            <div class="flex flex-wrap gap-2 mb-4">
+              ${cita.composicion.servicios.map(s => `<span class="badge badge-accent">${s}</span>`).join("")}
+              ${cita.composicion.modificadores.map(m => `<span class="badge badge-outline">${m}</span>`).join("")}
+            </div>
+            <div class="grid grid-2">
+              <div class="surface-muted"><div class="text-xs text-tertiary mb-1">Duración (snapshot)</div><div class="font-semibold">${cita.composicion.duracionTotal} min</div></div>
+              <div class="surface-muted"><div class="text-xs text-tertiary mb-1">Precio (snapshot)</div><div class="font-semibold">${Utils.money(cita.composicion.precioTotal)}</div></div>
+            </div>
+            <p class="text-xs text-tertiary mt-3">Snapshot inmutable — este precio no cambia aunque el catálogo se actualice después (ver Pregunta Abierta #13, Domain Discovery).</p>
+          </div>
+        </div>
+
+        ${anticipo ? `
+        <div class="card animate-in">
+          <div class="card-header"><h3>Anticipo</h3></div>
+          <div class="card-body flex items-center justify-between">
+            <div>
+              <div class="font-semibold">${Utils.money(anticipo.monto)}</div>
+              <div class="text-xs text-tertiary mt-1">Solicitado ${Utils.relativeTime(anticipo.creado)}</div>
+            </div>
+            ${Components.badgeAnticipoEstado(anticipo.estado)}
+          </div>
+        </div>` : ""}
+
+        ${notifs.length ? `
+        <div class="card animate-in">
+          <div class="card-header"><h3>Notificaciones enviadas</h3></div>
+          <div class="table-wrap"><table class="data-table"><tbody>
+            ${notifs.map(n => `<tr><td class="cell-primary" style="text-transform:capitalize;">${n.tipo}</td><td class="text-secondary">${Utils.dateTimeLabel(n.ts)}</td><td>${Components.badgeNotifEstado(n.estado)}</td></tr>`).join("")}
+          </tbody></table></div>
+        </div>` : ""}
+
+        <div class="card animate-in">
+          <div class="card-header"><h3>Línea de tiempo</h3></div>
+          <div class="card-body"><div class="timeline">${EVENTOS.map(Components.timelineItem).join("")}</div></div>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-6">
+        <div class="card animate-in">
+          <div class="card-header"><h3>Clienta</h3></div>
+          <div class="card-body">
+            <div class="flex items-center gap-3 mb-3">
+              ${Utils.avatarHTML(cli.nombre, "lg")}
+              <div>
+                <div class="font-semibold">${cli.nombre}</div>
+                <div class="text-xs text-tertiary">${cli.telefono}</div>
+                <div class="mt-1">${Components.badgeClientaEstado(cli.estado)}</div>
+              </div>
+            </div>
+            <a href="clienta-perfil.html?id=${cli.id}" class="btn btn-secondary btn-sm btn-block">Ver perfil completo</a>
+          </div>
+        </div>
+        <div class="card animate-in">
+          <div class="card-header"><h3>Recurso asignado</h3></div>
+          <div class="card-body">
+            ${mani ? `<div class="flex items-center gap-3">${Utils.avatarHTML(mani.nombre,"md")}<div><div class="font-semibold text-sm">${mani.nombre}</div><div class="text-xs text-tertiary">Manicurista</div></div></div>` : `<p class="text-sm text-tertiary">Sin manicurista asignada — clienta sin preferencia.</p>`}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  function accion(nombre) {
+    App.toast("success", nombre, "Acción simulada — sin efecto real sobre datos persistentes.");
+  }
+</script>
+</body>
+</html>

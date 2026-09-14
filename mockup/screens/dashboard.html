@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Dashboard · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="../manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="../assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/screens.css" />
+</head>
+<body>
+<div class="app-shell">
+  <div id="sidebar-mount"></div>
+  <div class="main-area">
+    <div id="topbar-mount" data-actions='<button class="btn btn-secondary btn-sm" onclick="App.toast(&apos;info&apos;,&apos;Exportando reporte&apos;,&apos;Acción simulada — sin efecto real sobre datos persistentes.&apos;)">Exportar</button><a href="cita-nueva.html" class="btn btn-primary btn-sm">+ Nueva cita</a>'></div>
+    <div class="page-content">
+
+      <div class="page-header">
+        <div>
+          <div class="desc" id="scope-desc">Vista general del negocio, todas las sucursales</div>
+        </div>
+        <div class="segmented">
+          <button class="active" onclick="App.selectSegment(this)">Hoy</button>
+          <button onclick="App.selectSegment(this)">Semana</button>
+          <button onclick="App.selectSegment(this)">Mes</button>
+        </div>
+      </div>
+
+      <div id="kpi-primary" class="grid grid-4 mb-6"></div>
+      <div id="kpi-secondary" class="grid grid-4 mb-6"></div>
+
+      <div class="grid row-16-10">
+        <div class="card animate-in">
+          <div class="card-header">
+            <h3>Ventas de la semana</h3>
+            <span class="badge badge-neutral">MXN</span>
+          </div>
+          <div class="card-body">
+            <div class="bar-chart" id="ventas-chart"></div>
+          </div>
+        </div>
+
+        <div class="card animate-in">
+          <div class="card-header"><h3>IA vs. Humano</h3></div>
+          <div class="card-body flex flex-col items-center">
+            <svg viewBox="0 0 36 36" class="donut" id="ia-donut"></svg>
+            <div class="flex flex-col gap-2 mt-4" style="width:100%;">
+              <div class="legend-row"><span class="legend-dot" style="background:var(--accent);"></span> IA autónoma <span style="margin-left:auto;font-weight:650;" id="ia-pct"></span></div>
+              <div class="legend-row"><span class="legend-dot" style="background:var(--bg-muted);border:1px solid var(--border-strong);"></span> Atendido por humano <span style="margin-left:auto;font-weight:650;" id="humano-pct"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid mt-6 row-10-14">
+        <div class="card animate-in">
+          <div class="card-header"><h3>Servicios más vendidos</h3></div>
+          <div class="card-body" id="servicios-top"></div>
+        </div>
+
+        <div class="card animate-in">
+          <div class="card-header">
+            <h3>Embudo de conversión</h3>
+            <span class="text-xs text-tertiary">Últimos 7 días</span>
+          </div>
+          <div class="card-body" id="embudo"></div>
+        </div>
+      </div>
+
+      <div class="card mt-6 animate-in" id="sucursales-card"></div>
+
+      <div class="card mt-6 animate-in">
+        <div class="card-header">
+          <h3>Actividad reciente</h3>
+          <a href="historial.html" class="btn btn-ghost btn-sm">Ver todo</a>
+        </div>
+        <div class="card-body">
+          <div class="timeline" id="actividad-timeline"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="../js/utils.js"></script>
+<script src="../js/icons.js"></script>
+<script src="../js/data.js"></script>
+<script src="../js/components.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/pwa.js"></script>
+<script>
+  App.init("dashboard");
+
+  function renderAll() {
+    const cur = App.getSucursal();
+    const todas = App.isTodasSucursales();
+    const K = DB.metrics(cur);
+
+    document.getElementById("scope-desc").textContent = `Vista general del negocio, ${App.scopeLabel()}`;
+
+    document.getElementById("kpi-primary").innerHTML = document.getElementById("kpi-secondary").innerHTML =
+      Array.from({length:4}).map(() => `<div class="card stat-tile"><div class="skel skel-text" style="width:50%;"></div><div class="skel" style="height:26px;width:70%;margin-top:8px;"></div></div>`).join("");
+
+    App.simulateLoading("kpi-primary", () => [
+      Components.statTile({ label: "Ventas hoy", value: Utils.money(K.ventasHoy), sub: `${K.citasCompletadasHoy} citas completadas` }),
+      Components.statTile({ label: "Citas hoy", value: K.citasHoy, sub: `${K.citasCompletadasHoy} completadas · ${K.citasHoy - K.citasCompletadasHoy} restantes` }),
+      Components.statTile({ label: "Conversaciones activas", value: K.conversacionesActivas, sub: `Tiempo de respuesta ${K.tiempoRespuestaPromedio}` }),
+      Components.statTile({ label: "Satisfacción", value: `${K.satisfaccion} / 5`, sub: "Basado en encuestas post-cita" }),
+    ].join(""), 550);
+
+    App.simulateLoading("kpi-secondary", () => [
+      Components.statTile({ label: "Cancelaciones (semana)", value: K.cancelacionesSemana, delta: `${K.noShowSemana} no-show`, deltaUp: false, sub: "Meta: < 8 por semana" }),
+      Components.statTile({ label: "Clientes nuevos", value: K.clientesNuevosSemana, sub: "Últimos 7 días" }),
+      Components.statTile({ label: "Clientes recurrentes", value: K.clientesRecurrentesSemana, sub: "Últimos 7 días" }),
+      Components.statTile({ label: "Costo de IA (mes)", value: Utils.money(K.costoIAMes), sub: `${(K.tokensConsumidosMes/1000).toFixed(1).replace(/\.0$/, "")}k tokens consumidos` }),
+    ].join(""), 750);
+
+    // Bar chart ventas — con el monto visible sobre cada barra, no solo en el tooltip
+    const maxVenta = Math.max(...K.ventasPorDia.map(v => v.valor)) || 1;
+    document.getElementById("ventas-chart").innerHTML = K.ventasPorDia.map(v => `
+      <div class="bar-col">
+        <span class="bar-value">${v.valor ? Utils.moneyCompact(v.valor) : "—"}</span>
+        <div class="bar ${v.valor === maxVenta && v.valor > 0 ? "hi" : ""}" style="height:${v.valor ? Math.max(6, (v.valor/maxVenta)*128) : 2}px;" title="${Utils.money(v.valor)}"></div>
+        <div class="bar-label">${v.label}</div>
+      </div>`).join("");
+
+    // Donut IA vs humano
+    const iaPct = K.iaVsHumano.ia;
+    document.getElementById("ia-donut").innerHTML = `
+      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bg-muted)" stroke-width="4"/>
+      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--accent)" stroke-width="4"
+        stroke-dasharray="${iaPct} ${100-iaPct}" stroke-dashoffset="25" stroke-linecap="round"/>
+      <text x="18" y="20" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="700">${iaPct}%</text>`;
+    document.getElementById("ia-pct").textContent = `${K.iaVsHumano.ia}%`;
+    document.getElementById("humano-pct").textContent = `${K.iaVsHumano.humano}%`;
+
+    // Servicios top (calculado a partir de las citas reales de la sucursal activa)
+    const servHTML = K.serviciosMasVendidos.length ? (() => {
+      const maxServ = Math.max(...K.serviciosMasVendidos.map(s => s.valor));
+      return K.serviciosMasVendidos.map(s => `
+        <div class="mb-3">
+          <div class="flex justify-between mb-1"><span class="text-sm font-medium">${s.nombre}</span><span class="text-sm text-secondary">${s.valor}</span></div>
+          <div class="progress"><div class="progress-bar" style="width:${(s.valor/maxServ)*100}%;"></div></div>
+        </div>`).join("");
+    })() : `<p class="text-sm text-tertiary">Sin citas registradas todavía en esta sucursal.</p>`;
+    document.getElementById("servicios-top").innerHTML = servHTML;
+
+    // Embudo
+    const maxEmbudo = K.embudo[0].valor || 1;
+    document.getElementById("embudo").innerHTML = K.embudo.map((e, i) => `
+      <div class="flex items-center gap-4 mb-3">
+        <div style="width:170px;" class="text-sm text-secondary">${e.etapa}</div>
+        <div class="progress grow"><div class="progress-bar" style="width:${(e.valor/maxEmbudo)*100}%; background: hsl(${340 - i*18} 60% 55%);"></div></div>
+        <div class="text-sm font-semibold" style="width:40px;text-align:right;">${e.valor}</div>
+      </div>`).join("");
+
+    // Desempeño por sucursal: comparativo agregado solo si "todas"; si hay una
+    // sucursal activa, se reemplaza por un resumen de ESA sucursal — nunca se
+    // mezclan datos de otras sucursales dentro del alcance actual.
+    const sucCard = document.getElementById("sucursales-card");
+    if (todas) {
+      sucCard.innerHTML = `
+        <div class="card-header">
+          <h3>Desempeño por sucursal</h3>
+          <a href="analytics.html" class="btn btn-ghost btn-sm">Ver Analytics completo</a>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Sucursal</th><th>Ventas (semana)</th><th>Ocupación</th><th>Citas hoy</th><th></th></tr></thead>
+            <tbody id="sucursales-tbody"></tbody>
+          </table>
+        </div>`;
+      document.getElementById("sucursales-tbody").innerHTML = K.sucursales.map(s => `
+        <tr onclick="App.setSucursal('${s.id}')" title="Ver el dashboard de ${s.nombre}">
+          <td class="cell-primary">${s.nombre}</td>
+          <td>${Utils.money(s.ventas)}</td>
+          <td><div class="flex items-center gap-2"><div class="progress" style="width:80px;"><div class="progress-bar" style="width:${s.ocupacion}%;"></div></div><span class="text-xs text-secondary">${s.ocupacion}%</span></div></td>
+          <td>${DB.citas.filter(c => c.sucursalId === s.id && new Date(c.inicio).toDateString() === new Date().toDateString()).length}</td>
+          <td class="text-tertiary">${ICONS.chevronRight}</td>
+        </tr>`).join("");
+    } else {
+      const sucInfo = DB.kpis.sucursales.find(s => s.id === cur);
+      sucCard.innerHTML = `
+        <div class="card-header">
+          <h3>Resumen de esta sucursal</h3>
+          <a href="#" onclick="App.setSucursal('todas');return false;" class="btn btn-ghost btn-sm">Comparar todas las sucursales</a>
+        </div>
+        <div class="card-body branch-scope-card">
+          <div class="item"><div class="v">${Utils.money(sucInfo ? sucInfo.ventas : 0)}</div><div class="l">Ventas (semana)</div></div>
+          <div class="item"><div class="v">${sucInfo ? sucInfo.ocupacion : 0}%</div><div class="l">Ocupación</div></div>
+          <div class="item"><div class="v">${K.citasHoy}</div><div class="l">Citas hoy</div></div>
+          <div class="item"><div class="v">${K.horasOcupadas.ocupadas}h / ${K.horasOcupadas.total}h</div><div class="l">Horas ocupadas (semana)</div></div>
+        </div>`;
+    }
+
+    // Actividad (respeta el filtro; los registros globales de configuración
+    // del bot, sin sucursal asociada, se muestran siempre)
+    const iconMap = { decision_ia: ["sparkle","accent"], config: ["settings",""], lista_roja: ["shield","danger"], anticipo: ["wallet","success"], prompt: ["edit",""], escalamiento: ["alert","danger"] };
+    const actividad = App.filterBySucursal(DB.auditoria, a => a.sucursalId).concat(todas ? [] : DB.auditoria.filter(a => a.sucursalId === null));
+    const actividadOrdenada = actividad.sort((a,b) => b.ts - a.ts).slice(0,6);
+    document.getElementById("actividad-timeline").innerHTML = actividadOrdenada.length ? actividadOrdenada.map(a => {
+      const [icon, variant] = iconMap[a.tipo] || ["check",""];
+      return Components.timelineItem({ icon, variant, title: a.detalle, meta: `${Utils.relativeTime(a.ts)} · ${a.meta}` });
+    }).join("") : `<p class="text-sm text-tertiary">Sin actividad registrada para esta sucursal.</p>`;
+  }
+
+  renderAll();
+  document.addEventListener("blanc:sucursal-change", renderAll);
+</script>
+</body>
+</html>

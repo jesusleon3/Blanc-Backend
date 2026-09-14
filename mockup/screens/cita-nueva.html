@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Nueva cita · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="../manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="../assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/screens.css" />
+</head>
+<body>
+<div class="app-shell">
+  <div id="sidebar-mount"></div>
+  <div class="main-area">
+    <div id="topbar-mount"></div>
+    <div class="page-content">
+
+      <div class="step-list" id="steps"></div>
+
+      <div class="workspace">
+        <div>
+          <!-- Paso 1 -->
+          <div class="card animate-in step-panel" data-step="1">
+            <div class="card-header"><h3>1. Elegir clienta</h3></div>
+            <div class="card-body">
+              <div class="field mb-4">
+                <label>Sucursal</label>
+                <select class="select" id="sel-sucursal"></select>
+              </div>
+              <div class="search-box mb-4">
+                <span id="icon-search"></span>
+                <input class="input" id="buscar-clienta" placeholder="Buscar por nombre o teléfono…" />
+              </div>
+              <div id="clienta-resultados" class="flex flex-col gap-2"></div>
+              <div id="clienta-alerta" class="mt-4"></div>
+            </div>
+          </div>
+
+          <!-- Paso 2 -->
+          <div class="card animate-in step-panel" data-step="2" style="display:none;">
+            <div class="card-header"><h3>2. Composición del servicio</h3></div>
+            <div class="card-body">
+              <div class="field mb-4">
+                <div class="service-pill-list" id="servicios-list"></div>
+              </div>
+              <div class="field">
+                <label>Diseño por uña <span class="text-tertiary font-medium">(toca cada uña para asignar un modificador)</span></label>
+                <div class="uña-grid mt-2" id="unas-grid"></div>
+                <div class="flex gap-3 mt-3 text-xs text-secondary wrap" id="unas-leyenda"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Paso 3 -->
+          <div class="card animate-in step-panel" data-step="3" style="display:none;">
+            <div class="card-header"><h3>3. Horario</h3></div>
+            <div class="card-body">
+              <div class="field mb-5">
+                <label>Manicurista</label>
+                <div class="flex gap-2 wrap" id="manicurista-list"></div>
+              </div>
+              <div class="field mb-5" id="preferencia-box" style="display:none;"></div>
+              <div class="field mb-5">
+                <label>Fecha</label>
+                <div class="flex gap-2 wrap" id="fecha-list"></div>
+              </div>
+              <div class="field">
+                <label>Horarios disponibles</label>
+                <div class="flex gap-2 wrap mt-2" id="hora-list"></div>
+                <div id="sugerencia-box"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Paso 4 -->
+          <div class="card animate-in step-panel" data-step="4" style="display:none;">
+            <div class="card-header"><h3>4. Confirmar</h3></div>
+            <div class="card-body" id="confirmar-body"></div>
+          </div>
+
+          <div class="flex justify-between mt-5">
+            <button class="btn btn-secondary" id="btn-atras" onclick="goStep(step-1)">Atrás</button>
+            <button class="btn btn-primary" id="btn-siguiente" onclick="goStep(step+1)">Continuar</button>
+          </div>
+        </div>
+
+        <div class="workspace-summary">
+          <div class="card">
+            <div class="card-header"><h3>Resumen de cotización</h3></div>
+            <div class="card-body" id="resumen-body">
+              <p class="text-sm text-tertiary">Selecciona servicios para calcular tiempo y precio automáticamente.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="../js/utils.js"></script>
+<script src="../js/icons.js"></script>
+<script src="../js/data.js"></script>
+<script src="../js/components.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/pwa.js"></script>
+<script>
+  App.init("agenda", "cita-nueva");
+  document.getElementById("icon-search").innerHTML = ICONS.search;
+  // Preselecciona la sucursal activa en el filtro global (si hay una
+  // concreta), en vez de asumir siempre la primera de la lista.
+  const sucursalInicial = App.isTodasSucursales() ? DB.sucursales[0].id : App.getSucursal();
+  document.getElementById("sel-sucursal").innerHTML = DB.sucursales.map(s => `<option value="${s.id}" ${s.id===sucursalInicial?"selected":""}>${s.nombre}</option>`).join("");
+
+  const MODS = ["—", "Diseño sencillo", "Diseño complejo", "Piedras", "Diseño francés"];
+  const MOD_COLOR = { "Diseño sencillo": "var(--info-500)", "Diseño complejo": "var(--accent)", "Piedras": "var(--warning-500)", "Diseño francés": "var(--success-500)" };
+  // Sesión 02 de Domain Discovery (docs/domain-discovery/02-domain-discovery-session-02.md),
+  // reglas Q1–Q3: catálogo de qué se puede retirar y catálogo de servicios de aplicación.
+  const SERV_RETIRO = ["Gel", "Acrílico", "Rubber"];
+  const SERV_APLICACION = DB.servicios.filter(s => s.tipo === "aplicacion");
+
+  let step = 1;
+  const wizard = {
+    clienta: null, sucursalId: sucursalInicial, servicios: [], unas: Array(10).fill(0),
+    retiro: { activo: false, retira: null, metodo: null },
+    manicuristaId: undefined, manicuristaExclusiva: false, fecha: null, fechaIndex: null, hora: null,
+  };
+
+  function renderSteps() {
+    const labels = ["Clienta", "Servicio", "Horario", "Confirmar"];
+    document.getElementById("steps").innerHTML = labels.map((l, i) => {
+      const n = i + 1;
+      const cls = n < step ? "done" : n === step ? "active" : "";
+      return `<div class="step ${cls}"><span class="n">${n < step ? "✓" : n}</span><span class="label">${l}</span></div>${n<4?'<span class="sep"></span>':""}`;
+    }).join("");
+  }
+
+  function goStep(n) {
+    if (n < 1 || n > 4) return;
+    if (n > step) {
+      if (step === 1 && !wizard.clienta) { App.toast("error", "Selecciona una clienta", "Es necesario elegir a la clienta antes de continuar."); return; }
+      if (step === 2 && wizard.servicios.length === 0 && !wizard.retiro.activo) { App.toast("error", "Selecciona al menos un servicio", ""); return; }
+      if (step === 3 && !wizard.hora) { App.toast("error", "Selecciona un horario disponible", ""); return; }
+    }
+    step = n;
+    Utils.qsa(".step-panel").forEach(p => p.style.display = Number(p.dataset.step) === step ? "block" : "none");
+    document.getElementById("btn-atras").style.visibility = step === 1 ? "hidden" : "visible";
+    document.getElementById("btn-siguiente").style.display = step === 4 ? "none" : "inline-flex";
+    renderSteps();
+    if (step === 3) renderPaso3();
+    if (step === 4) renderPaso4();
+    // document.scrollingElement varía según el navegador; se resetean los
+    // tres candidatos posibles para que "volver arriba" funcione siempre.
+    window.scrollTo({top:0, behavior:"smooth"});
+    document.documentElement.scrollTo({top:0, behavior:"smooth"});
+    document.body.scrollTo({top:0, behavior:"smooth"});
+  }
+
+  // ---- Paso 1
+  document.getElementById("sel-sucursal").addEventListener("change", (e) => { wizard.sucursalId = e.target.value; wizard.manicuristaId = undefined; renderClientas(""); });
+  document.getElementById("buscar-clienta").addEventListener("input", (e) => renderClientas(e.target.value));
+
+  function renderClientas(q) {
+    const list = DB.clientas.filter(c => c.nombre.toLowerCase().includes(q.toLowerCase()) || c.telefono.includes(q)).slice(0, 6);
+    document.getElementById("clienta-resultados").innerHTML = list.map(c => `
+      <div class="service-pill ${wizard.clienta?.id===c.id?"selected":""}" onclick="selectClienta('${c.id}')">
+        <div class="cell-flex">${Utils.avatarHTML(c.nombre,"sm")}<div><div class="cell-primary">${c.nombre}</div><div class="text-xs text-tertiary">${c.telefono}</div></div></div>
+        ${Components.badgeClientaEstado(c.estado)}
+      </div>`).join("") || `<p class="text-sm text-tertiary">Sin resultados. En producción, si la clienta no existe se crea automáticamente desde WhatsApp.</p>`;
+  }
+  renderClientas("");
+
+  function selectClienta(id) {
+    wizard.clienta = DB.cliente(id);
+    renderClientas(document.getElementById("buscar-clienta").value);
+    const alertBox = document.getElementById("clienta-alerta");
+    if (wizard.clienta.estado === "lista_roja") {
+      alertBox.innerHTML = `<div class="surface-muted" style="border-color:var(--danger-500);background:var(--danger-100);"><div class="flex items-center gap-2 font-semibold text-sm" style="color:var(--danger-500);">${ICONS.shield} Clienta en lista roja</div><p class="text-sm mt-1">Esta cita requerirá anticipo antes de confirmarse en firme, y cualquier cancelación necesitará aprobación de un empleado.</p></div>`;
+    } else if (wizard.clienta.estado === "bloqueada") {
+      alertBox.innerHTML = `<div class="surface-muted" style="border-color:var(--danger-500);background:var(--danger-100);"><div class="flex items-center gap-2 font-semibold text-sm" style="color:var(--danger-500);">${ICONS.alert} Clienta bloqueada</div><p class="text-sm mt-1">${wizard.clienta.notas || "Esta clienta está bloqueada."}</p></div>`;
+    } else {
+      alertBox.innerHTML = "";
+    }
+    updateResumen();
+  }
+
+  // ---- Paso 2
+  function renderServiciosPaso2() {
+    document.getElementById("servicios-list").innerHTML = `
+      <div class="text-xs font-semibold text-tertiary mb-2" style="letter-spacing:.03em;text-transform:uppercase;">Retiro</div>
+      <div class="service-pill ${wizard.retiro.activo?"selected":""}" onclick="toggleRetiro()">
+        <div><div class="cell-primary">Retiro de servicio anterior</div><div class="text-xs text-tertiary">Solo si la clienta ya trae un servicio aplicado</div></div>
+      </div>
+      ${wizard.retiro.activo ? `
+        <div class="mt-3 mb-1 text-xs text-secondary">¿Qué se retira?</div>
+        <div class="flex gap-2 wrap mb-3">${SERV_RETIRO.map(r => `<div class="filter-chip ${wizard.retiro.retira===r?"active":""}" onclick="setRetira('${r}')">${r}</div>`).join("")}</div>
+        <div class="mb-1 text-xs text-secondary">Método de retiro</div>
+        <div class="flex gap-2 wrap">${DB.retiroMetodos.map(m => `<div class="filter-chip ${wizard.retiro.metodo===m?"active":""}" onclick="setMetodoRetiro('${m}')">${m}</div>`).join("")}</div>
+      ` : ""}
+      <div class="text-xs font-semibold text-tertiary mt-4 mb-2" style="letter-spacing:.03em;text-transform:uppercase;">Aplicación</div>
+      ${SERV_APLICACION.map(s => `
+        <div class="service-pill ${wizard.servicios.includes(s.id)?"selected":""}" data-srv="${s.id}" onclick="toggleServicio('${s.id}')">
+          <div><div class="cell-primary">${s.nombre}</div><div class="text-xs text-tertiary">${s.categoria}</div></div>
+          <div class="text-sm font-semibold">${Utils.money(s.precioBase)}</div>
+        </div>`).join("")}
+    `;
+  }
+  renderServiciosPaso2();
+
+  function toggleRetiro() {
+    wizard.retiro.activo = !wizard.retiro.activo;
+    if (!wizard.retiro.activo) { wizard.retiro.retira = null; wizard.retiro.metodo = null; }
+    renderServiciosPaso2(); updateResumen();
+  }
+  function setRetira(r) { wizard.retiro.retira = r; renderServiciosPaso2(); updateResumen(); }
+  function setMetodoRetiro(m) { wizard.retiro.metodo = m; renderServiciosPaso2(); updateResumen(); }
+
+  function toggleServicio(id) {
+    const idx = wizard.servicios.indexOf(id);
+    if (idx > -1) wizard.servicios.splice(idx, 1); else wizard.servicios.push(id);
+    renderServiciosPaso2();
+    updateResumen();
+  }
+
+  document.getElementById("unas-grid").innerHTML = Array.from({length:10}).map((_,i) => `<div class="uña-chip" id="una-${i}" onclick="cycleUna(${i})">${i+1}</div>`).join("");
+  document.getElementById("unas-leyenda").innerHTML = MODS.slice(1).map(m => `<span class="flex items-center gap-1"><span style="width:9px;height:9px;border-radius:3px;background:${MOD_COLOR[m]};display:inline-block;"></span>${m}</span>`).join("");
+
+  function cycleUna(i) {
+    wizard.unas[i] = (wizard.unas[i] + 1) % MODS.length;
+    const el = document.getElementById(`una-${i}`);
+    const modName = MODS[wizard.unas[i]];
+    el.textContent = i + 1;
+    el.classList.toggle("selected", wizard.unas[i] !== 0);
+    el.style.borderColor = wizard.unas[i] ? MOD_COLOR[modName] : "";
+    el.style.background = wizard.unas[i] ? "" : "";
+    el.style.color = wizard.unas[i] ? MOD_COLOR[modName] : "";
+    updateResumen();
+  }
+
+  function calcularCotizacion() {
+    let duracion = 0, precio = 0;
+    const items = [];
+    let combinacionEncontrada = null; // null = no aplica todavía; true/false una vez hay suficiente selección
+
+    const aplicNombres = wizard.servicios.map(id => DB.servicios.find(s => s.id === id)).filter(Boolean).map(s => s.nombre);
+
+    if (wizard.retiro.activo && wizard.retiro.retira && wizard.retiro.metodo && aplicNombres.length) {
+      // Sesión 02, reglas Q1–Q3: la duración de retiro + aplicación es una tabla de
+      // combinaciones específicas, no la suma de cada servicio por separado.
+      const retiroServ = DB.servicios.find(s => s.nombre === "Retiro");
+      items.push({ label: `Retiro de ${wizard.retiro.retira} (${wizard.retiro.metodo})`, precio: retiroServ ? retiroServ.precioBase : 0 });
+      precio += retiroServ ? retiroServ.precioBase : 0;
+      wizard.servicios.forEach(id => { const s = DB.servicios.find(x => x.id === id); precio += s.precioBase; items.push({ label: s.nombre, precio: s.precioBase }); });
+
+      const match = DB.buscarDuracionRetiro(wizard.retiro.retira, wizard.retiro.metodo, aplicNombres);
+      if (match) { duracion += match.minutos; combinacionEncontrada = true; }
+      else {
+        duracion += (retiroServ ? retiroServ.duracionBase : 0) + wizard.servicios.reduce((s, id) => s + DB.servicios.find(x => x.id === id).duracionBase, 0);
+        combinacionEncontrada = false;
+      }
+    } else if (wizard.retiro.activo && !aplicNombres.length) {
+      // Retiro sin aplicación de servicio nuevo — no hay combinación que buscar
+      // en la tabla (esta solo aplica a retiro + aplicación juntos); se usa el
+      // tiempo/precio propio del servicio de retiro, igual que ya existía en el
+      // dataset simulado (ver cit-1014 en data.js).
+      const retiroServ = DB.servicios.find(s => s.nombre === "Retiro");
+      if (retiroServ) {
+        duracion += retiroServ.duracionBase; precio += retiroServ.precioBase;
+        items.push({ label: `Retiro de ${wizard.retiro.retira || "servicio anterior"}`, precio: retiroServ.precioBase });
+      }
+    } else if (aplicNombres.length >= 2) {
+      wizard.servicios.forEach(id => { const s = DB.servicios.find(x => x.id === id); precio += s.precioBase; items.push({ label: s.nombre, precio: s.precioBase }); });
+      const match = DB.buscarDuracionAplicacion(aplicNombres);
+      if (match) { duracion += match.minutos; combinacionEncontrada = true; }
+      else {
+        duracion += wizard.servicios.reduce((s, id) => s + DB.servicios.find(x => x.id === id).duracionBase, 0);
+        combinacionEncontrada = false;
+      }
+    } else {
+      wizard.servicios.forEach(id => {
+        const s = DB.servicios.find(x => x.id === id);
+        duracion += s.duracionBase; precio += s.precioBase;
+        items.push({ label: s.nombre, precio: s.precioBase });
+      });
+    }
+
+    const modCounts = {};
+    wizard.unas.forEach(v => { if (v) modCounts[MODS[v]] = (modCounts[MODS[v]]||0)+1; });
+    Object.entries(modCounts).forEach(([nombre, count]) => {
+      const mod = DB.modificadores.find(m => m.nombre === nombre);
+      if (!mod) return;
+      duracion += mod.minutosAdicionales * count; precio += mod.precioAdicional * count;
+      items.push({ label: `${nombre} × ${count}`, precio: mod.precioAdicional*count });
+    });
+    return { duracion, precio, items, combinacionEncontrada };
+  }
+
+  function updateResumen() {
+    const cot = calcularCotizacion();
+    const box = document.getElementById("resumen-body");
+    if (!wizard.clienta && wizard.servicios.length === 0 && !wizard.retiro.activo) {
+      box.innerHTML = `<p class="text-sm text-tertiary">Selecciona servicios para calcular tiempo y precio automáticamente.</p>`;
+      return;
+    }
+    box.innerHTML = `
+      ${wizard.clienta ? `<div class="flex items-center gap-3 mb-4 pb-4" style="border-bottom:1px solid var(--border);">${Utils.avatarHTML(wizard.clienta.nombre)}<div><div class="font-semibold text-sm">${wizard.clienta.nombre}</div><div class="text-xs text-tertiary">${DB.sucursal(wizard.sucursalId).nombre}</div></div></div>` : ""}
+      ${cot.items.map(it => `<div class="flex justify-between text-sm mb-2"><span class="text-secondary">${it.label}</span><span>${Utils.money(it.precio)}</span></div>`).join("")}
+      ${cot.items.length ? `<div class="divider"></div><div class="flex justify-between text-sm mb-1"><span class="text-secondary">Duración total</span><span class="font-semibold">${cot.duracion} min</span></div><div class="flex justify-between" style="font-size:var(--fs-lg);"><span class="font-semibold">Total</span><span class="font-semibold">${Utils.money(cot.precio)}</span></div>` : ""}
+      ${cot.combinacionEncontrada === true ? `<p class="text-xs text-tertiary mt-2">${ICONS.sparkle} Tiempo calculado automáticamente por combinación fija — no es la suma de cada servicio por separado.</p>` : ""}
+      ${cot.combinacionEncontrada === false ? `<p class="text-xs text-tertiary mt-2">⚠️ No hay una combinación exacta definida para esta selección todavía — se muestra un estimado por suma de tiempos individuales.</p>` : ""}
+      ${wizard.manicuristaId ? `<div class="divider"></div><div class="flex items-center gap-2 text-sm">${Utils.avatarHTML(DB.manicurista(wizard.manicuristaId).nombre,"xs")}${DB.manicurista(wizard.manicuristaId).nombre}${wizard.manicuristaExclusiva ? ` <span class="badge badge-accent">Exclusiva</span>` : ""}</div>` : ""}
+      ${wizard.hora ? `<div class="divider"></div><div class="flex items-center gap-2 text-sm"><span style="color:var(--accent);">${ICONS.calendar}</span>${wizard.fecha} · ${wizard.hora}</div>` : ""}
+    `;
+  }
+
+  // ---- Paso 3
+  const HORA_SLOTS = ["09:00","09:30","10:15","11:00","15:15","16:00","16:45","17:30","18:15"];
+  const ALTA_DEMANDA_IDX = [3, 6]; // 11:00 y 16:45 — Sesión 02, requisitos A1/A3
+
+  function renderPaso3() {
+    const manis = DB.manicuristas.filter(m => m.sucursalId === wizard.sucursalId && m.activa);
+    document.getElementById("manicurista-list").innerHTML = [{id:undefined,nombre:"Sin preferencia"}, ...manis].map(m => `
+      <div class="filter-chip ${wizard.manicuristaId===m.id?"active":""}" onclick="selectManicurista(${m.id?`'${m.id}'`:"undefined"})">${m.nombre}</div>`).join("");
+
+    // Preferencia / Exclusiva — Sesión 02, requisito A2. Solo aplica si se eligió
+    // una manicurista concreta (no "Sin preferencia").
+    const prefBox = document.getElementById("preferencia-box");
+    if (wizard.manicuristaId) {
+      prefBox.style.display = "block";
+      prefBox.innerHTML = `
+        <label>Preferencia de manicurista</label>
+        <div class="flex gap-2 mt-1">
+          <div class="filter-chip ${!wizard.manicuristaExclusiva?"active":""}" onclick="setExclusiva(false)">Preferencia</div>
+          <div class="filter-chip ${wizard.manicuristaExclusiva?"active":""}" onclick="setExclusiva(true)">Exclusiva</div>
+        </div>
+        <p class="text-xs text-tertiary mt-1">${wizard.manicuristaExclusiva ? "Si no hay espacio con esta manicurista, no se ofrecerá otra — solo horarios distintos." : "Si no hay espacio, el sistema puede sugerir otra manicurista disponible."}</p>
+      `;
+    } else {
+      prefBox.style.display = "none";
+      prefBox.innerHTML = "";
+    }
+
+    const dias = Array.from({length:7}).map((_,i) => { const dt=new Date(); dt.setDate(dt.getDate()+i); return dt; }).filter(dt => dt.getDay() !== 0);
+    document.getElementById("fecha-list").innerHTML = dias.map((dt, i) => {
+      const label = dt.toLocaleDateString("es-MX", { weekday:"short", day:"numeric" });
+      return `<div class="filter-chip ${wizard.fecha===label?"active":""}" onclick="selectFecha('${label}', ${i})">${label}</div>`;
+    }).join("");
+  }
+
+  function selectManicurista(id) {
+    wizard.manicuristaId = id; wizard.manicuristaExclusiva = false; wizard.hora = null;
+    document.getElementById("hora-list").innerHTML = ""; document.getElementById("sugerencia-box").innerHTML = "";
+    renderPaso3(); updateResumen();
+  }
+  function setExclusiva(val) {
+    wizard.manicuristaExclusiva = val;
+    renderPaso3();
+    if (wizard.fecha !== null) selectFecha(wizard.fecha, wizard.fechaIndex);
+    updateResumen();
+  }
+
+  function selectFecha(label, idx) {
+    wizard.fecha = label; wizard.fechaIndex = idx; wizard.hora = null;
+    document.getElementById("sugerencia-box").innerHTML = "";
+    renderPaso3();
+
+    // Escenario determinista de "sin alternativas" (Sesión 02, requisito A2):
+    // manicurista exclusiva + tercer día de la lista simula que esa manicurista
+    // no tiene ningún horario disponible ese día — y, por ser exclusiva, no se
+    // ofrece otra manicurista como sustituto, solo otro día.
+    if (wizard.manicuristaExclusiva && idx === 2) {
+      document.getElementById("hora-list").innerHTML = "";
+      document.getElementById("sugerencia-box").innerHTML = Components.emptyState({
+        icon: "calendar", title: "Sin horarios disponibles con esta manicurista",
+        desc: "Como la preferencia es exclusiva, no se sugiere otra manicurista — prueba con otro día.",
+      });
+      return;
+    }
+
+    document.getElementById("hora-list").innerHTML = HORA_SLOTS.map((h, i) => `
+      <div class="filter-chip ${wizard.hora===h?"active":""}" style="${ALTA_DEMANDA_IDX.includes(i)?"border-color:var(--warning-500);color:var(--warning-500);":""}"
+        onclick="${ALTA_DEMANDA_IDX.includes(i) ? `mostrarSugerencia(${i})` : `selectHora('${h}')`}">${h}${ALTA_DEMANDA_IDX.includes(i)?" · alta demanda":""}</div>`).join("");
+  }
+
+  // Sugerencia automática de horario/manicurista alterna — Sesión 02, requisito A1.
+  function mostrarSugerencia(i) {
+    const alterno = HORA_SLOTS[i === 3 ? 2 : 5];
+    const otraManicurista = wizard.manicuristaId ? DB.manicuristas.find(m => m.sucursalId === wizard.sucursalId && m.activa && m.id !== wizard.manicuristaId) : null;
+    document.getElementById("sugerencia-box").innerHTML = `
+      <div class="surface-muted mt-3" style="border-color:var(--accent);background:var(--accent-subtle);">
+        <div class="flex items-center gap-2 font-semibold text-sm" style="color:var(--accent);">${ICONS.sparkle} Ese horario tiene alta demanda</div>
+        <p class="text-sm mt-1">No hay un error — aquí tienes alternativas:</p>
+        <div class="flex gap-2 wrap mt-2">
+          <div class="filter-chip" onclick="selectHora('${alterno}')">🤖 ${alterno}${wizard.manicuristaId ? ` con ${DB.manicurista(wizard.manicuristaId).nombre}` : ""}</div>
+          ${!wizard.manicuristaExclusiva && otraManicurista ? `<div class="filter-chip" onclick="selectManicuristaSugerida('${otraManicurista.id}')">🤖 Mismo horario con ${otraManicurista.nombre}</div>` : ""}
+        </div>
+      </div>`;
+  }
+  function selectManicuristaSugerida(id) {
+    selectManicurista(id);
+    App.toast("info", "Manicurista actualizada", "Se aplicó la sugerencia automática del bot.");
+  }
+  function selectHora(h) {
+    wizard.hora = h;
+    document.getElementById("sugerencia-box").innerHTML = "";
+    renderPaso3();
+    Utils.qsa("#hora-list .filter-chip").forEach(el=>el.classList.toggle("active", el.textContent.startsWith(h)));
+    updateResumen();
+  }
+
+  // ---- Paso 4
+  function renderPaso4() {
+    // Conflicto de confirmación tardía — Sesión 02, requisito A3 (reactiva el
+    // hallazgo F-04 de ARCHITECTURE_REVIEW.md). Disparador determinista para la
+    // demo: el horario 09:30 simula haber sido tomado por otra clienta mientras
+    // se completaba el flujo — nunca se muestra como un error genérico.
+    if (wizard.hora === "09:30") {
+      document.getElementById("confirmar-body").innerHTML = `
+        <div class="surface-muted" style="border-color:var(--danger-500);background:var(--danger-100);">
+          <div class="flex items-center gap-2 font-semibold text-sm" style="color:var(--danger-500);">${ICONS.alert} Este horario ya no está disponible</div>
+          <p class="text-sm mt-1">Otra clienta confirmó las ${wizard.hora} mientras completabas esta reserva. Tu selección anterior no se perdió — elige otro horario para continuar.</p>
+          <button class="btn btn-primary btn-sm mt-3" onclick="wizard.hora=null; goStep(3);">Elegir otro horario</button>
+        </div>`;
+      return;
+    }
+
+    const cot = calcularCotizacion();
+    const requiereAnticipo = wizard.clienta.estado === "lista_roja";
+    const montoAnticipo = Math.round(cot.precio * 0.3 / 10) * 10;
+    document.getElementById("confirmar-body").innerHTML = `
+      <div class="grid grid-2 mb-5">
+        <div class="surface-muted"><div class="text-xs text-tertiary mb-1">Clienta</div><div class="font-semibold text-sm">${wizard.clienta.nombre}</div></div>
+        <div class="surface-muted"><div class="text-xs text-tertiary mb-1">Sucursal</div><div class="font-semibold text-sm">${DB.sucursal(wizard.sucursalId).nombre}</div></div>
+        <div class="surface-muted"><div class="text-xs text-tertiary mb-1">Manicurista</div><div class="font-semibold text-sm">${wizard.manicuristaId ? DB.manicurista(wizard.manicuristaId).nombre : "Sin preferencia"}${wizard.manicuristaId && wizard.manicuristaExclusiva ? ` <span class="badge badge-accent" style="margin-left:6px;">Exclusiva</span>` : ""}</div></div>
+        <div class="surface-muted"><div class="text-xs text-tertiary mb-1">Horario</div><div class="font-semibold text-sm">${wizard.fecha} · ${wizard.hora}</div></div>
+      </div>
+      ${requiereAnticipo ? `
+        <div class="surface-muted mb-5" style="border-color:var(--warning-500);background:var(--warning-100);">
+          <div class="flex items-center gap-2 font-semibold text-sm" style="color:var(--warning-500);">${ICONS.wallet} Anticipo requerido</div>
+          <p class="text-sm mt-1">Clienta en lista roja. Se enviará una solicitud de anticipo de <strong>${Utils.money(montoAnticipo)}</strong> por WhatsApp antes de confirmar en firme. El horario quedará retenido temporalmente.</p>
+        </div>` : ""}
+      <button class="btn btn-primary btn-block btn-lg" id="btn-confirmar" onclick="confirmarCita(${requiereAnticipo}, ${montoAnticipo})">
+        ${requiereAnticipo ? "Enviar solicitud de anticipo" : "Confirmar cita"}
+      </button>
+    `;
+  }
+
+  function confirmarCita(requiereAnticipo, monto) {
+    const btn = document.getElementById("btn-confirmar");
+    btn.classList.add("btn-loading"); btn.disabled = true;
+    setTimeout(() => {
+      if (requiereAnticipo) {
+        App.toast("info", "Solicitud de anticipo enviada", `Se envió por WhatsApp a ${wizard.clienta.nombre} · ${Utils.money(monto)}. La cita quedará en "Espera de pago" hasta confirmarse.`, 5000);
+      } else {
+        App.toast("success", "Cita confirmada", `${wizard.clienta.nombre} · ${wizard.fecha} ${wizard.hora}. Se envió confirmación automática por WhatsApp.`, 5000);
+      }
+      setTimeout(() => location.href = "agenda.html", 900);
+    }, 700);
+  }
+
+  goStep(1);
+</script>
+</body>
+</html>

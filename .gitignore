@@ -1,0 +1,21 @@
+# Ruido del sistema operativo
+.DS_Store
+**/.DS_Store
+
+# Transcripciones de sesiones de Claude Code (herramienta de trabajo, no del proyecto).
+# NO versionar: contienen el pegado literal de sesiones, incluidos valores reales de
+# configuración de Supabase. El repositorio nunca debe contener credenciales ni el
+# project ref real (02-architecture-principles.md, principio 12.3).
+.cc-history/
+
+# Dependencias y artefactos de build (el backend tiene además su propio .gitignore)
+node_modules/
+dist/
+coverage/
+
+# Variables de entorno: solo se versiona `.env.example`, siempre con valores vacíos.
+.env
+.env.*
+!.env.example
+
+*.log

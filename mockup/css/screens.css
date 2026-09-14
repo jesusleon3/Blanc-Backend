@@ -1,0 +1,146 @@
+/* ==========================================================================
+   Blanc — Estilos específicos de pantalla
+   ========================================================================== */
+
+/* ---------- Login ---------- */
+.auth-shell { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; }
+.auth-panel { display: flex; align-items: center; justify-content: center; padding: var(--space-8); }
+.auth-form-wrap { width: 100%; max-width: 380px; }
+.auth-logo { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-10); }
+.auth-logo .brand-mark { width: 34px; height: 34px; border-radius: var(--radius-sm); background: linear-gradient(135deg, var(--accent-500), var(--accent-700)); display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700; }
+.auth-logo span { font-weight: 700; font-size: var(--fs-lg); }
+.auth-form-wrap h1 { font-size: var(--fs-2xl); margin-bottom: var(--space-2); }
+.auth-form-wrap .sub { color: var(--text-secondary); margin-bottom: var(--space-8); font-size: var(--fs-sm); }
+.auth-visual {
+  background: radial-gradient(circle at 30% 20%, var(--accent-700), var(--accent-900) 60%);
+  position: relative; overflow: hidden; display: flex; align-items: flex-end; padding: var(--space-12);
+  color: #fff;
+}
+.auth-visual::before {
+  content: ""; position: absolute; inset: 0; opacity: 0.5;
+  background-image: radial-gradient(rgba(255,255,255,0.14) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+.auth-visual-content { position: relative; z-index: 1; }
+.auth-visual-content .quote { font-size: var(--fs-xl); font-weight: 600; line-height: var(--lh-tight); max-width: 460px; letter-spacing: -0.01em; }
+.auth-visual-content .cite { margin-top: var(--space-4); font-size: var(--fs-sm); opacity: 0.8; }
+.auth-role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3); }
+.role-pill {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 8px 10px;
+  font-size: 11.5px; font-weight: 600; text-align: center; cursor: pointer; color: var(--text-secondary);
+}
+.role-pill.active { border-color: var(--accent); background: var(--accent-subtle); color: var(--accent-subtle-text); }
+@media (max-width: 900px) { .auth-shell { grid-template-columns: 1fr; } .auth-visual { display: none; } }
+
+/* ---------- Page header pattern ---------- */
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: var(--space-6); gap: var(--space-4); flex-wrap: wrap; }
+.page-header h1 { font-size: var(--fs-xl); }
+.page-header .desc { color: var(--text-secondary); font-size: var(--fs-sm); margin-top: 4px; }
+.page-header-actions { display: flex; gap: var(--space-3); align-items: center; }
+
+/* ---------- Profile header ---------- */
+.profile-header { display: flex; gap: var(--space-6); align-items: flex-start; flex-wrap: wrap; }
+.profile-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); margin-top: var(--space-6); }
+.profile-stat { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-subtle); }
+.profile-stat .v { font-size: var(--fs-lg); font-weight: 700; }
+.profile-stat .l { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .03em; margin-top: 2px; }
+@media (max-width: 720px) { .profile-stats { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- Settings layout ---------- */
+.settings-layout { display: grid; grid-template-columns: 220px 1fr; gap: var(--space-8); align-items: start; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--topbar-h) + 24px); }
+.settings-nav .nav-item { color: var(--text-secondary); }
+@media (max-width: 900px) { .settings-layout { grid-template-columns: 1fr; } .settings-nav { flex-direction: row; overflow-x: auto; position: static; } }
+
+/* ---------- Two-column workspace (Cita nueva / cotizador) ---------- */
+.workspace { display: grid; grid-template-columns: 1fr 380px; gap: var(--space-6); align-items: start; }
+.workspace-summary { position: sticky; top: calc(var(--topbar-h) + 24px); }
+@media (max-width: 1080px) { .workspace { grid-template-columns: 1fr; } .workspace-summary { position: static; } }
+
+.step-list {
+  display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-6);
+  /* Red de seguridad: si aun así no cupiera en una pantalla muy angosta,
+     se desplaza contenido dentro de sí mismo, nunca la página completa. */
+  overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap;
+}
+.step-list .step { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); font-weight: 650; color: var(--text-tertiary); flex-shrink: 0; white-space: nowrap; }
+.step-list .step .n { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
+.step-list .step.active { color: var(--accent); }
+.step-list .step.active .n { background: var(--accent); border-color: var(--accent); color: #fff; }
+.step-list .step.done .n { background: var(--success-500); border-color: var(--success-500); color: #fff; }
+.step-list .sep { width: 24px; height: 1px; background: var(--border-strong); flex-shrink: 0; }
+@media (max-width: 480px) {
+  /* En teléfonos angostos se muestran solo los círculos numerados,
+     compactando el indicador sin perder información (el paso activo se
+     sigue viendo por el color/relleno del círculo). */
+  .step-list .step .label { display: none; }
+  .step-list .sep { width: 14px; }
+}
+
+.uña-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-2); }
+.uña-chip {
+  border: 1.5px solid var(--border-strong); border-radius: var(--radius-md); padding: var(--space-3) var(--space-1);
+  text-align: center; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text-secondary);
+}
+.uña-chip.selected { border-color: var(--accent); background: var(--accent-subtle); color: var(--accent-subtle-text); }
+
+.service-pill-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.service-pill {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+}
+.service-pill.selected { border-color: var(--accent); background: var(--accent-subtle); }
+
+/* ---------- Kanban (escalamientos) ---------- */
+.kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-5); align-items: start; }
+.kanban-col { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4); }
+.kanban-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); padding: 0 var(--space-1); }
+.kanban-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: var(--space-3); box-shadow: var(--shadow-sm); cursor: pointer; }
+@media (max-width: 1080px) { .kanban { grid-template-columns: 1fr; } }
+
+/* ---------- Login demo credentials box ---------- */
+.demo-box { border: 1px dashed var(--border-strong); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); font-size: var(--fs-xs); color: var(--text-secondary); margin-top: var(--space-6); background: var(--bg-subtle); }
+
+/* ---------- Charts (CSS-only bars) ----------
+   overflow-x contenido como red de seguridad: si 7 columnas + etiquetas no
+   caben en un teléfono muy angosto, se desplaza el gráfico, nunca la página. */
+.bar-chart { display: flex; align-items: flex-end; gap: 10px; height: 180px; padding-top: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.bar-chart .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; height: 100%; justify-content: flex-end; min-width: 34px; }
+.bar-chart .bar { width: 100%; border-radius: 6px 6px 2px 2px; background: var(--accent-subtle); position: relative; transition: height var(--dur-slow) var(--ease); }
+.bar-chart .bar.hi { background: var(--accent); }
+.bar-chart .bar-label { font-size: 10.5px; color: var(--text-tertiary); }
+.bar-chart .bar-value { font-size: 10.5px; font-weight: 650; color: var(--text-secondary); white-space: nowrap; }
+@media (max-width: 480px) {
+  .bar-chart .bar-value, .bar-chart .bar-label { font-size: 9.5px; }
+}
+.branch-scope-card { display: flex; align-items: center; gap: var(--space-6); flex-wrap: wrap; }
+.branch-scope-card .item { min-width: 120px; }
+.branch-scope-card .item .v { font-size: var(--fs-lg); font-weight: 700; }
+.branch-scope-card .item .l { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .03em; margin-top: 2px; }
+.donut { width: 132px; height: 132px; border-radius: 50%; flex-shrink: 0; }
+.legend-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+.legend-dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+
+/* ---------- Filas de 2 columnas asimétricas (Dashboard/Analytics/Panel) ----------
+   Reemplazan los style="grid-template-columns:..." inline, que no tenían
+   ningún colapso responsive y se aplastaban en móvil. ---------- */
+.row-16-10 { grid-template-columns: 1.6fr 1fr; }
+.row-10-14 { grid-template-columns: 1fr 1.4fr; }
+.row-14-10 { grid-template-columns: 1.4fr 1fr; }
+.row-1-1 { grid-template-columns: 1fr 1fr; }
+@media (max-width: 900px) {
+  .row-16-10, .row-10-14, .row-14-10, .row-1-1 { grid-template-columns: 1fr; }
+}
+
+/* ---------- Calendario semanal: scroll horizontal contenido, nunca en la página ---------- */
+#cal-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+#cal-wrap .week-grid { min-width: 640px; }
+
+/* ---------- Hover solo en dispositivos con puntero fino (mouse/trackpad) ----------
+   En touch (hover:none) estas reglas no aplican, evitando estados 'pegados'
+   tras un tap (el clásico bug de :hover que no se quita en móvil). ---------- */
+@media (hover: hover) and (pointer: fine) {
+  .service-pill:hover { border-color: var(--border-strong); background: var(--bg-subtle); }
+  .kanban-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+}

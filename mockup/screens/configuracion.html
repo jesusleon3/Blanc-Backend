@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Configuración · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="../manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="../assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/screens.css" />
+</head>
+<body>
+<div class="app-shell">
+  <div id="sidebar-mount"></div>
+  <div class="main-area">
+    <div id="topbar-mount"></div>
+    <div class="page-content">
+      <div class="settings-layout">
+        <div class="settings-nav" id="settings-nav"></div>
+        <div id="settings-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../js/utils.js"></script>
+<script src="../js/icons.js"></script>
+<script src="../js/data.js"></script>
+<script src="../js/components.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/pwa.js"></script>
+<script>
+  App.init("configuracion");
+
+  const SECTIONS = [
+    { key: "sucursales", label: "Sucursales", icon: "building" },
+    { key: "personal", label: "Personal", icon: "users" },
+    { key: "catalogo", label: "Catálogo de servicios", icon: "scissors" },
+    { key: "usuarios", label: "Usuarios y roles", icon: "shield" },
+    { key: "mantenimiento", label: "Modo mantenimiento", icon: "zap" },
+    { key: "prompts", label: "Prompts del bot", icon: "sparkle" },
+  ];
+  let active = "sucursales";
+
+  function renderNav() {
+    document.getElementById("settings-nav").innerHTML = SECTIONS.map(s =>
+      `<div class="nav-item ${s.key===active?"active":""}" data-sec="${s.key}" style="cursor:pointer;">${ICONS[s.icon]}<span>${s.label}</span></div>`).join("");
+    Utils.qsa("[data-sec]").forEach(el => el.addEventListener("click", () => { active = el.dataset.sec; renderNav(); renderContent(); }));
+  }
+
+  function renderContent() {
+    const c = document.getElementById("settings-content");
+    if (active === "sucursales") {
+      c.innerHTML = `<div class="flex flex-col gap-5">` + DB.sucursales.map(s => `
+        <div class="card">
+          <div class="card-header">
+            <h3>${s.nombre}</h3>
+            <span class="badge badge-success"><span class="dot"></span>Operando</span>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-2 mb-5">
+              <div class="field"><label>Dirección</label><input class="input" value="${s.direccion}" /></div>
+              <div class="field"><label>WhatsApp</label><input class="input" value="${s.whatsapp}" /></div>
+            </div>
+            <div class="text-xs font-semibold text-tertiary mb-2" style="text-transform:uppercase;">Horario</div>
+            <div class="table-wrap"><table class="data-table"><tbody>
+              ${Object.entries(DB.horarioSemanal).map(([dia,rangos]) => `<tr><td class="cell-primary" style="width:120px;">${Utils.diaLabel(dia)}</td><td>${rangos.length ? rangos.map(r=>r.join("–")).join(" y ") : "Cerrado"}</td></tr>`).join("")}
+            </tbody></table></div>
+            <button class="btn btn-primary btn-sm mt-4" onclick="App.toast('success','Sucursal actualizada','')">Guardar cambios</button>
+          </div>
+        </div>`).join("") + `</div>
+        <div class="card mt-5">
+          <div class="card-header"><h3>Días festivos</h3></div>
+          <div class="table-wrap"><table class="data-table"><tbody>
+            ${DB.diasFestivos.map(f => `<tr><td class="cell-primary">${Utils.dateLabel(f.fecha)}</td><td class="text-secondary">${f.motivo}</td><td><button class="btn btn-ghost btn-sm" onclick="App.toast('success','Día festivo quitado','')">Quitar</button></td></tr>`).join("")}
+          </tbody></table></div>
+          <div class="card-body no-pad-top"><button class="btn btn-secondary btn-sm" onclick="App.toast('success','Día festivo agregado','')">+ Agregar festivo</button></div>
+        </div>`;
+    }
+
+    if (active === "personal") {
+      c.innerHTML = `<div class="card"><div class="card-header"><h3>Manicuristas</h3><button class="btn btn-primary btn-sm" onclick="App.toast('success','Manicurista agregada','')">+ Agregar</button></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Nombre</th><th>Sucursal</th><th>Estado</th><th></th></tr></thead><tbody>
+        ${DB.manicuristas.map(m => `<tr>
+          <td><div class="cell-flex">${Utils.avatarHTML(m.nombre,"sm")}<span class="cell-primary">${m.nombre}</span></div></td>
+          <td class="text-secondary">${DB.sucursal(m.sucursalId).nombre}</td>
+          <td>${m.activa ? `<span class="badge badge-success"><span class="dot"></span>Activa</span>` : `<span class="badge badge-neutral">Inactiva</span>`}</td>
+          <td><label class="switch"><input type="checkbox" ${m.activa?"checked":""} onchange="App.toast('success','Estado actualizado','')"><span class="track"></span></label></td>
+        </tr>`).join("")}
+        </tbody></table></div></div>`;
+    }
+
+    if (active === "catalogo") {
+      c.innerHTML = `<div class="card mb-5"><div class="card-header"><h3>Servicios</h3><button class="btn btn-primary btn-sm" onclick="App.toast('success','Servicio agregado','')">+ Nuevo servicio</button></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Servicio</th><th>Categoría</th><th>Duración base</th><th>Precio base</th><th></th></tr></thead><tbody>
+        ${DB.servicios.map(s => `<tr><td class="cell-primary">${s.nombre}</td><td class="text-secondary">${s.categoria}</td><td>${s.duracionBase} min</td><td>${Utils.money(s.precioBase)}</td><td><label class="switch"><input type="checkbox" checked onchange="App.toast('success','Servicio actualizado','')"><span class="track"></span></label></td></tr>`).join("")}
+        </tbody></table></div></div>
+        <div class="card"><div class="card-header"><h3>Modificadores de diseño</h3><button class="btn btn-primary btn-sm" onclick="App.toast('success','Modificador agregado','')">+ Nuevo modificador</button></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Modificador</th><th>Minutos adicionales</th><th>Precio adicional</th></tr></thead><tbody>
+        ${DB.modificadores.map(m => `<tr><td class="cell-primary">${m.nombre}</td><td>+${m.minutosAdicionales} min</td><td>+${Utils.money(m.precioAdicional)}</td></tr>`).join("")}
+        </tbody></table></div></div>`;
+    }
+
+    if (active === "usuarios") {
+      c.innerHTML = `<div class="card"><div class="card-header"><h3>Usuarios</h3><button class="btn btn-primary btn-sm" onclick="App.toast('success','Invitación enviada','')">+ Invitar usuario</button></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Alcance</th><th></th></tr></thead><tbody>
+        ${DB.usuarios.map(u => `<tr>
+          <td><div class="cell-flex">${Utils.avatarHTML(u.nombre,"sm")}<div><div class="cell-primary">${u.nombre}</div><div class="text-xs text-tertiary">${u.email}</div></div></div></td>
+          <td><span class="badge badge-accent">${u.rol}</span></td>
+          <td class="text-secondary">${u.sucursales === "todas" ? "Todas las sucursales" : u.sucursales}</td>
+          <td class="dropdown" id="dd-${u.id}"><button class="icon-btn" onclick="App.toggleDropdown('dd-${u.id}', event)">${ICONS.moreH}</button>
+            <div class="dropdown-menu"><div class="dropdown-item" onclick="App.toast('success','Rol actualizado','')">${ICONS.edit} Editar rol</div><div class="dropdown-item danger" onclick="App.toast('error','Acceso revocado — ${u.nombre.replace(/'/g, "")}','')">${ICONS.trash} Revocar acceso</div></div></td>
+        </tr>`).join("")}
+        </tbody></table></div></div>`;
+    }
+
+    if (active === "mantenimiento") {
+      c.innerHTML = `<div class="card mb-5" style="border-color:var(--warning-500);">
+          <div class="card-body flex items-center gap-3">
+            <span style="color:var(--warning-500);">${ICONS.alert}</span>
+            <p class="text-sm">Al activar el modo mantenimiento, el bot deja de responder en la sucursal seleccionada y las conversaciones entrantes se marcan para atención manual. Úsalo solo durante incidentes o mantenimiento programado.</p>
+          </div>
+        </div>
+        <div class="card">
+          ${DB.sucursales.map(s => `<div class="card-body flex items-center justify-between" style="border-bottom:1px solid var(--border);">
+            <div><div class="font-semibold text-sm">${s.nombre}</div><div class="text-xs text-tertiary">Bot activo — respondiendo automáticamente</div></div>
+            <label class="switch"><input type="checkbox" onchange="toggleMantenimiento(this,'${s.nombre}')"><span class="track"></span></label>
+          </div>`).join("")}
+        </div>
+        <div class="card mt-5"><div class="card-body flex items-center justify-between">
+          <div><div class="font-semibold text-sm">Detener todos los bots</div><div class="text-xs text-tertiary">Aplica el modo mantenimiento a las 3 sucursales simultáneamente</div></div>
+          <button class="btn btn-danger btn-sm" onclick="App.toast('error','Modo mantenimiento activado','Todos los bots están detenidos. Las conversaciones nuevas se encolan para atención manual.')">Detener todo</button>
+        </div></div>`;
+    }
+
+    if (active === "prompts") {
+      const versiones = [
+        { v: "v14", estado: "producción", autor: "Diego Aranda", fecha: "hace 2 días", nota: "Ajuste de tono para venta cruzada, respuestas más cortas." },
+        { v: "v15-sandbox", estado: "sandbox", autor: "Karla Espinoza", fecha: "hace 3 horas", nota: "Prueba de nuevas respuestas frecuentes para dudas de precio." },
+        { v: "v13", estado: "archivada", autor: "Diego Aranda", fecha: "hace 9 días", nota: "Versión anterior a la campaña de temporada." },
+      ];
+      c.innerHTML = `<div class="card mb-5"><div class="card-header"><h3>Entrenar al bot</h3></div>
+        <div class="card-body">
+          <p class="text-sm text-secondary mb-4">Agrega una respuesta frecuente sin necesidad de programar. Se probará en sandbox antes de publicarse.</p>
+          <div class="field mb-3"><label>Pregunta frecuente de la clienta</label><input class="input" placeholder="Ej. ¿cuánto tarda el acrílico?" /></div>
+          <div class="field mb-4"><label>Respuesta sugerida</label><textarea class="input" rows="3" placeholder="Entre 90 y 120 minutos dependiendo del diseño."></textarea></div>
+          <button class="btn btn-primary btn-sm" onclick="App.toast('success','Guardado en sandbox','Pruébalo antes de publicarlo a producción.')">Guardar en sandbox</button>
+        </div></div>
+        <div class="card"><div class="card-header"><h3>Versiones del prompt</h3></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Versión</th><th>Estado</th><th>Autor</th><th>Notas</th><th></th></tr></thead><tbody>
+        ${versiones.map(v => `<tr>
+          <td class="cell-primary mono">${v.v}</td>
+          <td>${v.estado==="producción"?`<span class="badge badge-success"><span class="dot"></span>Producción</span>`:v.estado==="sandbox"?`<span class="badge badge-info">Sandbox</span>`:`<span class="badge badge-neutral">Archivada</span>`}</td>
+          <td class="text-secondary">${v.autor} · ${v.fecha}</td>
+          <td class="text-secondary" style="max-width:280px;">${v.nota}</td>
+          <td>${v.estado==="sandbox"?`<button class="btn btn-primary btn-sm" onclick="App.toast('success','Publicado a producción','v15 ahora es la versión activa.')">Publicar</button>`:v.estado==="archivada"?`<button class="btn btn-secondary btn-sm" onclick="App.toast('success','Versión revertida','')">Revertir</button>`:""}</td>
+        </tr>`).join("")}
+        </tbody></table></div></div>`;
+    }
+  }
+
+  function toggleMantenimiento(el, nombre) {
+    App.toast(el.checked ? "error" : "success", el.checked ? `Modo mantenimiento activado — ${nombre}` : `Bot reactivado — ${nombre}`, el.checked ? "El bot dejó de responder en esta sucursal." : "El bot vuelve a responder automáticamente.");
+  }
+
+  renderNav();
+  renderContent();
+</script>
+</body>
+</html>

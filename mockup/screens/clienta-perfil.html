@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Perfil de clienta · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="../manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="../assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/screens.css" />
+</head>
+<body>
+<div class="app-shell">
+  <div id="sidebar-mount"></div>
+  <div class="main-area">
+    <div id="topbar-mount"></div>
+    <div class="page-content" id="content"></div>
+  </div>
+</div>
+
+<div id="modal-mount"></div>
+
+<script src="../js/utils.js"></script>
+<script src="../js/icons.js"></script>
+<script src="../js/data.js"></script>
+<script src="../js/components.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/pwa.js"></script>
+<script>
+  App.init("crm", "clienta-perfil");
+  const id = Utils.param("id");
+  const cli = DB.cliente(id) || DB.clientas[0];
+  const citas = DB.citas.filter(c => c.clientaId === cli.id).sort((a,b)=>b.inicio-a.inicio);
+  const convs = DB.conversaciones.filter(c => c.clientaId === cli.id);
+  const garantiasCli = DB.garantias.filter(g => g.clientaId === cli.id);
+  const VENTANA_GARANTIA_DIAS = 7; // Sesión 02 de Domain Discovery, regla N1
+
+  document.getElementById("content").innerHTML = `
+    <a href="crm.html" class="text-sm text-secondary flex items-center gap-1 mb-4">${ICONS.chevronLeft} Volver al CRM</a>
+
+    <div class="card animate-in mb-6">
+      <div class="card-body">
+        <div class="profile-header">
+          ${Utils.avatarHTML(cli.nombre, "xl")}
+          <div style="flex:1;min-width:220px;">
+            <div class="flex items-center gap-3 wrap">
+              <h1 style="font-size:var(--fs-xl);">${cli.nombre}</h1>
+              ${Components.badgeClientaEstado(cli.estado)}
+            </div>
+            <div class="text-sm text-secondary mt-1">${cli.telefono} · ${DB.sucursal(cli.sucursalFavorita).nombre} · Cumpleaños ${cli.cumpleanos}</div>
+            <div class="flex items-center gap-2 wrap mt-2" id="etiquetas-wrap"></div>
+            ${cli.notas ? `<div class="surface-muted mt-3" style="max-width:520px;"><span class="text-xs font-semibold text-tertiary">NOTA INTERNA</span><p class="text-sm mt-1">${cli.notas}</p></div>` : ""}
+          </div>
+          <div class="dropdown" id="acciones-dd">
+            <button class="btn btn-secondary" onclick="App.toggleDropdown('acciones-dd', event)">Acciones ${ICONS.chevronDown}</button>
+            <div class="dropdown-menu align-left">
+              <a href="cita-nueva.html" class="dropdown-item">${ICONS.plus} Agendar cita</a>
+              ${cli.estado !== "lista_roja" ? `<div class="dropdown-item" onclick="accion('Marcada como lista roja')">${ICONS.shield} Marcar lista roja</div>` : `<div class="dropdown-item" onclick="accion('Quitada de lista roja')">${ICONS.check} Quitar de lista roja</div>`}
+              ${cli.estado !== "vip" ? `<div class="dropdown-item" onclick="accion('Marcada como VIP')">${ICONS.star} Marcar VIP</div>` : ""}
+              <div class="dropdown-divider"></div>
+              ${cli.estado !== "bloqueada" ? `<div class="dropdown-item danger" onclick="accion('Clienta bloqueada')">${ICONS.alert} Bloquear clienta</div>` : `<div class="dropdown-item" onclick="accion('Clienta desbloqueada')">${ICONS.check} Desbloquear</div>`}
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-stats">
+          <div class="profile-stat"><div class="v">${Utils.dateLabel(cli.stats.ultimaVisita)}</div><div class="l">Última visita</div></div>
+          <div class="profile-stat"><div class="v">${Utils.money(cli.stats.ticketPromedio)}</div><div class="l">Ticket promedio</div></div>
+          <div class="profile-stat"><div class="v">${cli.stats.visitas}</div><div class="l">Visitas totales</div></div>
+          <div class="profile-stat"><div class="v">${cli.manicuristaFavorita ? DB.manicurista(cli.manicuristaFavorita).nombre : "—"}</div><div class="l">Manicurista favorita</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabs mb-5" id="tabs" data-panels="tab-panels">
+      <div class="tab active" data-tab="citas">Historial de citas <span class="count">${citas.length}</span></div>
+      <div class="tab" data-tab="conversaciones">Conversaciones <span class="count">${convs.length}</span></div>
+      <div class="tab" data-tab="garantias">Garantías <span class="count">${garantiasCli.length}</span></div>
+      <div class="tab" data-tab="notas">Notas y preferencias</div>
+    </div>
+
+    <div id="tab-panels">
+      <div class="tab-panel active" data-panel="citas">
+        <div class="card">
+          ${citas.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Servicio</th><th>Sucursal</th><th>Manicurista</th><th>Precio</th><th>Estado</th></tr></thead><tbody>
+            ${citas.map(c => `<tr onclick="location.href='cita-detalle.html?id=${c.id}'">
+              <td class="cell-primary">${Utils.dateLabel(c.inicio)}</td>
+              <td>${c.composicion.servicios.join(" + ")}</td>
+              <td class="text-secondary">${DB.sucursal(c.sucursalId).nombre.replace("Blanc ","")}</td>
+              <td class="text-secondary">${DB.manicurista(c.manicuristaId)?.nombre || "Sin preferencia"}</td>
+              <td>${Utils.money(c.composicion.precioTotal)}</td>
+              <td>${Components.badgeCitaEstado(c.estado)}</td>
+            </tr>`).join("")}
+          </tbody></table></div>` : `<div class="card-body">${Components.emptyState({icon:"calendar", title:"Sin citas registradas", desc:"Esta clienta todavía no tiene historial de citas en Blanc."})}</div>`}
+        </div>
+      </div>
+      <div class="tab-panel" data-panel="conversaciones">
+        <div class="card">
+          ${convs.length ? convs.map(c => `<a href="chat.html?id=${c.id}" class="card-body flex items-center justify-between" style="border-bottom:1px solid var(--border);cursor:pointer;">
+            <div><div class="font-medium text-sm">${DB.sucursal(c.sucursalId).nombre}</div><div class="text-xs text-tertiary mt-1">${c.mensajes.length} mensajes · última actividad ${Utils.relativeTime(c.mensajes[c.mensajes.length-1].ts)}</div></div>
+            <div class="flex items-center gap-2">${c.modo==="humano"?`<span class="badge badge-warning">Humano</span>`:`<span class="badge badge-accent">Bot</span>`}${ICONS.chevronRight}</div>
+          </a>`).join("") : `<div class="card-body">${Components.emptyState({icon:"chat", title:"Sin conversaciones", desc:"Esta clienta aún no ha escrito por WhatsApp."})}</div>`}
+        </div>
+      </div>
+      <div class="tab-panel" data-panel="garantias">
+        <div class="card mb-5">
+          <div class="card-header"><h3>Validar garantía</h3></div>
+          <div class="card-body">
+            <p class="text-sm text-secondary mb-3">Garantía de ${VENTANA_GARANTIA_DIAS} días desde el servicio, aplicable solo si el reporte coincide con una cita completada de esta clienta (Sesión 02 de Domain Discovery, regla N1).</p>
+            <div class="flex gap-2 wrap items-end">
+              <div class="field" style="flex:1;min-width:220px;">
+                <label>ID de la cita a validar</label>
+                <select class="select" id="sel-cita-garantia">
+                  <option value="">Selecciona una cita…</option>
+                  ${citas.map(c => `<option value="${c.id}">${c.id.replace("cit-","#")} · ${Utils.dateLabel(c.inicio)} · ${c.composicion.servicios.join(" + ")}</option>`).join("")}
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="validarGarantia()">Validar</button>
+            </div>
+            <div id="resultado-garantia" class="mt-4"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Solicitudes registradas</h3></div>
+          ${garantiasCli.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Cita</th><th>Reportado</th><th>Fecha de solicitud</th><th>Estado</th></tr></thead><tbody>
+            ${garantiasCli.map(g => `<tr onclick="location.href='cita-detalle.html?id=${g.citaId}'">
+              <td class="mono">${g.citaId.replace("cit-","#")}</td>
+              <td>${g.reportado}</td>
+              <td class="text-secondary">${Utils.dateLabel(g.creado)}</td>
+              <td>${Components.badgeGarantiaEstado(g.estado)}</td>
+            </tr>`).join("")}
+          </tbody></table></div>` : `<div class="card-body">${Components.emptyState({icon:"shield", title:"Sin solicitudes de garantía", desc:"Esta clienta no ha reportado ningún problema con un servicio."})}</div>`}
+        </div>
+      </div>
+      <div class="tab-panel" data-panel="notas">
+        <div class="card card-body">
+          <div class="field mb-4">
+            <label>Servicios favoritos</label>
+            <div class="flex gap-2 wrap mt-1">${cli.stats.serviciosFavoritos.map(s=>`<span class="badge badge-accent">${s}</span>`).join("")}</div>
+          </div>
+          <div class="field mb-4">
+            <label>Nota interna</label>
+            <textarea class="input" rows="4" id="nota-textarea">${cli.notas}</textarea>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="App.toast('success','Nota guardada','')">Guardar nota</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  Utils.qsa("#tabs .tab").forEach(t => t.addEventListener("click", () => App.switchTab(document.getElementById("tabs"), t.dataset.tab)));
+
+  function accion(msg) { App.toast("success", msg, "Acción simulada — sin efecto real sobre datos persistentes."); }
+
+  // ---- Etiquetas (Sesión 02, requisito F2 — abierto, sin catálogo cerrado)
+  function renderEtiquetas() {
+    const tags = cli.etiquetas || [];
+    document.getElementById("etiquetas-wrap").innerHTML = tags.map((t, i) => Components.etiquetaChip(t, `quitarEtiqueta(${i})`)).join("")
+      + `<span class="filter-chip" onclick="agregarEtiqueta()">${ICONS.plus} Etiqueta</span>`;
+  }
+  function quitarEtiqueta(i) { (cli.etiquetas || []).splice(i, 1); renderEtiquetas(); }
+  function agregarEtiqueta() {
+    const val = prompt("Nueva etiqueta (libre, sin catálogo cerrado — gobernanza pendiente de confirmar con el negocio):");
+    if (!val || !val.trim()) return;
+    cli.etiquetas = cli.etiquetas || [];
+    cli.etiquetas.push(val.trim());
+    renderEtiquetas();
+  }
+  renderEtiquetas();
+
+  // ---- Garantías (Sesión 02, requisito F3/N1) — validación de ventana + servicio,
+  // nunca aprobación automática: la única acción disponible es enviar a revisión.
+  function validarGarantia() {
+    const citaId = document.getElementById("sel-cita-garantia").value;
+    const box = document.getElementById("resultado-garantia");
+    if (!citaId) { App.toast("error", "Selecciona una cita", ""); return; }
+    const cita = citas.find(c => c.id === citaId);
+    if (!cita || cita.estado !== "completada") {
+      box.innerHTML = `<div class="surface-muted" style="border-color:var(--border-strong);">
+        <div class="flex items-center gap-2 font-semibold text-sm">${Components.badgeGarantiaEstado("no_encontrada")}</div>
+        <p class="text-sm mt-2">No hay un servicio completado que coincida con esta cita para esta clienta.</p>
+      </div>`;
+      return;
+    }
+    const diasTranscurridos = Math.floor((new Date() - new Date(cita.fin)) / 86400000);
+    const vigente = diasTranscurridos <= VENTANA_GARANTIA_DIAS;
+    box.innerHTML = `<div class="surface-muted" style="${vigente ? "border-color:var(--success-500);background:var(--success-100);" : "border-color:var(--danger-500);background:var(--danger-100);"}">
+      <div class="flex items-center gap-2 font-semibold text-sm">${Components.badgeGarantiaEstado(vigente ? "valida" : "vencida")}</div>
+      <p class="text-sm mt-2">Servicio: ${cita.composicion.servicios.join(" + ")} · realizado hace ${diasTranscurridos} día${diasTranscurridos===1?"":"s"} (ventana de ${VENTANA_GARANTIA_DIAS} días).</p>
+      <button class="btn btn-secondary btn-sm mt-3" onclick="enviarARevision('${cita.id}')">Enviar a revisión</button>
+    </div>`;
+  }
+  function enviarARevision(citaId) {
+    App.toast("success", "Enviada a revisión", "Un empleado deberá confirmar la garantía manualmente — este mockup no simula aprobación automática.");
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>CRM de clientas · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="../manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="../assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/screens.css" />
+</head>
+<body>
+<div class="app-shell">
+  <div id="sidebar-mount"></div>
+  <div class="main-area">
+    <div id="topbar-mount" data-actions='<button class="btn btn-secondary btn-sm" onclick="App.toast(&apos;info&apos;,&apos;Exportando reporte&apos;,&apos;Acción simulada — sin efecto real sobre datos persistentes.&apos;)">Exportar</button>'></div>
+    <div class="page-content">
+      <div class="page-header">
+        <div>
+          <div class="desc" id="scope-desc"></div>
+          <div class="search-box mt-2" style="width:320px;"><span id="icon-search"></span><input class="input" id="buscar" placeholder="Buscar por nombre o teléfono…" /></div>
+        </div>
+        <div class="filters-bar">
+          <div class="filter-chip active" data-f="todas">Todas (<span id="count-todas"></span>)</div>
+          <div class="filter-chip" data-f="vip"><span id="icon-star"></span> VIP</div>
+          <div class="filter-chip" data-f="lista_roja">Lista roja</div>
+          <div class="filter-chip" data-f="bloqueada">Bloqueadas</div>
+        </div>
+      </div>
+
+      <div class="card animate-in">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Clienta</th><th>Estado</th><th>Etiquetas</th><th>Sucursal favorita</th><th>Última visita</th><th>Ticket promedio</th><th>Visitas</th><th></th></tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div id="empty" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../js/utils.js"></script>
+<script src="../js/icons.js"></script>
+<script src="../js/data.js"></script>
+<script src="../js/components.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/pwa.js"></script>
+<script>
+  App.init("crm");
+  document.getElementById("icon-search").innerHTML = ICONS.search;
+  document.getElementById("icon-star").innerHTML = ICONS.star;
+  let filtro = "todas", q = "";
+
+  function render() {
+    document.getElementById("scope-desc").textContent = `Clientas — ${App.scopeLabel()}`;
+    const base = App.filterBySucursal(DB.clientas, c => c.sucursalFavorita);
+    document.getElementById("count-todas").textContent = base.length;
+    let list = base.filter(c => {
+      if (q && !(c.nombre.toLowerCase().includes(q.toLowerCase()) || c.telefono.includes(q))) return false;
+      if (filtro !== "todas") return c.estado === filtro;
+      return true;
+    });
+    document.getElementById("empty").style.display = list.length ? "none" : "block";
+    if (!list.length) document.getElementById("empty").innerHTML = Components.emptyState({ icon: "search", title: "Sin resultados", desc: "Ajusta tu búsqueda o filtro para encontrar clientas." });
+
+    document.getElementById("tbody").innerHTML = list.map(c => `
+      <tr onclick="location.href='clienta-perfil.html?id=${c.id}'">
+        <td>${Components.clientaCell(c.id)}</td>
+        <td>${Components.badgeClientaEstado(c.estado)}</td>
+        <td>${(c.etiquetas || []).slice(0,2).map(t => `<span class="badge badge-outline">${t}</span>`).join(" ") || `<span class="text-tertiary">—</span>`}${(c.etiquetas||[]).length > 2 ? ` <span class="text-xs text-tertiary">+${c.etiquetas.length-2}</span>` : ""}</td>
+        <td class="text-secondary">${DB.sucursal(c.sucursalFavorita).nombre.replace("Blanc ","")}</td>
+        <td class="text-secondary">${Utils.dateLabel(c.stats.ultimaVisita)}</td>
+        <td>${Utils.money(c.stats.ticketPromedio)}</td>
+        <td>${c.stats.visitas}</td>
+        <td class="text-tertiary">${ICONS.chevronRight}</td>
+      </tr>`).join("");
+  }
+
+  Utils.qsa(".filter-chip").forEach(chip => chip.addEventListener("click", () => {
+    Utils.qsa(".filter-chip").forEach(c => c.classList.remove("active")); chip.classList.add("active");
+    filtro = chip.dataset.f; render();
+  }));
+  document.getElementById("buscar").addEventListener("input", e => { q = e.target.value; render(); });
+
+  render();
+  document.addEventListener("blanc:sucursal-change", render);
+</script>
+</body>
+</html>

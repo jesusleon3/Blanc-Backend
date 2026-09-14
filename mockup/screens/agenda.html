@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<script>(function(){try{var t=localStorage.getItem("blanc-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Agenda · Blanc</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2224%22 fill=%22%23ad2860%22/><text x=%2250%22 y=%2268%22 font-size=%2260%22 fill=%22white%22 text-anchor=%22middle%22 font-family=%22sans-serif%22 font-weight=%22700%22>B</text></svg>" />
+<link rel="manifest" href="../manifest.json" />
+<meta name="theme-color" content="#ad2860" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Blanc" />
+<link rel="apple-touch-icon" href="../assets/icons/apple-touch-icon.png" />
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/screens.css" />
+</head>
+<body>
+<div class="app-shell">
+  <div id="sidebar-mount"></div>
+  <div class="main-area">
+    <div id="topbar-mount" data-actions='<a href="cita-nueva.html" class="btn btn-primary btn-sm">+ Nueva cita</a>'></div>
+    <div class="page-content">
+
+      <div class="cal-toolbar">
+        <div class="segmented" id="sucursal-tabs"></div>
+        <div class="flex items-center gap-3">
+          <div class="filters-bar">
+            <div class="filter-chip" id="filter-bloqueos"><span id="icon-sliders"></span>Bloqueos y festivos</div>
+          </div>
+          <div class="flex items-center gap-1">
+            <button class="icon-btn" onclick="navDate(-1)"><span id="icon-prev"></span></button>
+            <button class="btn btn-secondary btn-sm" onclick="navDate(0,true)">Hoy</button>
+            <button class="icon-btn" onclick="navDate(1)"><span id="icon-next"></span></button>
+          </div>
+          <div class="text-sm font-semibold" id="fecha-label" style="min-width:170px;"></div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-4 mb-4 text-xs text-secondary wrap">
+        <span class="flex items-center gap-1"><span class="badge badge-neutral"><span class="dot"></span></span> Pendiente</span>
+        <span class="flex items-center gap-1"><span class="badge badge-success"><span class="dot"></span></span> Confirmada</span>
+        <span class="flex items-center gap-1"><span class="badge badge-warning"><span class="dot"></span></span> Espera de pago</span>
+        <span class="flex items-center gap-1"><span class="badge badge-info"><span class="dot"></span></span> Completada</span>
+        <span class="flex items-center gap-1"><span class="badge badge-danger"><span class="dot"></span></span> Cancelada / No-show</span>
+      </div>
+
+      <div id="cal-wrap"></div>
+
+      <div class="card mt-6 animate-in" id="dia-cerrado-card" style="display:none;"></div>
+
+    </div>
+  </div>
+</div>
+
+<div id="modal-cita-rapida"></div>
+
+<script src="../js/utils.js"></script>
+<script src="../js/icons.js"></script>
+<script src="../js/data.js"></script>
+<script src="../js/components.js"></script>
+<script src="../js/app.js"></script>
+<script src="../js/pwa.js"></script>
+<script>
+  App.init("agenda");
+
+  const ESTADO_COLOR = {
+    pendiente: "var(--text-tertiary)", confirmada: "var(--success-500)", en_espera_pago: "var(--warning-500)",
+    completada: "var(--info-500)", cancelada: "var(--danger-500)", no_show: "var(--danger-500)",
+  };
+  const ESTADO_BG = {
+    pendiente: "var(--bg-muted)", confirmada: "var(--success-100)", en_espera_pago: "var(--warning-100)",
+    completada: "var(--info-100)", cancelada: "var(--danger-100)", no_show: "var(--danger-100)",
+  };
+
+  // La sucursal mostrada en Agenda ES la sucursal global (misma fuente que
+  // el selector del sidebar): un calendario no puede mezclar varias
+  // sucursales, así que si el filtro global está en "todas" se usa la
+  // primera como predeterminada, mostrándolo con claridad en las tabs.
+  // Elegir una tab aquí también actualiza el filtro global (App.setSucursal)
+  // para que el resto de la app quede en el mismo contexto.
+  let sucursalActiva = App.isTodasSucursales() ? DB.sucursales[0].id : App.getSucursal();
+  let dayOffset = 0;
+  const START_H = 9, END_H = 19, PX_PER_MIN = 1; // 600px de alto (10h)
+
+  function renderTabs() {
+    document.getElementById("sucursal-tabs").innerHTML = DB.sucursales.map((s) =>
+      `<button data-suc="${s.id}" class="${s.id===sucursalActiva?"active":""}">${s.nombre.replace("Blanc ", "")}</button>`).join("");
+    Utils.qsa("#sucursal-tabs button").forEach(b => b.addEventListener("click", () => {
+      sucursalActiva = b.dataset.suc;
+      App.setSucursal(sucursalActiva);
+      renderTabs();
+      render();
+    }));
+  }
+  renderTabs();
+
+  document.addEventListener("blanc:sucursal-change", (e) => {
+    sucursalActiva = e.detail.sucursalId === "todas" ? DB.sucursales[0].id : e.detail.sucursalId;
+    renderTabs();
+    render();
+  });
+
+  document.getElementById("icon-sliders").innerHTML = ICONS.slidersH;
+  document.getElementById("icon-prev").innerHTML = ICONS.chevronLeft;
+  document.getElementById("icon-next").innerHTML = ICONS.chevronRight;
+  document.getElementById("filter-bloqueos").addEventListener("click", () => {
+    App.toast("info", "Bloqueos y días festivos", `Próximo festivo: ${DB.diasFestivos[0].motivo} (${Utils.dateLabel(DB.diasFestivos[0].fecha)}). Gestión completa en Configuración → Sucursales.`, 5000);
+  });
+
+  function navDate(delta, reset) {
+    dayOffset = reset ? 0 : dayOffset + delta;
+    render();
+  }
+
+  function dateForOffset(off) {
+    const dt = new Date(); dt.setDate(dt.getDate() + off); dt.setHours(0,0,0,0); return dt;
+  }
+
+  function isSameDay(a, b) { return a.toDateString() === new Date(b).toDateString(); }
+
+  function render() {
+    const target = dateForOffset(dayOffset);
+    const dow = target.getDay(); // 0 domingo
+    document.getElementById("fecha-label").textContent = target.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+
+    if (dow === 0) {
+      document.getElementById("cal-wrap").innerHTML = "";
+      document.getElementById("dia-cerrado-card").style.display = "block";
+      document.getElementById("dia-cerrado-card").innerHTML = Components.emptyState({
+        icon: "calendar", title: "Domingo — sucursal cerrada",
+        desc: "Blanc no agenda citas los domingos. Consulta el horario en Configuración → Sucursales.",
+      });
+      return;
+    }
+    document.getElementById("dia-cerrado-card").style.display = "none";
+
+    const manis = DB.manicuristas.filter(m => m.sucursalId === sucursalActiva && m.activa);
+    const cols = [...manis, { id: null, nombre: "Sin preferencia" }];
+    const citasDia = DB.citas.filter(c => c.sucursalId === sucursalActiva && isSameDay(target, c.inicio));
+
+    const headCells = cols.map(m => `<div class="head-cell">${m.nombre}${m.id ? "" : ""}</div>`).join("");
+
+    const totalMin = (END_H - START_H) * 60;
+    const hourLines = Array.from({length: END_H-START_H+1}).map((_,i) => `<div style="position:absolute;top:${i*60}px;left:0;right:0;height:1px;background:var(--border);"></div>`).join("");
+    const breakShade = `<div style="position:absolute;top:${(13-START_H)*60}px;height:120px;left:0;right:0;background:repeating-linear-gradient(45deg, var(--bg-muted), var(--bg-muted) 6px, transparent 6px, transparent 12px);opacity:.5;"></div>`;
+
+    const dayCols = cols.map(col => {
+      const citasCol = citasDia.filter(c => c.manicuristaId === col.id);
+      const blocks = citasCol.map(c => {
+        const cli = DB.cliente(c.clientaId);
+        const top = (c.inicio.getHours()*60 + c.inicio.getMinutes()) - START_H*60;
+        const height = Math.max(26, (c.fin - c.inicio)/60000);
+        return `<div class="appt-block" style="top:${top}px;height:${height}px;background:${ESTADO_BG[c.estado]};color:${ESTADO_COLOR[c.estado]};border-color:${ESTADO_COLOR[c.estado]};"
+          onclick="location.href='cita-detalle.html?id=${c.id}'">
+          ${cli.nombre.split(" ").slice(0,2).join(" ")}
+          <small>${Utils.timeLabel(c.inicio)} · ${c.composicion.servicios.join(" + ")}</small>
+        </div>`;
+      }).join("");
+      return `<div class="day-col" style="height:${totalMin}px;">${hourLines}${breakShade}${blocks}</div>`;
+    }).join("");
+
+    const timeLabels = Array.from({length: END_H-START_H}).map((_,i) => `<div style="height:60px;">${String(START_H+i).padStart(2,"0")}:00</div>`).join("");
+
+    document.getElementById("cal-wrap").innerHTML = `
+      <div class="week-grid animate-in" style="grid-template-columns:64px repeat(${cols.length}, 1fr);">
+        <div class="head-cell"></div>
+        ${headCells}
+        <div class="time-col" style="border-top:none;">${timeLabels}</div>
+        ${dayCols}
+      </div>
+      ${citasDia.length === 0 ? `<div class="card mt-4">${Components.emptyState({icon:"calendar", title:"Sin citas este día en esta sucursal", desc:"Cuando el bot confirme una cita por WhatsApp, o cuando agendes una manualmente, aparecerá aquí.", actionLabel:"Agendar cita", actionOnclick:"location.href='cita-nueva.html'"})}</div>` : ""}
+    `;
+  }
+
+  render();
+</script>
+</body>
+</html>
