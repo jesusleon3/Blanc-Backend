@@ -5,6 +5,7 @@ import request from 'supertest';
 import * as jwt from 'jsonwebtoken';
 import { SucursalesYPersonalModule } from '../../sucursales-y-personal.module';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
+import { Database } from '../../../../database/connection';
 import { AUDITORIA_PORT } from '../../../../shared/auditoria/auditoria.port';
 import { DrizzleAuditoriaRepository } from '../../../../shared/auditoria/drizzle-auditoria.repository';
 import { UNIT_OF_WORK } from '../../../../shared/persistence/unit-of-work.port';
@@ -15,7 +16,7 @@ import { PermisosUsuario, PermisosUsuarioPort } from '../../../../shared/auth/pe
 import { RolesGuard } from '../../../../shared/auth/roles.guard';
 import { Rol } from '../../../../shared/auth/rol';
 import { HttpExceptionFilter } from '../../../../shared/errors/http-exception.filter';
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 
 const SECRETO = 'secreto-e2e';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -54,16 +55,21 @@ const HORARIO = {
 
 /**
  * Prueba de extremo a extremo real: HTTP → Guards → Controller → Caso de uso → Repositorio
- * Drizzle → Postgres (pg-mem). Sin mocks de aplicación — solo la base de datos es de prueba,
+ * Drizzle → PostgreSQL real (Testcontainers). Sin mocks de aplicación — solo la base es efímera,
  * y el secreto JWT es fijo para poder firmar tokens de prueba (no hay módulo Identidad
  * todavía que los emita — ver reporte de cierre del módulo).
  */
+/** Asignada en `beforeAll`; la consume el `useFactory` de `DATABASE_CONNECTION`. */
+let dbDePrueba: Database;
+
 /** Sustituye a `DatabaseModule`+`AuditoriaModule` reales — `@Global()` para que sus
  * providers lleguen a `SucursalesYPersonalModule` igual que en producción. */
 @Global()
 @Module({
   providers: [
-    { provide: DATABASE_CONNECTION, useValue: crearBaseDeDatosDePrueba() },
+    // `useFactory`, no `useValue`: la base real se crea de forma asíncrona en `beforeAll`,
+    // después de que este módulo ya está definido pero antes de que Nest lo resuelva.
+    { provide: DATABASE_CONNECTION, useFactory: () => dbDePrueba },
     { provide: AUDITORIA_PORT, useClass: DrizzleAuditoriaRepository },
     { provide: UNIT_OF_WORK, useClass: DrizzleUnitOfWork },
   ],
@@ -75,6 +81,8 @@ describe('Sucursales y Personal — E2E (HTTP)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    dbDePrueba = await crearBaseDeDatosDePrueba();
+
     const moduleRef = await Test.createTestingModule({
       imports: [TestInfraModule, SucursalesYPersonalModule],
       providers: [

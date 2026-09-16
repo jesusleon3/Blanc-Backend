@@ -1,9 +1,9 @@
-import { crearBaseDeDatosDePrueba } from '../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../database/test-utils/postgres-de-prueba';
 import { DrizzleAuditoriaRepository } from './drizzle-auditoria.repository';
 
 describe('DrizzleAuditoriaRepository (integración) — RN-AUD-01', () => {
   it('registra una entrada de auditoría', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const repo = new DrizzleAuditoriaRepository(db);
 
     await expect(

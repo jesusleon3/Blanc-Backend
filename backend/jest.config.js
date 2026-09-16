@@ -1,10 +1,27 @@
-/** Jest — unit + integration (pg-mem). Sin acceso a Postgres real en este entorno; ver HANDOFF del módulo. */
+/**
+ * Jest — unitarias + integración/E2E contra un PostgreSQL REAL y efímero (Testcontainers).
+ *
+ * `globalSetup` levanta un único contenedor `postgres:16-alpine` para toda la corrida y
+ * `globalTeardown` lo detiene; cada worker trabaja sobre su propia base de datos dentro de ese
+ * contenedor (ver `src/database/test-utils/postgres-de-prueba.ts`). Sustituye a `pg-mem`, que no
+ * soporta `tstzrange`, `EXCLUDE USING gist` ni `btree_gist` — imprescindibles para la Fase 2 — y
+ * que además no revertía transacciones de verdad.
+ */
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
+  globalSetup: '<rootDir>/../test/global-setup.js',
+  globalTeardown: '<rootDir>/../test/global-teardown.js',
+  // Arrancar el contenedor y aplicar migraciones excede con creces el timeout por defecto (5 s)
+  // en la primera prueba de cada worker.
+  testTimeout: 60000,
   testRegex: '.*\\.spec\\.ts$',
+  setupFilesAfterEnv: ['<rootDir>/../test/setup-after-env.js'],
+  // Solo `.ts`: incluir `.js` hacía que ts-jest intentara compilar los hooks globales
+  // (`test/*.js`) y avisara de `allowJs` desactivado. Ningún archivo `.js` de `src/` necesita
+  // transformación.
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    '^.+\\.ts$': 'ts-jest',
   },
   collectCoverageFrom: ['**/*.(t|j)s'],
   coveragePathIgnorePatterns: ['main.ts', '.module.ts', '/database/schema/', '/database/migrate.ts'],

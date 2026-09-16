@@ -1,4 +1,4 @@
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 import { DrizzleSucursalRepository } from './drizzle-sucursal.repository';
 import { Sucursal } from '../../domain/entities/sucursal.entity';
 import { DiaFestivo } from '../../domain/entities/dia-festivo.entity';
@@ -17,12 +17,12 @@ const HORARIO = {
 /** Integración real contra Postgres (pg-mem) — no un mock del repositorio. */
 describe('DrizzleSucursalRepository (integración)', () => {
   it('buscarPorId devuelve null si no existe', async () => {
-    const repo = new DrizzleSucursalRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleSucursalRepository(await crearBaseDeDatosDePrueba());
     expect(await repo.buscarPorId('00000000-0000-0000-0000-000000000000')).toBeNull();
   });
 
   it('buscarPorNombre encuentra una sucursal ya guardada', async () => {
-    const repo = new DrizzleSucursalRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleSucursalRepository(await crearBaseDeDatosDePrueba());
     const sucursal = Sucursal.crear({ nombre: 'Blanc Polanco', horarioSemanal: HORARIO });
     await repo.guardar(sucursal);
 
@@ -31,7 +31,7 @@ describe('DrizzleSucursalRepository (integración)', () => {
   });
 
   it('la restricción UNIQUE de nombre se traduce a ConflictoDeNegocioError (409), no un error crudo de Postgres (Tarea 5, hardening)', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const repo = new DrizzleSucursalRepository(db);
     await repo.guardar(Sucursal.crear({ nombre: 'Blanc Polanco', horarioSemanal: HORARIO }));
 
@@ -45,7 +45,7 @@ describe('DrizzleSucursalRepository (integración)', () => {
   });
 
   it('agrega y lista días festivos de una sucursal', async () => {
-    const repo = new DrizzleSucursalRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleSucursalRepository(await crearBaseDeDatosDePrueba());
     const sucursal = Sucursal.crear({ nombre: 'Blanc Polanco', horarioSemanal: HORARIO });
     await repo.guardar(sucursal);
 
@@ -57,7 +57,7 @@ describe('DrizzleSucursalRepository (integración)', () => {
   });
 
   it('elimina un día festivo por id (cascada al eliminar la sucursal, ADR-005 mismo esquema)', async () => {
-    const repo = new DrizzleSucursalRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleSucursalRepository(await crearBaseDeDatosDePrueba());
     const sucursal = Sucursal.crear({ nombre: 'Blanc Polanco', horarioSemanal: HORARIO });
     await repo.guardar(sucursal);
     const diaFestivo = DiaFestivo.crear({ sucursalId: sucursal.id, fecha: '2026-12-25' });
@@ -69,7 +69,7 @@ describe('DrizzleSucursalRepository (integración)', () => {
   });
 
   it('listar devuelve todas las sucursales guardadas', async () => {
-    const repo = new DrizzleSucursalRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleSucursalRepository(await crearBaseDeDatosDePrueba());
     await repo.guardar(Sucursal.crear({ nombre: 'Blanc Polanco', horarioSemanal: HORARIO }));
     await repo.guardar(Sucursal.crear({ nombre: 'Blanc Condesa', horarioSemanal: HORARIO }));
 

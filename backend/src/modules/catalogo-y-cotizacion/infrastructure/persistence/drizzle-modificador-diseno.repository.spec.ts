@@ -1,4 +1,4 @@
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 import { DrizzleModificadorDisenoRepository } from './drizzle-modificador-diseno.repository';
 import { ModificadorDiseno } from '../../domain/entities/modificador-diseno.entity';
 
@@ -6,7 +6,7 @@ const MODIFICADOR_VALIDO = { nombre: 'Diseño francés', minutosAdicionales: 15,
 
 describe('DrizzleModificadorDisenoRepository (integración) — FL-COT-01', () => {
   it('guarda y recupera un modificador con todos sus campos intactos', async () => {
-    const repo = new DrizzleModificadorDisenoRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleModificadorDisenoRepository(await crearBaseDeDatosDePrueba());
     const modificador = ModificadorDiseno.crear(MODIFICADOR_VALIDO);
 
     await repo.guardar(modificador);
@@ -19,7 +19,7 @@ describe('DrizzleModificadorDisenoRepository (integración) — FL-COT-01', () =
   });
 
   it('la baja lógica sobrevive el viaje de ida y vuelta (columna `activo`, migración 0003)', async () => {
-    const repo = new DrizzleModificadorDisenoRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleModificadorDisenoRepository(await crearBaseDeDatosDePrueba());
     const modificador = ModificadorDiseno.crear(MODIFICADOR_VALIDO);
     await repo.guardar(modificador);
 
@@ -33,7 +33,7 @@ describe('DrizzleModificadorDisenoRepository (integración) — FL-COT-01', () =
   });
 
   it('devuelve null cuando el id no existe', async () => {
-    const repo = new DrizzleModificadorDisenoRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleModificadorDisenoRepository(await crearBaseDeDatosDePrueba());
     await expect(repo.buscarPorId('00000000-0000-0000-0000-000000000000')).resolves.toBeNull();
   });
 
@@ -43,7 +43,7 @@ describe('DrizzleModificadorDisenoRepository (integración) — FL-COT-01', () =
       ['cero (modificador solo estético, sin costo)', 0],
       ['un extra que en pesos tendría decimales: $80.50', 8050],
     ])('%s se persiste y se lee como el MISMO entero', async (_caso, precioAdicionalCentavos) => {
-      const repo = new DrizzleModificadorDisenoRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleModificadorDisenoRepository(await crearBaseDeDatosDePrueba());
       const modificador = ModificadorDiseno.crear({ ...MODIFICADOR_VALIDO, precioAdicionalCentavos });
 
       await repo.guardar(modificador);
@@ -56,7 +56,7 @@ describe('DrizzleModificadorDisenoRepository (integración) — FL-COT-01', () =
   });
 
   it('guardar es un upsert: actualizar no duplica la fila', async () => {
-    const repo = new DrizzleModificadorDisenoRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleModificadorDisenoRepository(await crearBaseDeDatosDePrueba());
     const modificador = ModificadorDiseno.crear(MODIFICADOR_VALIDO);
     await repo.guardar(modificador);
 
@@ -70,7 +70,7 @@ describe('DrizzleModificadorDisenoRepository (integración) — FL-COT-01', () =
   });
 
   it('listar devuelve todo el catálogo de modificadores', async () => {
-    const repo = new DrizzleModificadorDisenoRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleModificadorDisenoRepository(await crearBaseDeDatosDePrueba());
     await repo.guardar(ModificadorDiseno.crear({ ...MODIFICADOR_VALIDO, nombre: 'Francés' }));
     await repo.guardar(ModificadorDiseno.crear({ ...MODIFICADOR_VALIDO, nombre: 'Pedrería' }));
 
@@ -79,7 +79,7 @@ describe('DrizzleModificadorDisenoRepository (integración) — FL-COT-01', () =
   });
 
   it('listar sobre un catálogo vacío devuelve un arreglo vacío, no null', async () => {
-    const repo = new DrizzleModificadorDisenoRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleModificadorDisenoRepository(await crearBaseDeDatosDePrueba());
     await expect(repo.listar()).resolves.toEqual([]);
   });
 });

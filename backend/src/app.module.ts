@@ -5,6 +5,7 @@ import { AuditoriaModule } from './shared/auditoria/auditoria.module';
 import { SucursalesYPersonalModule } from './modules/sucursales-y-personal/sucursales-y-personal.module';
 import { IdentidadYAccesosModule } from './modules/identidad-y-accesos/identidad-y-accesos.module';
 import { CatalogoYCotizacionModule } from './modules/catalogo-y-cotizacion/catalogo-y-cotizacion.module';
+import { HealthController } from './shared/health/health.controller';
 
 /**
  * Modular Monolith (ADR-001) — un solo desplegable, módulos con frontera estricta.
@@ -21,5 +22,8 @@ import { CatalogoYCotizacionModule } from './modules/catalogo-y-cotizacion/catal
     IdentidadYAccesosModule,
     CatalogoYCotizacionModule,
   ],
+  // `HealthController` se declara aquí, no en un módulo propio: no tiene providers, no tiene
+  // dependencias y no pertenece a ningún Bounded Context — es infraestructura de despliegue.
+  controllers: [HealthController],
 })
 export class AppModule {}

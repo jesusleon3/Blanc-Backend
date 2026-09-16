@@ -1,4 +1,4 @@
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 import { DrizzleSucursalRepository } from './drizzle-sucursal.repository';
 import { DrizzleManicuristaRepository } from './drizzle-manicurista.repository';
 import { Sucursal } from '../../domain/entities/sucursal.entity';
@@ -17,7 +17,7 @@ const HORARIO = {
 
 describe('DrizzleManicuristaRepository (integración) — 01-domain-discovery.md §5.7', () => {
   it('asigna una manicurista a varias sucursales (relación muchos-a-muchos)', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const sucursalRepo = new DrizzleSucursalRepository(db);
     const manicuristaRepo = new DrizzleManicuristaRepository(db);
 
@@ -37,7 +37,7 @@ describe('DrizzleManicuristaRepository (integración) — 01-domain-discovery.md
   });
 
   it('estaAsignadaASucursal refleja correctamente el estado del par', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const sucursalRepo = new DrizzleSucursalRepository(db);
     const manicuristaRepo = new DrizzleManicuristaRepository(db);
 
@@ -52,7 +52,7 @@ describe('DrizzleManicuristaRepository (integración) — 01-domain-discovery.md
   });
 
   it('removerDeSucursal elimina únicamente el par indicado', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const sucursalRepo = new DrizzleSucursalRepository(db);
     const manicuristaRepo = new DrizzleManicuristaRepository(db);
 
@@ -72,7 +72,7 @@ describe('DrizzleManicuristaRepository (integración) — 01-domain-discovery.md
   });
 
   it('actualiza el estado activa/inactiva vía guardar (upsert)', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const manicuristaRepo = new DrizzleManicuristaRepository(db);
     const manicurista = Manicurista.crear({ nombre: 'Karla Espinoza' });
     await manicuristaRepo.guardar(manicurista);
@@ -85,7 +85,7 @@ describe('DrizzleManicuristaRepository (integración) — 01-domain-discovery.md
   });
 
   it('la restricción UNIQUE(manicurista_id, sucursal_id) se traduce a ConflictoDeNegocioError (409), no un error crudo (Tarea 5, hardening)', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const sucursalRepo = new DrizzleSucursalRepository(db);
     const manicuristaRepo = new DrizzleManicuristaRepository(db);
 

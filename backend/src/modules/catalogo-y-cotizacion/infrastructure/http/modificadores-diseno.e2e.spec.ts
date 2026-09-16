@@ -5,6 +5,7 @@ import request from 'supertest';
 import * as jwt from 'jsonwebtoken';
 import { CatalogoYCotizacionModule } from '../../catalogo-y-cotizacion.module';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
+import { Database } from '../../../../database/connection';
 import { AUDITORIA_PORT } from '../../../../shared/auditoria/auditoria.port';
 import { DrizzleAuditoriaRepository } from '../../../../shared/auditoria/drizzle-auditoria.repository';
 import { UNIT_OF_WORK } from '../../../../shared/persistence/unit-of-work.port';
@@ -15,7 +16,7 @@ import { PermisosUsuario, PermisosUsuarioPort } from '../../../../shared/auth/pe
 import { RolesGuard } from '../../../../shared/auth/roles.guard';
 import { Rol } from '../../../../shared/auth/rol';
 import { HttpExceptionFilter } from '../../../../shared/errors/http-exception.filter';
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 
 const SECRETO = 'secreto-e2e-modificadores';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -37,10 +38,15 @@ function token(rol: Rol, sub = 'test-user') {
 const RUTA = '/v1/catalogo-y-cotizacion/modificadores-diseno';
 const MODIFICADOR_VALIDO = { nombre: 'Diseño francés', minutosAdicionales: 15, precioAdicionalCentavos: 8000 };
 
+/** Asignada en `beforeAll`; la consume el `useFactory` de `DATABASE_CONNECTION`. */
+let dbDePrueba: Database;
+
 @Global()
 @Module({
   providers: [
-    { provide: DATABASE_CONNECTION, useValue: crearBaseDeDatosDePrueba() },
+    // `useFactory`, no `useValue`: la base real se crea de forma asíncrona en `beforeAll`,
+    // después de que este módulo ya está definido pero antes de que Nest lo resuelva.
+    { provide: DATABASE_CONNECTION, useFactory: () => dbDePrueba },
     { provide: AUDITORIA_PORT, useClass: DrizzleAuditoriaRepository },
     { provide: UNIT_OF_WORK, useClass: DrizzleUnitOfWork },
   ],
@@ -52,6 +58,8 @@ describe('Catálogo — Modificadores de Diseño E2E (HTTP) — FL-COT-01', () =
   let app: INestApplication;
 
   beforeAll(async () => {
+    dbDePrueba = await crearBaseDeDatosDePrueba();
+
     const moduleRef = await Test.createTestingModule({
       imports: [TestInfraModule, CatalogoYCotizacionModule],
       providers: [

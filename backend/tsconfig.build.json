@@ -1,0 +1,24 @@
+{
+  // Proyecto de COMPILACIÓN para el artefacto de producción (`nest build`).
+  //
+  // POR QUÉ EXISTE: `tsconfig.json` incluye `src/**/*.ts`, lo que arrastraba los 43 archivos
+  // `*.spec.ts` al `dist/` — código de pruebas viajando en el artefacto de producción, junto a
+  // sus `require` de `pg-mem`/`supertest`/`testcontainers` (devDependencies). Inerte en runtime,
+  // pero no debe estar ahí.
+  //
+  // `exclude` REEMPLAZA al del padre, no se fusiona: por eso se repiten `node_modules` y `dist`.
+  //
+  // `tsBuildInfoFile` PROPIO, distinto del de `tsconfig.json`: dos proyectos con distinto
+  // conjunto de archivos compartiendo un mismo estado incremental se pisan entre sí y provocan
+  // builds que terminan en 0 sin emitir nada (el defecto corregido en `d05c3f3`). Ambos viven
+  // dentro de `outDir` para que `deleteOutDir: true` los borre junto con la salida.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./dist/tsconfig.build.tsbuildinfo"
+  },
+  // `**/test-utils/**` cubre los dobles y helpers de prueba que no son `*.spec.ts` y que, por
+  // tanto, se colarían igual: `database/test-utils/pg-mem-database.ts` y
+  // `shared/persistence/test-utils/unit-of-work-falso.ts` (este último usa el global `jest`).
+  // Ningún archivo de producción los importa — verificado antes de excluirlos.
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.e2e-spec.ts", "**/test-utils/**"]
+}

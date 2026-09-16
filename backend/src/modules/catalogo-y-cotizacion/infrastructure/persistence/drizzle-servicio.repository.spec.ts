@@ -1,4 +1,4 @@
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 import { DrizzleServicioRepository } from './drizzle-servicio.repository';
 import { DrizzleModificadorDisenoRepository } from './drizzle-modificador-diseno.repository';
 import { Servicio } from '../../domain/entities/servicio.entity';
@@ -9,7 +9,7 @@ const SERVICIO_VALIDO = { nombre: 'Gelish', categoria: 'aplicacion', duracionBas
 
 describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
   it('guarda y recupera un servicio con todos sus campos intactos', async () => {
-    const repo = new DrizzleServicioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
     const servicio = Servicio.crear(SERVICIO_VALIDO);
 
     await repo.guardar(servicio);
@@ -24,7 +24,7 @@ describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
   });
 
   it('devuelve null cuando el id no existe', async () => {
-    const repo = new DrizzleServicioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
     await expect(repo.buscarPorId('00000000-0000-0000-0000-000000000000')).resolves.toBeNull();
   });
 
@@ -35,7 +35,7 @@ describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
       ['un precio que en pesos tendría decimales: $450.75', 45075],
       ['un importe grande, más allá del rango de un smallint', 250000],
     ])('%s se persiste y se lee como el MISMO entero', async (_caso, precioBaseCentavos) => {
-      const repo = new DrizzleServicioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
       const servicio = Servicio.crear({ ...SERVICIO_VALIDO, precioBaseCentavos });
 
       await repo.guardar(servicio);
@@ -48,7 +48,7 @@ describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
     });
 
     it('la columna no introduce error de punto flotante en una suma de importes leídos', async () => {
-      const repo = new DrizzleServicioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
       // 0.1 + 0.2 !== 0.3 en float; en centavos enteros, 10 + 20 === 30 siempre.
       await repo.guardar(Servicio.crear({ ...SERVICIO_VALIDO, nombre: 'A', precioBaseCentavos: 10 }));
       await repo.guardar(Servicio.crear({ ...SERVICIO_VALIDO, nombre: 'B', precioBaseCentavos: 20 }));
@@ -60,7 +60,7 @@ describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
   });
 
   it('guardar es un upsert: actualizar un servicio existente no duplica la fila', async () => {
-    const repo = new DrizzleServicioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
     const servicio = Servicio.crear(SERVICIO_VALIDO);
     await repo.guardar(servicio);
 
@@ -76,7 +76,7 @@ describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
   });
 
   it('listar devuelve activos e inactivos por igual', async () => {
-    const repo = new DrizzleServicioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
     const activo = Servicio.crear({ ...SERVICIO_VALIDO, nombre: 'Vigente' });
     const inactivo = Servicio.crear({ ...SERVICIO_VALIDO, nombre: 'Descontinuado' });
     inactivo.desactivar();
@@ -88,13 +88,13 @@ describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
   });
 
   it('listar sobre un catálogo vacío devuelve un arreglo vacío, no null', async () => {
-    const repo = new DrizzleServicioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
     await expect(repo.listar()).resolves.toEqual([]);
   });
 
   describe('vínculo N:M con modificadores (servicio_modificadores_aplicables)', () => {
     async function prepararEscenario() {
-      const db = crearBaseDeDatosDePrueba();
+      const db = await crearBaseDeDatosDePrueba();
       const servicioRepo = new DrizzleServicioRepository(db);
       const modificadorRepo = new DrizzleModificadorDisenoRepository(db);
 

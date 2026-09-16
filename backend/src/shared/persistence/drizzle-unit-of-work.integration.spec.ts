@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { crearBaseDeDatosDePrueba } from '../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../database/test-utils/postgres-de-prueba';
 import { sucursales } from '../../database/schema';
 import { DrizzleUnitOfWork } from './drizzle-unit-of-work';
 import { Sucursal } from '../../modules/sucursales-y-personal/domain/entities/sucursal.entity';
@@ -16,21 +16,19 @@ const HORARIO = {
 };
 
 /**
- * Integración real contra pg-mem — cubre el camino de código (`db.transaction()` + contexto de
- * `AsyncLocalStorage`), no un mock del `UnitOfWork`.
+ * Integración contra **PostgreSQL real** (Testcontainers) — cubre el camino de código
+ * (`db.transaction()` + contexto de `AsyncLocalStorage`), no un mock del `UnitOfWork`.
  *
- * **Limitación documentada, verificada empíricamente en este hardening (2026-08-11):** pg-mem
- * acepta `BEGIN`/`ROLLBACK` sin error, pero no revierte de verdad las filas insertadas — un
- * `INSERT` seguido de `ROLLBACK` deja la fila visible igual. Esto se confirmó tanto vía el driver
- * `pg` crudo como vía `db.transaction()` de Drizzle antes de escribir esta prueba. Por eso el
- * segundo test de este archivo documenta el comportamiento REAL de pg-mem (no revierte) en vez de
- * afirmar el comportamiento que un Postgres real garantizaría — afirmar lo segundo aquí sería una
- * prueba verde que miente. La verificación de reversión real contra Postgres queda pendiente
- * (Tarea 8 del reporte de cierre: sin `DATABASE_URL` real disponible en este entorno).
+ * **RIESGO ACEPTADO CERRADO (2026-09-15).** Hasta esta fecha estas pruebas corrían contra pg-mem,
+ * que acepta `BEGIN`/`ROLLBACK` sin error pero **no revierte de verdad** las filas insertadas. El
+ * archivo documentaba esa limitación y afirmaba el comportamiento equivocado a propósito —
+ * afirmar la reversión sobre pg-mem habría sido una prueba verde que miente. Con PostgreSQL real
+ * ya se puede verificar la atomicidad de verdad, que es lo que `RN-AUD-01` exige: la auditoría de
+ * una operación no puede quedar huérfana si la operación falla, ni al revés.
  */
-describe('DrizzleUnitOfWork (integración, pg-mem) — RN-AUD-01', () => {
+describe('DrizzleUnitOfWork (integración, PostgreSQL real) — RN-AUD-01', () => {
   it('propaga el error de `trabajo` sin envolverlo ni silenciarlo', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const unitOfWork = new DrizzleUnitOfWork(db);
 
     await expect(
@@ -41,34 +39,61 @@ describe('DrizzleUnitOfWork (integración, pg-mem) — RN-AUD-01', () => {
   });
 
   it('resuelve con el valor de `trabajo` cuando no hay error (camino feliz)', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const unitOfWork = new DrizzleUnitOfWork(db);
 
     const resultado = await unitOfWork.ejecutar(async () => 'listo');
     expect(resultado).toBe('listo');
   });
 
-  it(
-    'LIMITACIÓN CONOCIDA DE PG-MEM: un INSERT dentro de `ejecutar()` que luego falla NO se revierte en pg-mem ' +
-      '(a diferencia de Postgres real) — ver comentario superior; no interpretar este test como validación de atomicidad real',
-    async () => {
-      const db = crearBaseDeDatosDePrueba();
-      const repo = new DrizzleSucursalRepository(db);
-      const unitOfWork = new DrizzleUnitOfWork(db);
-      const sucursal = Sucursal.crear({ nombre: 'Blanc Prueba Atomicidad', horarioSemanal: HORARIO });
+  it('ATOMICIDAD REAL: un INSERT dentro de `ejecutar()` que luego falla SÍ se revierte', async () => {
+    const db = await crearBaseDeDatosDePrueba();
+    const repo = new DrizzleSucursalRepository(db);
+    const unitOfWork = new DrizzleUnitOfWork(db);
+    const sucursal = Sucursal.crear({ nombre: 'Blanc Prueba Atomicidad', horarioSemanal: HORARIO });
 
-      await expect(
-        unitOfWork.ejecutar(async () => {
-          await repo.guardar(sucursal);
-          throw new Error('fallo después del INSERT');
-        }),
-      ).rejects.toThrow('fallo después del INSERT');
+    await expect(
+      unitOfWork.ejecutar(async () => {
+        await repo.guardar(sucursal);
+        throw new Error('fallo después del INSERT');
+      }),
+    ).rejects.toThrow('fallo después del INSERT');
 
-      // Comportamiento real de pg-mem hoy: la fila QUEDA insertada pese al error posterior.
-      // Un Postgres real, bajo el mismo código, la revertiría — eso es lo que este hardening deja
-      // como pendiente de verificación (no se puede probar aquí, ver comentario superior del archivo).
-      const filas = await db.select().from(sucursales).where(eq(sucursales.id, sucursal.id));
-      expect(filas).toHaveLength(1);
-    },
-  );
+    // Esta es la aserción que pg-mem hacía imposible: la fila NO debe existir.
+    const filas = await db.select().from(sucursales).where(eq(sucursales.id, sucursal.id));
+    expect(filas).toHaveLength(0);
+  });
+
+  it('el camino feliz SÍ confirma: lo escrito dentro de `ejecutar()` persiste tras terminar', async () => {
+    const db = await crearBaseDeDatosDePrueba();
+    const repo = new DrizzleSucursalRepository(db);
+    const unitOfWork = new DrizzleUnitOfWork(db);
+    const sucursal = Sucursal.crear({ nombre: 'Blanc Commit Confirmado', horarioSemanal: HORARIO });
+
+    await unitOfWork.ejecutar(async () => {
+      await repo.guardar(sucursal);
+    });
+
+    // Sin esta prueba, la anterior podría pasar simplemente porque nada se escribe nunca.
+    const filas = await db.select().from(sucursales).where(eq(sucursales.id, sucursal.id));
+    expect(filas).toHaveLength(1);
+  });
+
+  it('la reversión alcanza a TODAS las escrituras de la transacción, no solo a la última', async () => {
+    const db = await crearBaseDeDatosDePrueba();
+    const repo = new DrizzleSucursalRepository(db);
+    const unitOfWork = new DrizzleUnitOfWork(db);
+    const primera = Sucursal.crear({ nombre: 'Blanc Primera', horarioSemanal: HORARIO });
+    const segunda = Sucursal.crear({ nombre: 'Blanc Segunda', horarioSemanal: HORARIO });
+
+    await expect(
+      unitOfWork.ejecutar(async () => {
+        await repo.guardar(primera);
+        await repo.guardar(segunda);
+        throw new Error('fallo tras dos INSERT');
+      }),
+    ).rejects.toThrow('fallo tras dos INSERT');
+
+    expect(await db.select().from(sucursales)).toHaveLength(0);
+  });
 });

@@ -1,4 +1,4 @@
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/pg-mem-database';
+import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 import { DrizzleUsuarioRepository } from './drizzle-usuario.repository';
 import { Usuario } from '../../domain/entities/usuario.entity';
 import { ConflictoDeNegocioError } from '../../../../shared/errors/domain-error';
@@ -13,12 +13,12 @@ const SUC_INEXISTENTE = '99999999-9999-9999-9999-999999999999';
 /** Integración real contra Postgres (pg-mem) — no un mock del repositorio. */
 describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () => {
   it('buscarPorId devuelve null si no existe', async () => {
-    const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
     expect(await repo.buscarPorId('00000000-0000-0000-0000-000000000000')).toBeNull();
   });
 
   it('guarda y recupera un usuario por id y por email, activo por defecto', async () => {
-    const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
     const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
     await repo.guardar(usuario);
 
@@ -31,7 +31,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
   });
 
   it('persiste la desactivación (FL-SEG-05)', async () => {
-    const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
     const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
     await repo.guardar(usuario);
 
@@ -43,7 +43,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
   });
 
   it('guardar sobre un id existente actualiza (upsert), no duplica', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const repo = new DrizzleUsuarioRepository(db);
     const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
     await repo.guardar(usuario);
@@ -56,7 +56,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
   });
 
   it('la restricción UNIQUE de email se traduce a ConflictoDeNegocioError (409), no un error crudo de Postgres', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const repo = new DrizzleUsuarioRepository(db);
     await repo.guardar(Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA }));
 
@@ -66,7 +66,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
   });
 
   it('asignarASucursal inserta el par usuario-sucursal', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const repo = new DrizzleUsuarioRepository(db);
     const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
     await repo.guardar(usuario);
@@ -75,7 +75,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
   });
 
   it('la restricción UNIQUE(usuario_id, sucursal_id) se traduce a ConflictoDeNegocioError (409)', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const repo = new DrizzleUsuarioRepository(db);
     const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
     await repo.guardar(usuario);
@@ -87,12 +87,12 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
   });
 
   it('removerDeSucursal sobre un par inexistente no falla (no-op, mismo precedente que Manicuristas)', async () => {
-    const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+    const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
     await expect(repo.removerDeSucursal('00000000-0000-0000-0000-000000000000', SUC_INEXISTENTE)).resolves.toBeUndefined();
   });
 
   it('removerDeSucursal elimina solo el par indicado', async () => {
-    const db = crearBaseDeDatosDePrueba();
+    const db = await crearBaseDeDatosDePrueba();
     const repo = new DrizzleUsuarioRepository(db);
     const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
     await repo.guardar(usuario);
@@ -112,7 +112,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
     const CUENTA_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 
     it('un usuario recién creado nace sin vínculo', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
       await repo.guardar(usuario);
 
@@ -121,7 +121,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
     });
 
     it('vincula cuando `supabase_user_id` es NULL y el vínculo queda persistido', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
       await repo.guardar(usuario);
 
@@ -133,7 +133,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
     });
 
     it('la guardia impide sobrescribir un vínculo existente: devuelve false y NO machaca el valor', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
       await repo.guardar(usuario);
       await repo.vincularCuentaExterna(usuario.id, CUENTA_A);
@@ -145,17 +145,17 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
     });
 
     it('devuelve false si el usuario no existe, sin lanzar', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       await expect(repo.vincularCuentaExterna('00000000-0000-0000-0000-000000000000', CUENTA_A)).resolves.toBe(false);
     });
 
     it('obtenerPermisosPorSupabaseUserId devuelve null si ninguna fila referencia esa cuenta', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       await expect(repo.obtenerPermisosPorSupabaseUserId(CUENTA_A)).resolves.toBeNull();
     });
 
     it('obtenerPermisosPorSupabaseUserId devuelve rol, activa y las sucursales asignadas', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       const usuario = Usuario.crear({ email: 'gera@blanc.mx', nombre: 'Gera', rol: Rol.GERENTE });
       await repo.guardar(usuario);
       await repo.vincularCuentaExterna(usuario.id, CUENTA_A);
@@ -170,7 +170,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
     });
 
     it('refleja la desactivación en la lectura de autorización (FL-SEG-05 con efecto real)', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
       await repo.guardar(usuario);
       await repo.vincularCuentaExterna(usuario.id, CUENTA_A);
@@ -182,7 +182,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
     });
 
     it('aplica RN-SEG-03: Analista sin filas asignadas obtiene alcance GLOBAL', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       const usuario = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.ANALISTA });
       await repo.guardar(usuario);
       await repo.vincularCuentaExterna(usuario.id, CUENTA_A);
@@ -191,7 +191,7 @@ describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () =>
     });
 
     it('varios usuarios sin provisionar coexisten pese al índice UNIQUE (NULL no colisiona)', async () => {
-      const repo = new DrizzleUsuarioRepository(crearBaseDeDatosDePrueba());
+      const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());
       const uno = Usuario.crear({ email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA });
       const dos = Usuario.crear({ email: 'bea@blanc.mx', nombre: 'Bea', rol: Rol.GERENTE });
 
