@@ -1,0 +1,27 @@
+{
+  // Proyecto TypeScript usado EXCLUSIVAMENTE por ESLint (`.eslintrc.js` →
+  // `parserOptions.project`), nunca para compilar.
+  //
+  // POR QUÉ EXISTE: `@typescript-eslint/parser` con `parserOptions.project` exige que todo
+  // archivo que analiza pertenezca al proyecto de TypeScript. `tsconfig.json` incluye solo
+  // `src/**/*.ts` — deliberadamente, porque su `rootDir` es `./src` y de él depende el layout de
+  // `dist/` (`dist/main.js`, no `dist/src/main.js`). Meter los archivos de configuración de la
+  // raíz en ese `include` movería el `rootDir` inferido a `backend/` y rompería el arranque.
+  //
+  // Sin este archivo, abrir `drizzle.config.ts` en el editor produce:
+  //   Parsing error: "parserOptions.project" has been provided ... The file was not found in
+  //   any of the provided project(s): drizzle.config.ts
+  //
+  // Este proyecto amplía la cobertura de ESLint sin tocar la compilación: `noEmit` garantiza
+  // que nunca genere salida.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Se reabre a la raíz porque `drizzle.config.ts` vive fuera de `src/`; heredar
+    // `rootDir: "./src"` daría TS6059 ("file is not under rootDir"). Es inocuo aquí: sin emisión,
+    // `rootDir` no determina ningún layout de salida.
+    "rootDir": "./",
+    "incremental": false
+  },
+  "include": ["src/**/*.ts", "drizzle.config.ts"]
+}

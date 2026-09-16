@@ -1,7 +1,10 @@
 module.exports = {
   parser: '@typescript-eslint/parser',
   parserOptions: {
-    project: 'tsconfig.json',
+    // `tsconfig.eslint.json`, no `tsconfig.json`: cubre también los archivos de configuración de
+    // la raíz (`drizzle.config.ts`), que el tsconfig de compilación no puede incluir sin alterar
+    // su `rootDir` y con ello el layout de `dist/`. Ver el comentario de ese archivo.
+    project: 'tsconfig.eslint.json',
     sourceType: 'module',
   },
   plugins: ['@typescript-eslint'],
