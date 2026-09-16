@@ -4,13 +4,14 @@ import { Usuario } from '../../domain/entities/usuario.entity';
 import { ConflictoDeNegocioError } from '../../../../shared/errors/domain-error';
 import { Rol } from '../../../../shared/auth/rol';
 
-// `sucursal_id` es una columna `uuid` real (sin FK cruzada, ADR-005) — pg-mem valida el formato
-// estrictamente, a diferencia de una columna `text`. Se usan UUIDs fijos, no strings arbitrarios.
+// `sucursal_id` es una columna `uuid` real (sin FK cruzada, ADR-005) — PostgreSQL valida el
+// formato al castear, a diferencia de una columna `text`. Se usan UUIDs fijos, no strings
+// arbitrarios.
 const SUC_1 = '11111111-1111-1111-1111-111111111111';
 const SUC_2 = '22222222-2222-2222-2222-222222222222';
 const SUC_INEXISTENTE = '99999999-9999-9999-9999-999999999999';
 
-/** Integración real contra Postgres (pg-mem) — no un mock del repositorio. */
+/** Integración contra PostgreSQL real (Testcontainers) — no un mock del repositorio. */
 describe('DrizzleUsuarioRepository (integración) — FL-SEG-01/03/04/05', () => {
   it('buscarPorId devuelve null si no existe', async () => {
     const repo = new DrizzleUsuarioRepository(await crearBaseDeDatosDePrueba());

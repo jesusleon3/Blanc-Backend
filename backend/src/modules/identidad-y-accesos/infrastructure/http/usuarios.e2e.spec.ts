@@ -46,7 +46,7 @@ function token(rol: Rol, sub = 'test-user', sucursales: 'GLOBAL' | string[] = 'G
 }
 
 // `sucursal_id` es una columna `uuid` real (sin FK cruzada, ADR-005) — usar UUIDs válidos, no
-// slugs arbitrarios como "suc-1", que pg-mem rechaza al castear.
+// slugs arbitrarios como "suc-1", que PostgreSQL rechaza al castear.
 const SUC_1 = '11111111-1111-1111-1111-111111111111';
 const SUC_AJENA = '22222222-2222-2222-2222-222222222222';
 const SUC_PROPIA = '33333333-3333-3333-3333-333333333333';
