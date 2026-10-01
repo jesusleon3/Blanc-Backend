@@ -184,6 +184,7 @@ describe('Catálogo — Servicios E2E (HTTP) — FL-COT-01', () => {
         duracionBaseMinutos: 90,
         precioBaseCentavos: 78000,
         activo: true,
+        requiereCotizacionManual: false,
       });
     });
 
@@ -317,6 +318,65 @@ describe('Catálogo — Servicios E2E (HTTP) — FL-COT-01', () => {
 
         expect(respuesta.body).toEqual(servicio);
       });
+    });
+  });
+
+  describe('`requiere_cotizacion_manual` — DEC-033', () => {
+    const autorizacionAdmin = () => `Bearer ${token(Rol.ADMINISTRADOR, 'admin-flag')}`;
+
+    it('por defecto es false: lo normal es que un servicio SÍ se pueda cotizar solo', async () => {
+      const creado = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', autorizacionAdmin())
+        .send({ ...SERVICIO_VALIDO, nombre: 'Cotizable solo' })
+        .expect(201);
+
+      expect(creado.body.requiereCotizacionManual).toBe(false);
+    });
+
+    it('se puede marcar al crear y sobrevive al listado', async () => {
+      const creado = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', autorizacionAdmin())
+        .send({ ...SERVICIO_VALIDO, nombre: 'Diseño Especial', requiereCotizacionManual: true })
+        .expect(201);
+
+      expect(creado.body.requiereCotizacionManual).toBe(true);
+
+      const listado = await request(app.getHttpServer()).get(RUTA).set('Authorization', autorizacionAdmin()).expect(200);
+      expect(listado.body.servicios).toContainEqual(
+        expect.objectContaining({ id: creado.body.id, requiereCotizacionManual: true }),
+      );
+    });
+
+    it('se puede activar y desactivar por PATCH', async () => {
+      const creado = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', autorizacionAdmin())
+        .send({ ...SERVICIO_VALIDO, nombre: 'Flag editable' })
+        .expect(201);
+
+      const encendido = await request(app.getHttpServer())
+        .patch(`${RUTA}/${creado.body.id}`)
+        .set('Authorization', autorizacionAdmin())
+        .send({ requiereCotizacionManual: true })
+        .expect(200);
+      expect(encendido.body.requiereCotizacionManual).toBe(true);
+
+      const apagado = await request(app.getHttpServer())
+        .patch(`${RUTA}/${creado.body.id}`)
+        .set('Authorization', autorizacionAdmin())
+        .send({ requiereCotizacionManual: false })
+        .expect(200);
+      expect(apagado.body.requiereCotizacionManual).toBe(false);
+    });
+
+    it('rechaza un valor no booleano con 400', async () => {
+      await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', autorizacionAdmin())
+        .send({ ...SERVICIO_VALIDO, nombre: 'Flag inválido', requiereCotizacionManual: 'sí' })
+        .expect(400);
     });
   });
 

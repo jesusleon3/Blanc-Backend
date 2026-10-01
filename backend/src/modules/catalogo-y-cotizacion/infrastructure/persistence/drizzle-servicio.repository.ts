@@ -28,6 +28,7 @@ export class DrizzleServicioRepository implements ServicioRepository {
         duracionBaseMinutos: servicio.duracionBaseMinutos,
         precioBaseCentavos: servicio.precioBaseCentavos,
         activo: servicio.activo,
+        requiereCotizacionManual: servicio.requiereCotizacionManual,
       })
       .onConflictDoUpdate({
         target: servicios.id,
@@ -37,6 +38,7 @@ export class DrizzleServicioRepository implements ServicioRepository {
           duracionBaseMinutos: servicio.duracionBaseMinutos,
           precioBaseCentavos: servicio.precioBaseCentavos,
           activo: servicio.activo,
+          requiereCotizacionManual: servicio.requiereCotizacionManual,
           actualizadoEn: new Date(),
         },
       });
@@ -121,6 +123,7 @@ export class DrizzleServicioRepository implements ServicioRepository {
       duracionBaseMinutos: fila.duracionBaseMinutos,
       precioBaseCentavos: validarImporteEnCentavos(fila.precioBaseCentavos, 'SERVICIO_PRECIO_BASE'),
       activo: fila.activo,
+      requiereCotizacionManual: fila.requiereCotizacionManual,
     });
   }
 }

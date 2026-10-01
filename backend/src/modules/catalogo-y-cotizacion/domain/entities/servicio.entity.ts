@@ -10,6 +10,8 @@ export interface ServicioProps {
   duracionBaseMinutos: number;
   precioBaseCentavos: Centavos;
   activo: boolean;
+  /** `DEC-033` — ver el getter homónimo. */
+  requiereCotizacionManual: boolean;
 }
 
 /**
@@ -28,7 +30,13 @@ export interface ServicioProps {
 export class Servicio {
   private constructor(private props: ServicioProps) {}
 
-  static crear(input: { nombre: string; categoria: string; duracionBaseMinutos: number; precioBaseCentavos: number }): Servicio {
+  static crear(input: {
+    nombre: string;
+    categoria: string;
+    duracionBaseMinutos: number;
+    precioBaseCentavos: number;
+    requiereCotizacionManual?: boolean;
+  }): Servicio {
     const nombre = input.nombre.trim();
     const categoria = input.categoria.trim();
 
@@ -46,6 +54,9 @@ export class Servicio {
       duracionBaseMinutos: validarDuracionEnMinutos(input.duracionBaseMinutos, 'SERVICIO'),
       precioBaseCentavos: validarImporteEnCentavos(input.precioBaseCentavos, 'SERVICIO_PRECIO_BASE'),
       activo: true,
+      // Por defecto `false`: el caso normal es que un servicio SÍ se pueda cotizar solo. Exigir
+      // intervención humana es la excepción, y conviene que sea explícita.
+      requiereCotizacionManual: input.requiereCotizacionManual ?? false,
     });
   }
 
@@ -53,7 +64,13 @@ export class Servicio {
     return new Servicio(props);
   }
 
-  actualizarDatos(input: { nombre?: string; categoria?: string; duracionBaseMinutos?: number; precioBaseCentavos?: number }): void {
+  actualizarDatos(input: {
+    nombre?: string;
+    categoria?: string;
+    duracionBaseMinutos?: number;
+    precioBaseCentavos?: number;
+    requiereCotizacionManual?: boolean;
+  }): void {
     if (input.nombre !== undefined) {
       const nombre = input.nombre.trim();
       if (nombre.length === 0) {
@@ -73,6 +90,9 @@ export class Servicio {
     }
     if (input.precioBaseCentavos !== undefined) {
       this.props.precioBaseCentavos = validarImporteEnCentavos(input.precioBaseCentavos, 'SERVICIO_PRECIO_BASE');
+    }
+    if (input.requiereCotizacionManual !== undefined) {
+      this.props.requiereCotizacionManual = input.requiereCotizacionManual;
     }
   }
 
@@ -104,6 +124,18 @@ export class Servicio {
   }
   get activo(): boolean {
     return this.props.activo;
+  }
+  /**
+   * `DEC-033` — este servicio no se puede cotizar de forma automática: su precio y duración los
+   * fija una persona. El motor de cotización (`FL-COT-03`, pospuesto) debe detenerse al encontrarlo
+   * y escalar a un humano, en vez de inventar un número.
+   *
+   * La regla de propagación es una **disyunción**: si cualquier elemento de la composición lo tiene
+   * activo, la cotización completa es manual. Basta un elemento incalculable para que el total lo
+   * sea. Esa combinación NO se resuelve aquí — es del motor de cotización.
+   */
+  get requiereCotizacionManual(): boolean {
+    return this.props.requiereCotizacionManual;
   }
 }
 

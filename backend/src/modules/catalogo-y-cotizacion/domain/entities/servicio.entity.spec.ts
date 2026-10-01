@@ -79,6 +79,34 @@ describe('Servicio — aggregate raíz del catálogo (FL-COT-01)', () => {
     });
   });
 
+  describe('`requiereCotizacionManual` — DEC-033', () => {
+    it('por defecto es false: lo normal es que un servicio se pueda cotizar solo', () => {
+      expect(Servicio.crear(SERVICIO_VALIDO).requiereCotizacionManual).toBe(false);
+    });
+
+    it('se puede marcar al crear', () => {
+      const servicio = Servicio.crear({ ...SERVICIO_VALIDO, requiereCotizacionManual: true });
+      expect(servicio.requiereCotizacionManual).toBe(true);
+    });
+
+    it('se puede encender y apagar con actualizarDatos, sin tocar el resto', () => {
+      const servicio = Servicio.crear(SERVICIO_VALIDO);
+
+      servicio.actualizarDatos({ requiereCotizacionManual: true });
+      expect(servicio.requiereCotizacionManual).toBe(true);
+      expect(servicio.precioBaseCentavos).toBe(45000);
+
+      servicio.actualizarDatos({ requiereCotizacionManual: false });
+      expect(servicio.requiereCotizacionManual).toBe(false);
+    });
+
+    it('es independiente de `activo`: un servicio puede estar vigente y aun así no ser cotizable solo', () => {
+      const servicio = Servicio.crear({ ...SERVICIO_VALIDO, requiereCotizacionManual: true });
+      expect(servicio.activo).toBe(true);
+      expect(servicio.requiereCotizacionManual).toBe(true);
+    });
+  });
+
   describe('baja del catálogo', () => {
     it('desactiva y reactiva sin borrar (preserva el historial de citas ya cotizadas)', () => {
       const servicio = Servicio.crear(SERVICIO_VALIDO);
@@ -136,6 +164,13 @@ describe('ModificadorDiseno — aggregate raíz independiente (01-domain-discove
       expect(modificador.minutosAdicionales).toBe(0);
       expect(modificador.precioAdicionalCentavos).toBe(0);
     });
+  });
+
+  it('el modificador también lleva `requiereCotizacionManual`, false por defecto (DEC-033)', () => {
+    expect(ModificadorDiseno.crear(MODIFICADOR_VALIDO).requiereCotizacionManual).toBe(false);
+
+    const especial = ModificadorDiseno.crear({ ...MODIFICADOR_VALIDO, nombre: 'Diseño Especial', requiereCotizacionManual: true });
+    expect(especial.requiereCotizacionManual).toBe(true);
   });
 
   it('rechaza nombre vacío', () => {

@@ -30,6 +30,11 @@ export const servicios = catalogoCotizacionSchema.table('servicios', {
   /** Entero en centavos (`RN-COT-07`). Nunca `numeric`, nunca `real`. */
   precioBaseCentavos: integer('precio_base_centavos').notNull(),
   activo: boolean('activo').notNull().default(true),
+  /**
+   * `DEC-033` — el servicio no se puede cotizar automáticamente y exige que un humano fije precio
+   * y duración. La automatización se detiene al encontrarlo (directriz de Sistema Híbrido).
+   */
+  requiereCotizacionManual: boolean('requiere_cotizacion_manual').notNull().default(false),
   creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
   actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -49,6 +54,9 @@ export const modificadoresDiseno = catalogoCotizacionSchema.table('modificadores
   /** Baja lógica, igual que `servicios.activo`: un modificador descontinuado debe sobrevivir en
    * las citas ya cotizadas con él. Nunca se borra físicamente. */
   activo: boolean('activo').notNull().default(true),
+  /** `DEC-033` — mismo criterio que `servicios.requiere_cotizacion_manual`; el caso típico es
+   * "Diseño Especial", cuyo tiempo depende del diseño concreto y no se parametriza. */
+  requiereCotizacionManual: boolean('requiere_cotizacion_manual').notNull().default(false),
   creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
   actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
 });

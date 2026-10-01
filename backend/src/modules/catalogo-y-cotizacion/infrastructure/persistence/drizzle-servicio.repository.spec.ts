@@ -92,6 +92,18 @@ describe('DrizzleServicioRepository (integración) — FL-COT-01', () => {
     await expect(repo.listar()).resolves.toEqual([]);
   });
 
+  it('`requiereCotizacionManual` sobrevive el viaje de ida y vuelta (columna de la migración 0004)', async () => {
+    const repo = new DrizzleServicioRepository(await crearBaseDeDatosDePrueba());
+    const normal = Servicio.crear({ ...SERVICIO_VALIDO, nombre: 'Cotizable' });
+    const especial = Servicio.crear({ ...SERVICIO_VALIDO, nombre: 'Diseño Especial', requiereCotizacionManual: true });
+
+    await repo.guardar(normal);
+    await repo.guardar(especial);
+
+    expect((await repo.buscarPorId(normal.id))?.requiereCotizacionManual).toBe(false);
+    expect((await repo.buscarPorId(especial.id))?.requiereCotizacionManual).toBe(true);
+  });
+
   describe('vínculo N:M con modificadores (servicio_modificadores_aplicables)', () => {
     async function prepararEscenario() {
       const db = await crearBaseDeDatosDePrueba();

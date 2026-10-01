@@ -1,0 +1,2 @@
+ALTER TABLE "catalogo_cotizacion"."modificadores_diseno" ADD COLUMN "requiere_cotizacion_manual" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "catalogo_cotizacion"."servicios" ADD COLUMN "requiere_cotizacion_manual" boolean DEFAULT false NOT NULL;

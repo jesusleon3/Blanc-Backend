@@ -120,19 +120,45 @@ El modelo adoptado mantiene separadas las dos cosas que de verdad son distintas:
 - **Las sillas son configuración, no código.** El número por sucursal vive en datos (`agenda.sillas`), no en una constante. Añadir la cuarta sucursal, o una silla más en Lomas, es insertar filas.
 - **Las sillas no se nombran de cara a la clienta.** Son un mecanismo interno de capacidad. Nada en WhatsApp dice "silla 2".
 
-### 2.7 ⚠️ `ABIERTO` — capacidad física vs. personal presente
+### 2.7 Capacidad física vs. personal en turno — `N-01` **RESUELTO** (decisión técnica, 2026-09-30)
 
-**Las sillas no son el único límite real, y la Dueña no respondió sobre el otro.**
+Las sillas no son el único límite real. Si Zibatá tiene 5 sillas pero hoy trabajan 3 manicuristas,
+las restricciones de §2.3 aceptarían 5 citas simultáneas y dos clientas no tendrían quién las
+atienda: las 5 sillas están libres y la base de datos no tiene forma de saber quién vino a trabajar.
 
-Si Zibatá tiene 5 sillas pero hoy solo trabajan 3 manicuristas, este modelo aceptaría 5 citas simultáneas y dos clientas no tendrían quién las atienda. La restricción de exclusión no lo impediría: las 5 sillas están libres.
+**Decisión: esto NO se resuelve en la capa de base de datos.** Se asume explícitamente un reparto de
+responsabilidades en dos niveles:
 
-Hay al menos tres salidas, y **no se elige ninguna aquí**:
+| Nivel | Garantiza | Mecanismo |
+|---|---|---|
+| **Base de datos** | Ningún **recurso físico** se usa dos veces a la vez — ni una silla, ni una persona | Restricciones `EXCLUDE USING gist` (§2.3). Invariante duro, no evadible por la aplicación |
+| **Aplicación** | No se ofrecen más huecos de los que el salón puede **atender** hoy | Servicio de dominio `MotorDisponibilidad`, que calcula `MIN(sillas_libres, manicuristas_activas)` |
 
-- (a) La capacidad efectiva es `min(sillas, manicuristas en turno)` — exige modelar turnos, que hoy no existen.
-- (b) Se mantiene el límite por sillas y **recepción absorbe el desajuste** — coherente con la directriz de Sistema Híbrido, pero traslada el problema a una persona.
-- (c) Las sillas de cada sucursal se configuran a la baja, al mínimo de personal habitual, sacrificando capacidad en los días buenos.
+**Por qué no en la base de datos.** "Manicuristas activas" es un dato que cambia por día, por turno y
+por ausencia de última hora. Expresarlo como restricción exigiría modelar turnos y mantener una
+tabla de capacidad sincronizada en cada alta, baja y cambio de horario — una restricción que se
+recalcula sola es una fuente de bloqueos y de deriva. El cruce es un **cálculo de disponibilidad**,
+no un invariante de integridad referencial, y pertenece a donde viven los cálculos.
 
-Es una pregunta para la Dueña, no para arquitectura. Queda registrada como pendiente nueva.
+**`MotorDisponibilidad` es un Servicio de Dominio**, no un caso de uso: no orquesta transacciones ni
+escribe nada. Recibe sucursal, rango y catálogo de personal, y devuelve los huecos ofrecibles. Lo
+consumen tanto el flujo conversacional como el panel de recepción, que por tanto ven lo mismo.
+
+#### ⚠️ Lo que este reparto NO garantiza, y conviene asumir conscientemente
+
+La comprobación de la capa de aplicación es **consultiva, no un invariante**. Entre que
+`MotorDisponibilidad` responde "quedan 3 huecos" y que la cita se confirma, otra reserva puede
+colarse: ambas pasan la comprobación, ambas toman sillas **distintas**, y las dos restricciones de
+base de datos las aceptan porque ningún recurso físico se duplicó. El resultado puede ser 4 citas
+con 3 manicuristas.
+
+No es un descuido del diseño: es la consecuencia inevitable de decidir que este límite vive en la
+aplicación. Mitigarlo del todo exigiría un bloqueo pesimista sobre la capacidad de la sucursal, que
+serializaría todas las reservas de un local — un precio alto para un desajuste que la directriz de
+Sistema Híbrido ya asigna a recepción.
+
+Queda, por tanto, como riesgo aceptado y no como problema resuelto: **la base de datos impide el
+doble-booking; el exceso de carga frente al personal presente lo absorbe una persona.**
 
 ---
 
@@ -174,7 +200,7 @@ Afecta directamente a `RN-CRM-06`, porque un `no_show` dispara la sugerencia de 
 Error de dominio a añadir, siguiendo la convención del proyecto:
 
 ```
-MANICURISTA_CON_CITAS_FUTURAS   →  409 Conflicto de negocio
+MANICURISTA_CON_CITAS_ACTIVAS   →  409 Conflicto de negocio
 ```
 
 ### 4.2 La consecuencia arquitectónica: cruza un Bounded Context
@@ -322,14 +348,14 @@ Notas de modelado:
 
 ## 8. Pendientes nuevos que esta ronda abrió
 
-Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñas. Es sano: son más concretas que las que sustituyen.
+Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñas. **`N-01` se cerró el mismo día como decisión técnica** (§2.7), sin consultar a la Dueña: quedan tres.
 
 | # | Pregunta | Para | Bloquea |
 |---|---|---|---|
-| N-01 | Capacidad física vs. personal en turno (§2.7) | Dueña | Calibrar el motor de disponibilidad |
+| ~~N-01~~ | ~~Capacidad física vs. personal en turno~~ | — | **CERRADO (§2.7)** — decisión técnica: capa de aplicación vía `MotorDisponibilidad`, no base de datos |
 | N-02 | Carrera `completada` / `no_show`: ventana de gracia o sobrescritura (§3.2) | Dueña | `RN-AGE-14`, `RN-CRM-06` |
 | N-03 | Qué significa operativamente "la automatización se detiene" (§5.4) | Dueña + Arquitectura | Estado `pendiente_cotizacion` |
-| N-04 | Qué estados cuentan como "cita futura" para bloquear la baja (§4.3) | Arquitectura | Puerto `CITAS_FUTURAS_PORT` |
+| N-04 | Qué estados cuentan como "cita futura" para bloquear la baja (§4.3) | Arquitectura | Puerto `VERIFICAR_CITAS_FUTURAS_PORT` |
 
 Y siguen abiertos, sin cambio:
 

@@ -389,7 +389,7 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 **Historial:**
 - **2026-09-30:** la Dueña elige la opción (a): el sistema **lanza excepción** si se intenta dar de baja a una manicurista con citas futuras. Nada se cancela ni se reasigna automáticamente.
 
-  **Modifica código de Fase 1 ya entregado.** `DesactivarManicuristaUseCase` existe hoy y **no verifica nada** — su propio comentario deja constancia de que el tratamiento de citas futuras estaba deferido a esta pregunta. No es trabajo en terreno virgen: es un cambio sobre un módulo cerrado y con pruebas escritas. Error nuevo: `MANICURISTA_CON_CITAS_FUTURAS` (409).
+  **Modifica código de Fase 1 ya entregado.** `DesactivarManicuristaUseCase` existe hoy y **no verifica nada** — su propio comentario deja constancia de que el tratamiento de citas futuras estaba deferido a esta pregunta. No es trabajo en terreno virgen: es un cambio sobre un módulo cerrado y con pruebas escritas. Error nuevo: `MANICURISTA_CON_CITAS_ACTIVAS` (409).
 
   **Consecuencia arquitectónica — cruza un Bounded Context:** la baja ocurre en Sucursales y Personal; las citas viven en Agenda. `ADR-005` prohíbe FKs entre esquemas y `ADR-001`/`ADR-002` que un módulo consulte las tablas de otro, así que **no puede ser un `JOIN`**: requiere un puerto explícito que Agenda implemente y Sucursales y Personal consuma, mismo patrón que `PERMISOS_USUARIO_PORT` en `DEC-029`. Invierte la dirección de dependencia declarada en `01-domain-discovery.md` §4 (Agenda es consumidor de Sucursales), por lo que debe verificarse con `madge` al implementarlo.
 
@@ -429,6 +429,28 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 
 ---
 
+### DEC-035 — `N-01` capacidad vs. personal: se resuelve en la capa de aplicación, no en la base de datos
+**Estado actual:** `CLOSED` (decisión técnica de arquitectura, 2026-09-30). Cierra `N-01` **sin consultar a la Dueña** — es una decisión de implementación, no de negocio.
+**Historial:**
+- **2026-09-30:** las restricciones `EXCLUDE` de `DEC-031` protegen recursos **físicos** (sillas y personas), pero no saben quién vino a trabajar hoy. Con 5 sillas y 3 manicuristas en turno, aceptarían 5 citas simultáneas.
+
+  **Decisión — reparto de responsabilidades en dos niveles:**
+
+  | Nivel | Garantiza | Mecanismo |
+  |---|---|---|
+  | Base de datos | Ningún recurso físico se usa dos veces a la vez | `EXCLUDE USING gist`. Invariante duro, no evadible |
+  | Aplicación | No se ofrecen más huecos de los que el salón puede atender hoy | Servicio de dominio `MotorDisponibilidad` → `MIN(sillas_libres, manicuristas_activas)` |
+
+  **Por qué no en la base de datos:** "manicuristas activas" cambia por día, por turno y por ausencia de última hora. Expresarlo como restricción exigiría modelar turnos y mantener una tabla de capacidad sincronizada en cada alta, baja y cambio de horario. Es un **cálculo de disponibilidad**, no un invariante de integridad referencial.
+
+  **`MotorDisponibilidad` es un Servicio de Dominio**, no un caso de uso: no orquesta transacciones ni escribe. Lo consumen por igual el flujo conversacional y el panel de recepción, de modo que ambos ven lo mismo.
+
+  ⚠️ **Lo que este reparto NO garantiza, asumido conscientemente:** la comprobación de aplicación es **consultiva, no un invariante**. Entre que `MotorDisponibilidad` responde "quedan 3 huecos" y que la cita se confirma, otra reserva puede colarse: ambas pasan la comprobación, toman sillas **distintas**, y la base de datos las acepta porque ningún recurso físico se duplicó — 4 citas con 3 manicuristas. Mitigarlo exigiría bloqueo pesimista sobre la capacidad de la sucursal, que serializaría todas las reservas del local. Se acepta el desajuste y lo absorbe recepción, coherente con la directriz de Sistema Híbrido.
+
+  **Detalle completo:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md` §2.7.
+
+---
+
 ---
 
 ## 6. Elementos explícitamente `OUT_OF_SCOPE` (por incremento, no en general)
@@ -457,6 +479,14 @@ No son "no implementados a secas" — son exclusiones deliberadas y ya verificad
 `FL-SEG-05` establece `activa=false` en `identidad_accesos.usuarios`, pero mientras `FL-SEG-06` no exista, **nada en el sistema consulta esa columna para autorizar** — ni `JwtAuthGuard`, ni ningún hook de claims (que no existe todavía). Un usuario desactivado conserva acceso completo hasta que su access token expire naturalmente, y puede seguir refrescando su sesión indefinidamente.
 **Estado:** `ACCEPTED_RISK`, no un bug de `FL-SEG-05` — es una consecuencia explícita y documentada del alcance por etapas, aceptada conscientemente por el cliente (2026-08-23).
 **Mitigación futura:** `FL-SEG-06` (y que el mecanismo de claims que ahí se construya efectivamente respete `activa`).
+
+### Riesgo: el bloqueo duro de baja de manicurista **no protege nada todavía** — `ACCEPTED_RISK` (2026-09-30)
+
+`DEC-032` exige rechazar la baja de una manicurista con citas futuras, y `DesactivarManicuristaUseCase` ya consulta `VerificarCitasFuturasPort` para hacerlo. Pero el puerto lo satisface `SinAgendaVerificarCitasFuturasAdapter`, un sustituto temporal que **siempre responde `false`**.
+
+**Hoy es inofensivo y literalmente correcto:** el Bounded Context *Agenda* no existe, no hay tabla de citas, luego no puede haber citas futuras. **Deja de serlo en el instante en que Fase 2 cree la primera cita**, y entonces el bloqueo duro queda desactivado en silencio.
+
+**Mitigación:** el riesgo está registrado en tres sitios — el comentario de cabecera del adaptador, su propia prueba (que fija el comportamiento a propósito, de modo que sustituirlo rompa la prueba y obligue a borrarla conscientemente) y esta entrada. **Acción obligatoria de Fase 2:** reemplazar el proveedor en `sucursales-y-personal.module.ts` por un adaptador real contra Agenda y **borrar** el sustituto, no dejarlo de respaldo.
 
 ### Riesgo: `pg-mem` no revierte transacciones de verdad
 Verificado empíricamente (hardening 2026-08-11) — `pg-mem` acepta `BEGIN`/`ROLLBACK` sin error pero no revierte los datos. Las pruebas de atomicidad de este proyecto prueban la orquestación del código (`UnitOfWork`), no que Postgres real revierta.
@@ -839,11 +869,11 @@ No es una preferencia de producto sino una restricción de diseño: el sistema d
 
 ### 14.3 Pendientes NUEVOS que esta ronda abrió
 
-Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñas. Es sano: son más concretas que las que sustituyen.
+Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñas. **`N-01` se cerró el mismo día** como decisión técnica (`DEC-035`); quedan tres.
 
 | # | Pregunta | Responde | Bloquea |
 |---|---|---|---|
-| `N-01` | Capacidad física vs. personal en turno — 5 sillas con 3 manicuristas aceptaría 5 citas | Dueña | Calibrar el motor de disponibilidad |
+| ~~`N-01`~~ | ~~Capacidad física vs. personal en turno~~ | — | **CERRADO el 2026-09-30** por `DEC-035`: se resuelve en la capa de aplicación (`MotorDisponibilidad`), no en la base de datos |
 | `N-02` | Carrera `completada`/`no_show`: ¿ventana de gracia o sobrescritura? | Dueña | `RN-AGE-14`, `RN-CRM-06` |
 | `N-03` | Qué significa operativamente "la automatización se detiene" | Dueña + Arquitectura | Estado `pendiente_cotizacion` |
 | `N-04` | Qué estados cuentan como "cita futura" para bloquear la baja | Arquitectura | `CITAS_FUTURAS_PORT` |

@@ -25,6 +25,7 @@ export class DrizzleModificadorDisenoRepository implements ModificadorDisenoRepo
         minutosAdicionales: modificador.minutosAdicionales,
         precioAdicionalCentavos: modificador.precioAdicionalCentavos,
         activo: modificador.activo,
+        requiereCotizacionManual: modificador.requiereCotizacionManual,
       })
       .onConflictDoUpdate({
         target: modificadoresDiseno.id,
@@ -33,6 +34,7 @@ export class DrizzleModificadorDisenoRepository implements ModificadorDisenoRepo
           minutosAdicionales: modificador.minutosAdicionales,
           precioAdicionalCentavos: modificador.precioAdicionalCentavos,
           activo: modificador.activo,
+          requiereCotizacionManual: modificador.requiereCotizacionManual,
           actualizadoEn: new Date(),
         },
       });
@@ -66,6 +68,7 @@ export class DrizzleModificadorDisenoRepository implements ModificadorDisenoRepo
       minutosAdicionales: fila.minutosAdicionales,
       precioAdicionalCentavos: validarImporteEnCentavos(fila.precioAdicionalCentavos, 'MODIFICADOR_PRECIO_ADICIONAL'),
       activo: fila.activo,
+      requiereCotizacionManual: fila.requiereCotizacionManual,
     });
   }
 }

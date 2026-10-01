@@ -1,4 +1,4 @@
-import { IsInt, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 /**
  * Cuerpo de `POST /v1/catalogo-y-cotizacion/servicios`.
@@ -31,4 +31,12 @@ export class CrearServicioDto {
   @IsInt()
   @Min(0)
   precioBaseCentavos!: number;
+
+  /**
+   * `DEC-033` — marca que este elemento NO se puede cotizar automáticamente. Por defecto `false`:
+   * exigir intervención humana es la excepción, y conviene que sea explícita en el payload.
+   */
+  @IsOptional()
+  @IsBoolean()
+  requiereCotizacionManual?: boolean;
 }

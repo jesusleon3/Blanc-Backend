@@ -17,6 +17,7 @@ export function servicioAJson(servicio: Servicio) {
     duracionBaseMinutos: servicio.duracionBaseMinutos,
     precioBaseCentavos: servicio.precioBaseCentavos,
     activo: servicio.activo,
+    requiereCotizacionManual: servicio.requiereCotizacionManual,
   };
 }
 
@@ -27,5 +28,6 @@ export function modificadorDisenoAJson(modificador: ModificadorDiseno) {
     minutosAdicionales: modificador.minutosAdicionales,
     precioAdicionalCentavos: modificador.precioAdicionalCentavos,
     activo: modificador.activo,
+    requiereCotizacionManual: modificador.requiereCotizacionManual,
   };
 }

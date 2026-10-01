@@ -4,6 +4,8 @@ import { ManicuristasController } from './infrastructure/http/manicuristas.contr
 import { MantenimientoController } from './infrastructure/http/mantenimiento.controller';
 import { SUCURSAL_REPOSITORY } from './domain/ports/sucursal.repository';
 import { MANICURISTA_REPOSITORY } from './domain/ports/manicurista.repository';
+import { VERIFICAR_CITAS_FUTURAS_PORT } from './domain/ports/verificar-citas-futuras.port';
+import { SinAgendaVerificarCitasFuturasAdapter } from './infrastructure/agenda/sin-agenda-verificar-citas-futuras.adapter';
 import { DrizzleSucursalRepository } from './infrastructure/persistence/drizzle-sucursal.repository';
 import { DrizzleManicuristaRepository } from './infrastructure/persistence/drizzle-manicurista.repository';
 import { CrearSucursalUseCase } from './application/use-cases/crear-sucursal.use-case';
@@ -30,6 +32,9 @@ import { RemoverManicuristaDeSucursalUseCase } from './application/use-cases/rem
   providers: [
     { provide: SUCURSAL_REPOSITORY, useClass: DrizzleSucursalRepository },
     { provide: MANICURISTA_REPOSITORY, useClass: DrizzleManicuristaRepository },
+    // ⚠️ Sustituto temporal: siempre responde `false`. Debe reemplazarse por un adaptador real
+    // contra Agenda en Fase 2, o el bloqueo duro de `DEC-032` no protegerá nada.
+    { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: SinAgendaVerificarCitasFuturasAdapter },
     CrearSucursalUseCase,
     ActualizarConfiguracionSucursalUseCase,
     ListarSucursalesUseCase,

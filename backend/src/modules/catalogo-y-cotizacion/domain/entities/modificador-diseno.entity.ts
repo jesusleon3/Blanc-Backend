@@ -9,6 +9,8 @@ export interface ModificadorDisenoProps {
   minutosAdicionales: number;
   precioAdicionalCentavos: Centavos;
   activo: boolean;
+  /** `DEC-033` — ver el getter homónimo en `Servicio`. */
+  requiereCotizacionManual: boolean;
 }
 
 /**
@@ -29,7 +31,12 @@ export interface ModificadorDisenoProps {
 export class ModificadorDiseno {
   private constructor(private props: ModificadorDisenoProps) {}
 
-  static crear(input: { nombre: string; minutosAdicionales: number; precioAdicionalCentavos: number }): ModificadorDiseno {
+  static crear(input: {
+    nombre: string;
+    minutosAdicionales: number;
+    precioAdicionalCentavos: number;
+    requiereCotizacionManual?: boolean;
+  }): ModificadorDiseno {
     const nombre = input.nombre.trim();
     if (nombre.length === 0) {
       throw new DomainError('MODIFICADOR_NOMBRE_REQUERIDO', 'El nombre del modificador no puede estar vacío.', 400);
@@ -41,6 +48,7 @@ export class ModificadorDiseno {
       minutosAdicionales: validarDuracionEnMinutos(input.minutosAdicionales, 'MODIFICADOR'),
       precioAdicionalCentavos: validarImporteEnCentavos(input.precioAdicionalCentavos, 'MODIFICADOR_PRECIO_ADICIONAL'),
       activo: true,
+      requiereCotizacionManual: input.requiereCotizacionManual ?? false,
     });
   }
 
@@ -48,7 +56,12 @@ export class ModificadorDiseno {
     return new ModificadorDiseno(props);
   }
 
-  actualizarDatos(input: { nombre?: string; minutosAdicionales?: number; precioAdicionalCentavos?: number }): void {
+  actualizarDatos(input: {
+    nombre?: string;
+    minutosAdicionales?: number;
+    precioAdicionalCentavos?: number;
+    requiereCotizacionManual?: boolean;
+  }): void {
     if (input.nombre !== undefined) {
       const nombre = input.nombre.trim();
       if (nombre.length === 0) {
@@ -61,6 +74,9 @@ export class ModificadorDiseno {
     }
     if (input.precioAdicionalCentavos !== undefined) {
       this.props.precioAdicionalCentavos = validarImporteEnCentavos(input.precioAdicionalCentavos, 'MODIFICADOR_PRECIO_ADICIONAL');
+    }
+    if (input.requiereCotizacionManual !== undefined) {
+      this.props.requiereCotizacionManual = input.requiereCotizacionManual;
     }
   }
 
@@ -92,5 +108,13 @@ export class ModificadorDiseno {
   }
   get activo(): boolean {
     return this.props.activo;
+  }
+  /**
+   * `DEC-033` — el caso típico es "Diseño Especial", cuyo tiempo la Dueña describió como "dentro
+   * de la hora dependiendo del diseño": un rango, no un número. Ver el getter homónimo en
+   * `Servicio` para la regla de propagación.
+   */
+  get requiereCotizacionManual(): boolean {
+    return this.props.requiereCotizacionManual;
   }
 }

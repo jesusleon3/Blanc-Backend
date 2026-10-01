@@ -245,6 +245,7 @@ describe('Catálogo — Modificadores de Diseño E2E (HTTP) — FL-COT-01', () =
         minutosAdicionales: 20,
         precioAdicionalCentavos: 12000,
         activo: true,
+        requiereCotizacionManual: false,
       });
     });
 
