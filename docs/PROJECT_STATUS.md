@@ -350,6 +350,85 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 
   **Explícitamente NO decidido aquí:** el comportamiento exacto fail-closed ante caída de PostgreSQL más allá del principio (denegar, nunca asumir rol); si se cachea y cómo; la validación de `audience` (`DEC-027`, sigue `PENDING`); y el momento de implementar.
 
+### DEC-030 — Disparador de `completada`: automático por paso del tiempo, sin notificación
+**Estado actual:** `CLOSED` (decisión de negocio de la Dueña, 2026-09-30). Cierra `Pregunta 2` de `OWNER_DECISION_LOG.md`.
+**Historial:**
+- **2026-09-30:** la Dueña responde que la transición a `completada` es **automática por el paso del tiempo** y **no emite notificación a la clienta**. Es la opción (a) de las tres planteadas.
+
+  **Por qué importaba tanto:** `OWNER_DECISION_LOG.md` la calificaba como *"la pregunta de mayor apalancamiento de todo el proyecto"*. Desbloquea en cascada `RN-AGE-14`, la máquina de estados de `Cita`, el evento de dominio `CitaCompletada` y, con él, la entrada a la Fase 5 (Garantías), que depende de ese evento.
+
+  **Consecuencia de diseño:** la transición se **almacena**, no se calcula. Una vista derivada ("si el rango ya pasó, está completada") no emite eventos de dominio, y Garantías necesita el evento. Requiere por tanto un job programado que publique `CitaCompletada` por el Outbox — que nace en esta misma Fase 2.
+
+  **Abierto que esta decisión genera (`N-02`):** `no_show` es manual y `completada` automática, y se pisan. Si el job marca `completada` a las 19:00 y recepción descubre el no-show a la mañana siguiente, la corrección puede ser imposible. Falta decidir entre ventana de gracia o permitir que `no_show` sobrescriba. Afecta a `RN-CRM-06` (sugerencia de lista roja).
+
+  **Detalle completo:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md` §3.
+
+---
+
+### DEC-031 — Capacidad por sucursal: patrón de Sillas Virtuales
+**Estado actual:** `CLOSED` (decisión de negocio + diseño de arquitectura, 2026-09-30). Cierra `P4` de `ARCHITECTURE_CLOSURE_PLAN.md`.
+**Historial:**
+- **2026-09-30:** la Dueña fija un **límite físico estricto por sucursal** — Zibatá 5, Lomas 3, Álamos 1 — y la directriz de que una cita sin manicurista elegida debe apartar el hueco respetando esa capacidad, para que **recepción reasigne a la manicurista real al llegar la clienta**.
+
+  **El defecto que esto evita, y que fallaba en silencio:** la restricción de exclusión anti-doble-booking compara `manicurista_id`. En PostgreSQL `NULL = NULL` evalúa a `NULL`, no a `TRUE`, así que una restricción `EXCLUDE` **nunca se dispara entre dos filas con `NULL`**. Dejar `manicurista_id` nulo para las citas sin preferencia habría permitido **citas simultáneas ilimitadas** sin que la base de datos protestara: sobreventa descubierta el día que llegan siete clientas a un local de tres sillas.
+
+  **El patrón adoptado:** se introduce `agenda.sillas` (estación física; el número de filas por sucursal **es** la capacidad) y se invierte el modelo: **toda cita ocupa exactamente una silla, siempre; la manicurista es opcional.** `silla_id` es `NOT NULL`, de modo que la restricción siempre tiene un valor real que comparar. Dos restricciones distintas para dos escaseces distintas — una sobre `silla_id` (capacidad física) y otra sobre `manicurista_id` con `WHERE manicurista_id IS NOT NULL` explícito (la persona nombrada). La reasignación en mostrador es un `UPDATE` que la segunda restricción valida sola.
+
+  **Alternativas descartadas:** `manicurista_id` nulo (falla en silencio); recurso unificado con sillas y manicuristas como filas hermanas (fuga capacidad: 3 sillas + 3 manicuristas = 6 recursos en un local de 3 sillas); asignar una manicurista real de inmediato (contradice la directriz de que decida recepción al llegar).
+
+  **Prerrequisito técnico ya verificado:** `postgres-de-prueba.smoke.spec.ts` crea esta misma restricción en miniatura contra PostgreSQL real y comprueba que rechaza el solapamiento para el mismo recurso y lo acepta para otro. No es una suposición.
+
+  **Abierto que esta decisión genera (`N-01`):** las sillas no son el único límite. Si Zibatá tiene 5 sillas pero hoy trabajan 3 manicuristas, el modelo aceptaría 5 citas y dos clientas no tendrían quién las atienda. Falta decidir si la capacidad efectiva es `min(sillas, personal en turno)`, si recepción absorbe el desajuste, o si las sillas se configuran a la baja.
+
+  **Detalle completo:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md` §2.
+
+---
+
+### DEC-032 — Baja de manicurista con citas futuras: bloqueo duro
+**Estado actual:** `CLOSED` (decisión de negocio de la Dueña, 2026-09-30). Cierra `Pregunta 4` de `OWNER_DECISION_LOG.md`.
+**Historial:**
+- **2026-09-30:** la Dueña elige la opción (a): el sistema **lanza excepción** si se intenta dar de baja a una manicurista con citas futuras. Nada se cancela ni se reasigna automáticamente.
+
+  **Modifica código de Fase 1 ya entregado.** `DesactivarManicuristaUseCase` existe hoy y **no verifica nada** — su propio comentario deja constancia de que el tratamiento de citas futuras estaba deferido a esta pregunta. No es trabajo en terreno virgen: es un cambio sobre un módulo cerrado y con pruebas escritas. Error nuevo: `MANICURISTA_CON_CITAS_FUTURAS` (409).
+
+  **Consecuencia arquitectónica — cruza un Bounded Context:** la baja ocurre en Sucursales y Personal; las citas viven en Agenda. `ADR-005` prohíbe FKs entre esquemas y `ADR-001`/`ADR-002` que un módulo consulte las tablas de otro, así que **no puede ser un `JOIN`**: requiere un puerto explícito que Agenda implemente y Sucursales y Personal consuma, mismo patrón que `PERMISOS_USUARIO_PORT` en `DEC-029`. Invierte la dirección de dependencia declarada en `01-domain-discovery.md` §4 (Agenda es consumidor de Sucursales), por lo que debe verificarse con `madge` al implementarlo.
+
+  **Abierto (`N-04`):** qué estados cuentan como "cita futura". Debe reutilizar la misma lista de estados que ocupan horario (`DEC-034`), no una segunda definición que pueda divergir.
+
+  **Detalle completo:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md` §4.
+
+---
+
+### DEC-033 — Diseños especiales: flag `requiere_cotizacion_manual` en vez de parametrizar
+**Estado actual:** `CLOSED` (decisión de negocio de la Dueña, 2026-09-30). Cierra **uno de los tres** huecos de `RN-COT-04`.
+**Historial:**
+- **2026-09-30:** la Dueña decide **no intentar parametrizar** tiempos ni precios de diseños complejos. Se marca el elemento con un flag y la automatización **se detiene**, exigiendo un humano. Es la realización más directa de la directriz de Sistema Híbrido: el sistema reconoce lo que no sabe calcular en vez de inventar un número.
+
+  **Qué cierra y qué NO.** `RN-COT-04` tenía tres huecos: (1) celdas sin valor numérico ("Diseño Especial", `SP`, `CF`, `CC`) — **resuelto por decisión**: no se parametrizan; (2) la ambigüedad del "+15 min" del drill, ¿delta o reemplazo? — **sigue abierto**; (3) la tabla numérica original no está en el repositorio y hay que recuperarla de la reunión — **sigue abierto**. "Ya no bloquea" no es "resuelto".
+
+  **Dónde vive el flag:** en `servicios` y en `modificadores_diseno`, ambos `boolean NOT NULL DEFAULT false`. Regla de propagación: si *cualquier* elemento de la composición lo tiene activo, la cotización completa es manual — disyunción, no media ponderada.
+
+  **Reabre `FL-COT-01`, que figuraba CERRADO.** Exige migración `0004`, cambios en ambas entidades, en los DTO de alta/edición y en el presenter. Son cambios aditivos con `DEFAULT false` y sin romper datos, pero el estado del flujo pasa de `CERRADO` a `REABIERTO (alcance acotado)` — ver §13.
+
+  **Abierto (`N-03`):** el flag dice *que* hay que parar, no *cómo*. Falta definir si la cita queda en un estado propio (`pendiente_cotizacion`) que ocupe el horario mientras un humano cotiza —si no ocupa, el hueco puede venderse dos veces—, si hay límite de tiempo, y si se avisa activamente a recepción.
+
+  **Detalle completo:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md` §5.
+
+---
+
+### DEC-034 — Anticipo expirado libera el horario; lista de estados que ocupan
+**Estado actual:** `CLOSED` (decisión de negocio de la Dueña, 2026-09-30). Rellena un hueco concreto de la máquina de estados de `Cita`.
+**Historial:**
+- **2026-09-30:** la Dueña confirma que si un anticipo expira, el espacio **no se considera agendado y se libera**, priorizando a otras clientas. Esto cierra lo que `DOMAIN_MODEL_REVIEW.md` había señalado como *"no solo una incógnita de negocio, sino una transición de estado sin definir"*.
+
+  **Habilita la restricción de exclusión.** `04-data-model.md` §346 dejó constancia de que, sin saber qué estados ocupan el horario, la restricción *"no puede implementarse literalmente"*. Con `DEC-030` y esta decisión ya hay base para proponer la lista: **liberan `cancelada`, `expirada` y `reprogramada`; todo lo demás ocupa** (`pendiente_confirmacion`, `en_espera_pago`, `confirmada`, `completada`, `no_show`). Se formula por la negativa a propósito: un estado nuevo que alguien añada en el futuro ocupará por defecto, que es el lado seguro del error.
+
+  **No cierra `P3`.** Siguen faltando: el estado `pendiente_confirmacion`, que **todavía no existe** en `01-domain-discovery.md` §113 y que la confirmación interactiva ya confirmada (1.23) exige; a qué estado vuelve una cita tras reprogramarse; si `DEC-033` necesita un `pendiente_cotizacion`; y las máquinas de `Conversación` y `TicketEscalamiento` enteras — la segunda ni siquiera tiene valores propuestos. `P3` pasa de `Abierto` a **`Abierto — parcialmente desbloqueado`**.
+
+  **Detalle completo:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md` §6.
+
+---
+
 ---
 
 ## 6. Elementos explícitamente `OUT_OF_SCOPE` (por incremento, no en general)
@@ -642,7 +721,14 @@ Revisión explícita solicitada — **no se modificó `ADR-024` en esta iteraci�
 
 ---
 
-## 13. `FL-COT-01` — Catálogo y Cotización (**flujo CERRADO**, 2026-09-14)
+## 13. `FL-COT-01` — Catálogo y Cotización (**REABIERTO con alcance acotado**, 2026-09-30)
+
+> **Reapertura (2026-09-30) — `DEC-033`.** Este flujo se cerró el 2026-09-14 y vuelve a abrirse con
+> alcance acotado: la Dueña decidió no parametrizar los diseños especiales y marcarlos con un flag
+> `requiere_cotizacion_manual`, lo que exige dos columnas nuevas (migración `0004`), cambios en
+> ambas entidades, en los DTO de alta/edición y en el presenter. Son cambios **aditivos**
+> (`DEFAULT false`, sin romper datos existentes), pero marcar el flujo como cerrado y modificarlo
+> igual sería justo la deriva que este registro existe para evitar.
 
 ### 13.1 Estado por flujo
 
@@ -727,3 +813,47 @@ Este incremento **no abrió ningún `DEC-XXX` nuevo**: no hubo ninguna bifurcaci
 La única decisión con efecto en el esquema fue **agregar `activo` a `modificadores_diseno`** (migración `0003`), autorizada explícitamente por el arquitecto el 2026-09-14 tras señalarse que la orden de trabajo presuponía una columna que no existía.
 
 ---
+
+---
+
+## 14. Fase 2 — Agenda: estado tras las respuestas de la Dueña (2026-09-30)
+
+**Documento de diseño:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md`. Nada de lo que sigue está implementado — ni esquema, ni migración, ni código.
+
+### 14.1 Directriz rectora: Sistema Híbrido
+
+> Automatizar la agenda básica; que el sistema **se apoye en recepción y gerencia** para casos complejos, diseños y cotizaciones.
+
+No es una preferencia de producto sino una restricción de diseño: el sistema debe poder **detenerse y pedir que decida un humano** sin dejar la cita en estado inconsistente ni el horario bloqueado indefinidamente. `DEC-031` (recepción reasigna la manicurista al llegar) y `DEC-033` (la cotización manual pausa la automatización) son sus dos realizaciones concretas.
+
+### 14.2 Bloqueos cerrados y abiertos
+
+| Antes | Ahora |
+|---|---|
+| `Pregunta 2` — disparador de `completada` | ✅ `DEC-030` |
+| `P4` — capacidad sin manicurista | ✅ `DEC-031` |
+| `Pregunta 4` — baja de manicurista | ✅ `DEC-032` |
+| `RN-COT-04` — celdas sin valor numérico | ✅ `DEC-033` (solo ese hueco; el "+15 min" y la tabla original siguen abiertos) |
+| Expiración de anticipo sin transición | ✅ `DEC-034` |
+| `P3` — máquinas de estado | ⚠️ **parcialmente desbloqueado** — `Cita` sí; `Conversación` y `TicketEscalamiento` no |
+
+### 14.3 Pendientes NUEVOS que esta ronda abrió
+
+Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñas. Es sano: son más concretas que las que sustituyen.
+
+| # | Pregunta | Responde | Bloquea |
+|---|---|---|---|
+| `N-01` | Capacidad física vs. personal en turno — 5 sillas con 3 manicuristas aceptaría 5 citas | Dueña | Calibrar el motor de disponibilidad |
+| `N-02` | Carrera `completada`/`no_show`: ¿ventana de gracia o sobrescritura? | Dueña | `RN-AGE-14`, `RN-CRM-06` |
+| `N-03` | Qué significa operativamente "la automatización se detiene" | Dueña + Arquitectura | Estado `pendiente_cotizacion` |
+| `N-04` | Qué estados cuentan como "cita futura" para bloquear la baja | Arquitectura | `CITAS_FUTURAS_PORT` |
+
+### 14.4 Lo que sigue bloqueado, sin cambio
+
+- **`RN-COT-04`**: la ambigüedad del "+15 min" del drill (¿delta o reemplazo?) y, sobre todo, que **la tabla numérica original no está en el repositorio** — hay que recuperarla de la reunión. Sin ella no hay motor de duración preciso aunque se responda todo lo demás.
+- **`Pregunta 11`** — alcance por defecto de sucursales por rol. El código hoy se comporta de **dos maneras contradictorias**: las escrituras implementan "sin filas = sin acceso", las lecturas no filtran nada.
+- **Máquinas de `Conversación` y `TicketEscalamiento`** (Fase 4). La segunda ni siquiera tiene valores de estado propuestos.
+
+### 14.5 Prerrequisito técnico — ya resuelto
+
+El invariante anti-doble-booking exige `btree_gist`, `tstzrange` y `EXCLUDE USING gist`. `pg-mem` no soporta ninguno de los tres, lo que habría hecho imposible probar el módulo. Desde el 2026-09-15 las pruebas corren contra **PostgreSQL real** (Testcontainers) y `postgres-de-prueba.smoke.spec.ts` verifica la restricción en miniatura. Fase 2 puede empezar a construirse con pruebas reales desde el primer día.

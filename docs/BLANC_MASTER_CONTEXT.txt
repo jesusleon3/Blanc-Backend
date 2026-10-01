@@ -915,17 +915,69 @@ PARTE IV — DECISIONES
     P3   RN-COT-04: valores de duracion faltantes y significado de "+15 min".
          Bloquea dar por terminado el motor de duracion, no iniciarlo.
 
-  BLOQUEANTES ANTES DE FASE 2 (Agenda)
-    P2   Estado `completada` de Cita: cuando se considera oficialmente
-         completada. Bloquea la maquina de estados de Cita (P3 del cierre).
-    P4   Baja de manicurista: que ocurre con sus citas futuras ya asignadas.
-    P10  Reconfirmacion de FIFO estricto en lista de espera.
+  BLOQUEANTES ANTES DE FASE 2 (Agenda)   *** TODAS RESUELTAS 2026-09-30 ***
+    P2   [RESUELTA] Estado `completada`: automatica por paso del tiempo, sin
+         notificacion a la clienta. Opcion (a). -> DEC-030.
+         Abre N-02: carrera con `no_show`, que es manual.
+    P4   [RESUELTA] Baja de manicurista: BLOQUEO DURO, lanza excepcion si hay
+         citas futuras. Opcion (a). -> DEC-032.
+         Modifica DesactivarManicuristaUseCase, ya implementado en Fase 1.
+         Abre N-04: que estados cuentan como "cita futura".
+    P10  Reconfirmacion de FIFO estricto en lista de espera. (sigue abierta,
+         no bloqueante)
 
   BLOQUEANTES ANTES DE FASE 4 (Conversacion IA)
     P1   RN-CONV-10: cuando vuelve el control al bot tras intervencion humana.
     P9   RN-CONV-08: umbral exacto de "cliente molesto".
     P6   Capacidad real de recepcion humana ante escalamiento masivo.
     P8   Presupuesto de mensajeria de WhatsApp y limite de gasto de IA.
+
+  *** RONDA DE RESPUESTAS DE LA DUENA — 2026-09-30 ***
+
+  Directriz rectora: SISTEMA HIBRIDO. Automatizar la agenda basica; que el
+  sistema se apoye en recepcion y gerencia para casos complejos, disenos y
+  cotizaciones. No es preferencia de producto: es restriccion de diseno. El
+  sistema debe poder DETENERSE y pedir que decida un humano, sin dejar la cita
+  inconsistente ni el horario bloqueado.
+
+  CINCO REGLAS APROBADAS  ->  DEC-030..DEC-034
+    1. `completada` automatica por paso del tiempo, sin notificacion.  DEC-030
+    2. Capacidad fisica estricta por sucursal (Zibata 5, Lomas 3, Alamos 1)
+       via patron de SILLAS VIRTUALES.                                 DEC-031
+    3. Baja de manicurista con citas futuras: bloqueo duro.            DEC-032
+    4. Disenos especiales: flag `requiere_cotizacion_manual`.          DEC-033
+    5. Anticipo expirado libera el espacio.                            DEC-034
+
+  EL PATRON DE SILLAS VIRTUALES — por que existe
+    La restriccion anti-doble-booking es EXCLUDE USING gist sobre
+    manicurista_id. En PostgreSQL NULL = NULL evalua a NULL, no a TRUE, asi que
+    una restriccion EXCLUDE NUNCA se dispara entre dos filas con NULL. Dejar
+    manicurista_id nulo para las citas sin preferencia habria permitido citas
+    simultaneas ILIMITADAS sin que la base protestara: sobreventa silenciosa.
+    Solucion: `agenda.sillas` (estacion fisica; el numero de filas por sucursal
+    ES la capacidad) y se invierte el modelo — toda cita ocupa exactamente una
+    silla, SIEMPRE, y la manicurista es opcional. silla_id es NOT NULL, asi que
+    la restriccion siempre tiene un valor real que comparar. Dos restricciones
+    para dos escaseces distintas: silla_id (espacio fisico) y manicurista_id con
+    WHERE ... IS NOT NULL explicito (persona nombrada). Recepcion reasigna al
+    llegar la clienta con un UPDATE, que la segunda restriccion valida sola.
+    Detalle: docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md §2.
+
+  CUATRO PREGUNTAS NUEVAS  (PROJECT_STATUS.md §14.3)
+    N-01  Capacidad fisica vs. personal en turno. 5 sillas con 3 manicuristas
+          aceptaria 5 citas y dos clientas sin quien las atienda.   [Duena]
+    N-02  Carrera `completada`/`no_show`: ventana de gracia o sobrescritura.
+                                                                    [Duena]
+    N-03  Que significa operativamente "la automatizacion se detiene". [Duena+Arq]
+    N-04  Que estados cuentan como "cita futura".                   [Arquitectura]
+
+  SIGUE BLOQUEADO, SIN CAMBIO
+    - RN-COT-04: ambiguedad del "+15 min" del drill, y LA TABLA NUMERICA
+      ORIGINAL NO ESTA EN EL REPOSITORIO (hay que recuperarla de la reunion).
+    - Pregunta 11: alcance por defecto de sucursales por rol. El codigo hoy se
+      comporta de DOS MANERAS CONTRADICTORIAS (escrituras filtran, lecturas no).
+    - Maquinas de Conversacion y TicketEscalamiento (Fase 4). La segunda ni
+      siquiera tiene valores de estado propuestos.
 
   IMPORTANTES, NO BLOQUEANTES
     P5   RN-SUC-04: modelo de Google Calendar.

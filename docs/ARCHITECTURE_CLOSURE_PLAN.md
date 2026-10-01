@@ -69,6 +69,16 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 - **Fase que bloquea:** Fase 2 (Agenda).
 - **¿Puede resolverse durante desarrollo?** No.
 
+> **RESUELTO (2026-09-30) — `DEC-031`.** La Dueña fijó un límite físico estricto por sucursal
+> (Zibatá 5, Lomas 3, Álamos 1). De los 5+ modelos igualmente válidos que `DM-11` no pudo
+> desempatar, la decisión de negocio selecciona el de **capacidad física finita**, modelado con el
+> patrón de **Sillas Virtuales**: toda cita ocupa exactamente una silla (`NOT NULL`), la manicurista
+> es opcional, y la capacidad deja de ser una regla que la aplicación recuerde para pasar a ser una
+> consecuencia aritmética del esquema. Detalle en `FASE_2_AGENDA_ARQUITECTURA.md` §2.
+>
+> **Abierto nuevo (`N-01`):** las sillas no son el único límite — falta decidir qué ocurre cuando
+> hay más sillas que personal en turno.
+
 ### P5 — Corregir la dependencia circular Agenda↔Anticipos en el catálogo de Decision Flows
 
 - **¿Por qué sigue abierto?** `FL-ANT-01` invoca `FL-AGE-09` directamente, contradiciendo tanto `01-domain-discovery.md` §4 ("Anticipos: Consumidor... de Agenda") como el diagrama unidireccional de `03-technical-architecture.md` §4.1.
@@ -167,8 +177,8 @@ Este documento se escribió el 2026-07-16, antes de que existieran `PLATFORM_ARC
 |---|---|---|---|---|---|
 | P1 — Conjunto Supabase / BD / ORM / Auth | Desarrollo | `03-technical-architecture.md` | ~~Fase 1 completa~~ Ninguna | **Resuelto (2026-08-04)** | Ninguna — Supabase (BD/Auth/Storage/Realtime) + Drizzle + Railway. Validación en producción de Auth/Railway pendiente como tarea de Fase 1 |
 | P2 — `PA-19` (alcance RBAC) | Cliente | `RN-SEG-03`, `99-open-questions.md` | ~~Fase 1 (modelo de permisos), `05-api-design.md`~~ Ninguna | **Resuelto (2026-08-04)** | Ninguna — `RN-SEG-03: Aprobada`, transcrito a `99-open-questions.md` en Paso 11 |
-| P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | Fase 2, Fase 4 | Abierto (con avance documental — ver §1) | Diseñar con las precisiones ya identificadas |
-| P4 — Invariante de capacidad sin manicurista | Cliente + Arquitectura | `01-domain-discovery.md`, `decision-flows-catalogo-diseno.md` | Fase 2 | Abierto | Decisión de negocio + modelado |
+| P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | Fase 2, Fase 4 | **Abierto — parcialmente desbloqueado (2026-09-30)**: `Cita` tiene ya disparador de `completada` (`DEC-030`) y lista de estados que ocupan horario (`DEC-034`); `Conversación` y `TicketEscalamiento` siguen intactas | Cerrar `Cita` (falta `pendiente_confirmacion`); las otras dos esperan a Fase 4 |
+| P4 — Invariante de capacidad sin manicurista | Cliente + Arquitectura | `01-domain-discovery.md`, `decision-flows-catalogo-diseno.md` | ~~Fase 2~~ Ninguna | **Resuelto (2026-09-30)** | Ninguna — límite físico por sucursal (Zibatá 5, Lomas 3, Álamos 1) + patrón de Sillas Virtuales, `DEC-031` |
 | P5 — Circular Agenda↔Anticipos | Arquitectura | `decision-flows-catalogo-diseno.md` | Fase 2/3 | Abierto | Corregir una fila del catálogo |
 | P6 — Ratificar F-27 y F-14 | Arquitectura + Cliente | ADR nuevo + enmienda ADR-007/017/022 | Fase 4 | Abierto | Redactar y aprobar |
 | P7 — Sign-off ADR-008 | Cliente | `ADR-008-*.md` | Fase 4 + trámite Meta | Abierto | Aprobación explícita |

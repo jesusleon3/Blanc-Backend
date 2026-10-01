@@ -42,7 +42,10 @@ Ambas superficies quedan bloqueadas en el mismo punto: sin que la Dueña elija (
 
 ## Bloqueantes antes de Fase 2
 
-### Pregunta 2 — Estado `completada` de `Cita`: ¿cuándo se considera oficialmente completada?
+### Pregunta 2 — Estado `completada` de `Cita`: ¿cuándo se considera oficialmente completada? — ~~Abierta~~ **RESUELTA (2026-09-30)**
+
+> **Respuesta:** opción **(a)** — la transición es **automática por el paso del tiempo**, y además **no emite notificación a la clienta**. Formalizada en `DEC-030` (`PROJECT_STATUS.md` §5); diseño en `FASE_2_AGENDA_ARQUITECTURA.md` §3.
+> **Abierto que generó (`N-02`):** `no_show` es manual y `completada` automática, y se pisan — falta decidir entre ventana de gracia o permitir que `no_show` sobrescriba. Afecta a `RN-CRM-06`.
 **Contexto:** la Dueña ya confirmó que `no_show` es un disparador **manual** (lo marca un empleado) y que dispara la sugerencia de lista roja si ocurre dentro de los 60-0 minutos antes de la cita. Sobre `completada` dijo textualmente: *"se toma como completado cuando no haya un inconveniente con la cita"* — frase que admite dos lecturas distintas.
 **Regla/documento afectado:** `RN-AGE-14` (a crear, `01-agenda.md`), máquina de estados de `Cita` (`01-domain-discovery.md`, en diseño activo), evento de dominio `CitaCompletada`.
 **Por qué importa:** es la pregunta de mayor apalancamiento de todo el proyecto — desbloquea en cascada cuatro entregables a la vez (el propio `RN-AGE-14`, el cierre de la máquina de estados de `Cita`, el evento `CitaCompletada`, y la entrada a la Fase de Garantías, que depende de ese evento).
@@ -84,7 +87,11 @@ Ambas superficies quedan bloqueadas en el mismo punto: sin que la Dueña elija (
 
 ## Importantes pero no bloqueantes
 
-### Pregunta 4 — Baja de manicurista: ¿qué ocurre con sus citas futuras ya asignadas?
+### Pregunta 4 — Baja de manicurista: ¿qué ocurre con sus citas futuras ya asignadas? — ~~Abierta~~ **RESUELTA (2026-09-30)**
+
+> **Respuesta:** opción **(a)** — **bloqueo duro**: el sistema lanza excepción si la manicurista tiene citas futuras. Nada se cancela ni reasigna automáticamente. Formalizada en `DEC-032`; diseño en `FASE_2_AGENDA_ARQUITECTURA.md` §4.
+> **Nota:** modifica `DesactivarManicuristaUseCase`, ya implementado en Fase 1 y que hoy no verifica nada. Requiere un puerto entre Bounded Contexts (Agenda → Sucursales y Personal), no un `JOIN`.
+> **Abierto que generó (`N-04`):** qué estados cuentan como "cita futura".
 **Contexto:** nunca se le formuló esta pregunta a la Dueña — es una "pregunta implícita" que el proyecto está asumiendo de facto sin haberla registrado nunca (`DISCOVERY_CHECKLIST.md` §4.3).
 **Regla/documento afectado:** nuevo Rule ID en `docs/business-rules/09-sucursales-configuracion.md` (no creado — requiere tu autorización aparte, ver Grupo B).
 **Por qué importa:** sin definición, el cálculo de disponibilidad puede quedar con citas "huérfanas" sin comportamiento definido.
@@ -143,8 +150,18 @@ Ambas superficies quedan bloqueadas en el mismo punto: sin que la Dueña elija (
 
 | Bucket | Preguntas |
 |---|---|
-| Bloqueantes antes de Fase 1 (completar, no iniciar) | 2 (Preguntas 3, 11) |
-| Bloqueantes antes de Fase 2 | 1 (Pregunta 2) |
+| Bloqueantes antes de Fase 1 (completar, no iniciar) | 2 (Preguntas 3 *parcial*, 11) |
+| Bloqueantes antes de Fase 2 | ~~1~~ **0** — Pregunta 2 resuelta (`DEC-030`) |
 | Bloqueantes antes de Fase 4 | 2 (Preguntas 1, 5) |
-| Importantes, no bloqueantes | 6 (Preguntas 4, 6, 7, 8, 9, 10) |
-| **Total** | **11** |
+| Importantes, no bloqueantes | ~~6~~ **5** — Pregunta 4 resuelta (`DEC-032`) |
+| **Total original** | **11** — 2 resueltas el 2026-09-30, 1 parcialmente (Pregunta 3 vía `DEC-033`) |
+
+**Actualización 2026-09-30 — ronda de respuestas de la Dueña.** Se resolvieron las Preguntas 2 y 4,
+y parcialmente la 3 (`DEC-033` cierra el hueco de las celdas sin valor numérico; la ambigüedad del
+"+15 min" y la recuperación de la tabla original siguen abiertas). Se resolvió además **`P4`** de
+`ARCHITECTURE_CLOSURE_PLAN.md` (capacidad sin manicurista → `DEC-031`), que **nunca figuró entre
+estas 11 preguntas** pese a bloquear Fase 2 y requerir decisión de negocio — el hueco de
+catalogación que ya se había señalado al extraer los bloqueos para el documento ejecutivo.
+
+**Cuatro preguntas nuevas** (`N-01`..`N-04`) nacieron de estas respuestas; viven en
+`PROJECT_STATUS.md` §14.3 y en `FASE_2_AGENDA_ARQUITECTURA.md` §8.
