@@ -927,7 +927,11 @@ PARTE IV — DECISIONES
          no bloqueante)
 
   BLOQUEANTES ANTES DE FASE 4 (Conversacion IA)
-    P1   RN-CONV-10: cuando vuelve el control al bot tras intervencion humana.
+    P1   [RESUELTA 2026-10-09] RN-CONV-10: el modo permanece en HUMANO
+         INDEFINIDAMENTE hasta que alguien lo libere. Opcion (b). Literal de la
+         Duena: "si una conversacion queda muda, se queda asi hasta que haya
+         respuesta o se le pase al bot por medio del humano". Era la pregunta
+         de MAYOR RIESGO DE NEGOCIO de toda la lista. -> DEC-038, seccion IV.5.
     P9   RN-CONV-08: umbral exacto de "cliente molesto".
     P6   Capacidad real de recepcion humana ante escalamiento masivo.
     P8   Presupuesto de mensajeria de WhatsApp y limite de gasto de IA.
@@ -978,6 +982,120 @@ PARTE IV — DECISIONES
       comporta de DOS MANERAS CONTRADICTORIAS (escrituras filtran, lecturas no).
     - Maquinas de Conversacion y TicketEscalamiento (Fase 4). La segunda ni
       siquiera tiene valores de estado propuestos.
+
+  *** CONTEXTO OPERATIVO CONFIRMADO — 2026-10-09 ***  [DEC-036..DEC-042]
+
+  DIRECTRIZ QUE LO GOBIERNA TODO: CERO SUPERFICIE WEB PARA LA CLIENTA.
+  Todo ocurre dentro de la conversacion de WhatsApp. No hay liga de
+  agendamiento, no hay liga de pago, no hay portal. El panel administrativo es
+  la UNICA interfaz web, y es interna. Hasta ahora esto se decia de palabra
+  pero NO estaba escrito en ningun documento.
+
+  LAS SIETE DECISIONES
+    DEC-036  Submodulo "Horarios y Ausencias" (fase posterior). Horario base
+             fijo por manicurista + excepcion diaria (ausencia, salida
+             temprana, cobertura en otra sucursal). Es la fuente de datos que
+             DEC-035 necesitaba y no tenia. OJO: la cobertura cruzada obliga a
+             que la pertenencia a sucursal sea POR DIA, no estatica — un solo
+             registro cambia la capacidad de DOS sucursales.
+    DEC-037  Walk-ins: raros, pero se registran manualmente por Duena o
+             Encargada y CONSUMEN una Silla Virtual en tiempo real. Sin
+             prioridad sobre las citas. Preserva que la garantia
+             anti-doble-booking sea cierta sobre la realidad FISICA.
+    DEC-038  WhatsApp doble canal. Ver bloque aparte, abajo.
+    DEC-039  El rol Gerente se RENOMBRA a Encargada. Una por sucursal; la
+             Duena opera sobre las tres. NO hay recepcionistas: el rol
+             Recepcionista existe en el modelo pero sin titular real.
+    DEC-040  iPad de la manicurista: SOLO LECTURA. Ve su agenda y los precios,
+             no ve lista roja, no marca llegada ni fin. Sin conexion anota en
+             EXCEL, fuera de la plataforma.
+    DEC-041  SIN pasarela de pago. Anticipo = porcentaje del servicio (exacto
+             sin definir), transferencia manual, confirmacion humana.
+    DEC-042  Bloque de politicas operativas. Ver tabla en PROJECT_STATUS.md.
+
+  *** ADDENDUM 2026-10-09 (mismo dia): DEC-043 REEMPLAZA LO QUE SIGUE ***
+  El cliente decidio usar la API OFICIAL DE META (Cloud API) EN EXCLUSIVA: "el
+  riesgo de baneo por usar APIs no oficiales es inaceptable". Acepta que eso
+  DESCONECTA los numeros de la app movil de WhatsApp Business.
+  => El patron del eco descrito abajo queda SUPERSEDED y se conserva solo como
+     registro. No habia nada malo en el diseno: el PROBLEMA dejo de existir.
+     Sin app movil no hay segundo emisor; la colision es imposible por
+     construccion, no gestionada. N-05, N-06 y N-07 cerrados por no aplicar.
+  => ADR-008 pasa a Accepted (Enmienda 1) y P7 queda RESUELTO. Esto REVIERTE la
+     peticion del 2026-08-03 de tener DOS adaptadores configurables: habra uno.
+  => LO QUE CAMBIA EL PLAN DE ENTREGA: hasta ahora, si el panel de Blanc
+     fallaba, el equipo seguia teniendo WhatsApp en el celular. ESA RED
+     DESAPARECE. El panel es el UNICO lugar desde donde se puede responder a
+     una clienta. Por tanto la BANDEJA COMPARTIDA deja de ser comodidad de
+     Fase 4 y pasa a ser CONDICION DE PUESTA EN MARCHA: ningun numero puede
+     migrarse antes de que la bandeja este en produccion y probada.
+  => La VENTANA DE 24 HORAS pasa a ser restriccion dura: fuera de ella solo se
+     escribe con plantilla preaprobada DE PAGO. Choca con los recordatorios
+     (obligatorios), los avisos de lista de espera y los escalamientos que
+     "esperan a manana". Pregunta 8 (presupuesto) YA NO ES APLAZABLE.
+  => EL HISTORIAL EXISTENTE NO MIGRA. No hay mecanismo por API. Blanc arranca
+     con historial vacio por clienta.
+  => Riesgo que cambia de naturaleza: desaparece el de baneo, aparece
+     DEPENDENCIA OPERATIVA TOTAL del panel — una caida ya no degrada el
+     servicio, lo INTERRUMPE. Tratar en ADR-011 y ADR-012.
+  => Pendientes nuevos N-13..N-16. Detalle:
+     docs/architecture/WHATSAPP_ARQUITECTURA_CANAL.md
+
+  [SUPERSEDED] EL PATRON DEL ECO — como se resolvia el doble uso de WhatsApp
+    Problema: el personal seguira usando la app de WhatsApp Business en el
+    celular Y los numeros actuales se conservan. Sin diseno, la clienta recibe
+    DOS respuestas contradictorias el primer dia y la plataforma no se entera.
+    Pedirles "que no lo hagan" no es un diseno: es una esperanza.
+
+    Regla: si sale un mensaje de la conversacion que el BOT NO ENVIO, lo envio
+    un humano -> bot_pausado = true SOLO en esa conversacion.
+    Se distingue comparando el identificador del mensaje saliente contra el
+    registro de envios de la plataforma. No es heuristica de contenido.
+    La pausa es POR CONVERSACION, jamas global (exigencia literal de la Duena).
+    Reanudar es SIEMPRE manual, coherente con RN-ESC-03.
+
+    *** SUPUESTO SIN VERIFICAR QUE PUEDE INVALIDARLO ***
+    El eco no existe en todos los proveedores. Con la API oficial de Meta en
+    modo clasico, dar de alta el numero en la Cloud API LO DESCONECTA de la app
+    de WhatsApp Business: el problema desaparece, pero se incumple la condicion
+    de la Duena de seguir usando el celular. El mecanismo exige el modo de
+    COEXISTENCIA de Meta (sin verificar) o Evolution API.
+    => Esta verificacion FUERZA la decision de ADR-008, abierta desde el inicio.
+    Mitigacion de diseno: la deteccion vive en el ADAPTADOR, no en el dominio,
+    para que el diseno sobreviva vaya como vaya ADR-008.
+    Detalle y los 7 escenarios: docs/architecture/WHATSAPP_ARQUITECTURA_CANAL.md
+
+  REGLAS YA APROBADAS QUE ESTO MODIFICA  (no son adiciones)
+    RN-AGE-13  Decia FIFO "gana la primera en confirmar" = CARRERA, avisando a
+               varias. Ahora: oferta SECUENCIAL, una sola clienta, 1 HORA para
+               responder (plazo configurable). El orden FIFO sobrevive; la
+               carrera desaparece.
+    RN-AGE-07  Expiracion por evento + AHORA tambien por plazo de 1 hora.
+    RN-CRM-03  Decia que la cancelacion de lista roja requiere aprobacion, lo
+               que implicaba que las demas SI podian cancelar solas. Ahora
+               NINGUNA clienta cancela sola: la distincion pierde sentido.
+    RN-ANT-03  Sin cambio, pero ahora con cara visible: sin pasarela y con
+               confirmacion humana, una clienta puede transferir y PERDER el
+               hueco igual si confirman antes a otra.
+
+  TRES CONSECUENCIAS INCOMODAS (correctas, pero no evidentes)
+    - Una clienta BLOQUEADA que escriba de madrugada recibe SILENCIO ABSOLUTO:
+      el bot no le responde nada y no se escala fuera de horario.
+    - El silencio de la lista roja TIENE UNA FUGA: no se le avisa, pero se le
+      empieza a pedir anticipo cuando antes no. El cambio de trato se nota.
+    - El recorte de servicio por retraso NO TIENE PRECIO DEFINIDO, y el
+      cotizacion_snapshot es inmutable por diseno.
+
+  RIESGO ACEPTADO NUEVO: EL SISTEMA CONOCE LO COTIZADO, NO LO EJECUTADO
+    DEC-040 deja el registro real de servicios en un Excel fuera de la
+    plataforma, y la Duena confirma que se anaden servicios con la clienta ya
+    sentada. Por tanto TODO reporte de ingresos o productividad que salga de la
+    plataforma es una ESTIMACION, no un hecho contable. Analitica (Fase 6)
+    hereda este techo.
+
+  PENDIENTES NUEVOS: N-05..N-12 (PROJECT_STATUS.md §15.5). El mas urgente es
+  N-07: verificar la coexistencia app+API en la cuenta real de Meta, porque
+  bloquea ADR-008 y DEC-038.
 
   IMPORTANTES, NO BLOQUEANTES
     P5   RN-SUC-04: modelo de Google Calendar.

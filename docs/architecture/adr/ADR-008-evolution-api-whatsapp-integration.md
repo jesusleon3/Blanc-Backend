@@ -4,7 +4,31 @@
 Estrategia de integración con WhatsApp: API oficial de WhatsApp Business Platform como decisión primaria — Evolution API rechazada como integración principal
 
 ## Status
-Proposed — **respuesta del cliente recibida (`DISCOVERY_CHECKLIST.md` 1.29, 2026-08-03), pero no aprueba la Decision tal como está escrita.** El cliente pide un alcance distinto al de la Opción B exclusiva (ver nota post-Context). Este ADR **no pasa a Accepted** hasta que se rediseñe y se reescriba formalmente con autorización explícita — no es una simple ratificación.
+**Accepted (2026-10-09)** — ver "Enmienda 1" más abajo.
+
+*Historial:* estuvo `Proposed` desde su redacción. El 2026-08-03 el cliente respondió pidiendo **dos adaptadores configurables** (oficial + Evolution), lo que cambiaba el alcance sin aprobar la Decision original, y el ADR quedó explícitamente pendiente de rediseño. El 2026-10-09 el cliente **revirtió esa petición** y decidió la API oficial en exclusiva, lo que **ratifica la Decision original tal como estaba escrita** y cierra `P7` de `ARCHITECTURE_CLOSURE_PLAN.md`.
+
+---
+
+## Enmienda 1 (2026-10-09) — decisión final del cliente: API oficial en exclusiva
+
+**Decisión literal:** *"el riesgo de baneo por usar APIs no oficiales (como Baileys o Evolution API) es inaceptable. El sistema Blanc utilizará estrictamente la API Oficial de Meta (Cloud API). Entendemos y aceptamos que esto desconecta los números de las apps móviles nativas de WhatsApp Business."*
+
+**Qué queda sin efecto.** La petición de `DISCOVERY_CHECKLIST.md` 1.29 — *"que exista la posibilidad de usar las dos… en la configuración decidamos"* — **se anula**. No habrá adaptador de Evolution API ni mecanismo de selección por configuración. `Decision`, `Options Considered` y `Alternatives Rejected` de este ADR **recuperan su validez tal como están redactados**, sin reescritura.
+
+**Lo que el cliente acepta explícitamente a cambio:** que los números **dejen de funcionar en la app móvil de WhatsApp Business**. Es consecuencia inevitable de dar de alta un número en la Cloud API, no una restricción que Blanc imponga.
+
+**Consecuencias que esta enmienda añade a la sección `Consequences`:**
+
+1. **La Bandeja Compartida pasa de comodidad a requisito de puesta en marcha.** Al desaparecer la app móvil, el panel de Blanc queda como **el único lugar desde el que se puede responder a una clienta**. Ningún número puede migrarse antes de que exista una bandeja funcional en producción: el momento de la migración es exactamente aquel en que el celular deja de servir.
+2. **La ventana de 24 horas deja de ser un detalle y pasa a ser restricción dura.** Afecta a tres flujos ya aprobados —recordatorios, avisos de lista de espera y escalamientos que "esperan a mañana"—, que fuera de esa ventana exigen plantilla preaprobada y de pago.
+3. **El historial de conversaciones existente no migra.** No existe un mecanismo por API para trasladar los hilos que hoy viven en los celulares. Blanc arranca con historial vacío por clienta.
+4. **`Pregunta 8` (presupuesto de mensajería) deja de ser aplazable.** Con integración no oficial el costo por mensaje no existía; con la Cloud API condiciona cuántos recordatorios son viables.
+5. **Se elimina de raíz el problema de colisión bot/humano** que `DEC-038` había diseñado resolver mediante detección de "ecos". Sin app móvil no hay segundo emisor. `DEC-038` queda `SUPERSEDED`.
+
+**Riesgo que esta decisión cambia de naturaleza, no elimina:** el riesgo de bloqueo de número por uso de protocolo no oficial —motivo central de este ADR— desaparece. A cambio aparece una **dependencia operativa total del panel de Blanc**: una caída de la plataforma ya no degrada el servicio, lo interrumpe, porque no queda canal alternativo. Debe tratarse como tal en `ADR-011` (observabilidad) y `ADR-012` (despliegue).
+
+**Trazabilidad:** `DEC-043` en `PROJECT_STATUS.md` §5; diseño en `docs/architecture/WHATSAPP_ARQUITECTURA_CANAL.md`.
 
 ## Context
 El stack de referencia entregado por el cliente propone **Evolution API** para la integración de WhatsApp. Evolution API es una solución open-source que opera sobre el protocolo no oficial de WhatsApp Web (vía librerías como Baileys), no sobre la API oficial de Meta (WhatsApp Business Platform / Cloud API). El Domain Discovery ya marcó esto como riesgo técnico con impacto de negocio directo: cada una de las 3–4 sucursales depende de **un único número de WhatsApp** como único canal de agendamiento, sin canal de respaldo declarado.

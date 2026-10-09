@@ -181,7 +181,7 @@ Este documento se escribió el 2026-07-16, antes de que existieran `PLATFORM_ARC
 | P4 — Invariante de capacidad sin manicurista | Cliente + Arquitectura | `01-domain-discovery.md`, `decision-flows-catalogo-diseno.md` | ~~Fase 2~~ Ninguna | **Resuelto (2026-09-30)** | Ninguna — límite físico por sucursal (Zibatá 5, Lomas 3, Álamos 1) + patrón de Sillas Virtuales, `DEC-031` |
 | P5 — Circular Agenda↔Anticipos | Arquitectura | `decision-flows-catalogo-diseno.md` | Fase 2/3 | Abierto | Corregir una fila del catálogo |
 | P6 — Ratificar F-27 y F-14 | Arquitectura + Cliente | ADR nuevo + enmienda ADR-007/017/022 | Fase 4 | Abierto | Redactar y aprobar |
-| P7 — Sign-off ADR-008 | Cliente | `ADR-008-*.md` | Fase 4 + trámite Meta | Abierto | Aprobación explícita |
+| P7 — Sign-off ADR-008 | Cliente | `ADR-008-*.md` | ~~Fase 4 + trámite Meta~~ Ninguna | **Resuelto (2026-10-09)** | Ninguna — API oficial en exclusiva (`DEC-043`); `ADR-008` pasa a `Accepted` con Enmienda 1. Revierte la petición de doble adaptador de 1.29. **Dispara el trámite de Meta: ahora es camino crítico** |
 | P8 — `05-api-design.md` | Arquitectura | `05-api-design.md` (ya existe, parcial) | Módulos sin contrato específico todavía | Abierto (parcialmente iniciado) | Redactar contratos módulo por módulo |
 | P9 — `usuarios↔manicuristas_recurso` | Arquitectura | `04-data-model.md` | Rol Manicurista (Fase 1/2) | Abierto | Agregar columna |
 

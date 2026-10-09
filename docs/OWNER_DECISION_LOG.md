@@ -60,7 +60,12 @@ Ambas superficies quedan bloqueadas en el mismo punto: sin que la Dueña elija (
 
 ## Bloqueantes antes de Fase 4
 
-### Pregunta 1 — RN-CONV-10: ¿cuándo vuelve el control al bot tras una intervención humana por inactividad?
+### Pregunta 1 — RN-CONV-10: ¿cuándo vuelve el control al bot tras una intervención humana por inactividad? — ~~Abierta~~ **RESUELTA (2026-10-09)**
+
+> **Respuesta: opción (b)** — el `modo` permanece en `humano` **indefinidamente** hasta que un empleado lo libere explícitamente. Literal de la Dueña: *"si una conversación queda muda, se queda así hasta que haya respuesta o se le pase al bot por medio del humano"*.
+> Confirma además que **el bot responde 24/7 pero no escala 24/7**, y que la pausa es **por conversación, nunca global** — *"debe ser individual para que no se queden mensajes sin responder"*.
+> Era la pregunta marcada como **de mayor riesgo de negocio** de toda esta lista. Formalizada en `DEC-038` y **conservada por `DEC-043`**, que la supersede en el mecanismo pero no en esta respuesta: el modo sigue siendo manual de liberar. Diseño en `WHATSAPP_ARQUITECTURA_CANAL.md`.
+> **Mitigación exigida:** la respuesta acepta que una conversación quede muda. Para que *muda* no signifique *invisible*, la pausa debe abrir ticket — ver escenario E5 del diseño.
 **Contexto:** ya está resuelto que el retorno de control al bot **siempre requiere una acción explícita de un empleado** cuando el empleado decide devolverlo (`RN-ESC-03`, ya `Aprobada`, no se reabre aquí). Lo que sigue sin resolver es distinto: qué pasa con el `modo` de una conversación después de un período de **inactividad** tras haber escalado a humano — la Dueña confirmó el modelo de identidad de conversación persistente (2026-08-03) pero no este punto específico, y ella misma invitó a repreguntar ("si hay dudas quiero que me las preguntes").
 **Regla/documento afectado:** `RN-CONV-10` (`06-conversacion-ia.md`), máquina de estados de `Conversación` (`01-domain-discovery.md`, en diseño activo).
 **Por qué importa:** es la ruta directa hacia el peor escenario de negocio ya identificado en la revisión adversarial del proyecto (DM-C: una clienta que escribe y no recibe respuesta de nadie, ni bot ni humano).
@@ -134,7 +139,10 @@ Ambas superficies quedan bloqueadas en el mismo punto: sin que la Dueña elija (
 **Prioridad:** Baja.
 **Opciones posibles:** no aplica — requiere palabras clave/umbrales específicos del negocio, no una elección entre alternativas de diseño.
 
-### Pregunta 10 — Reconfirmación de FIFO estricto en lista de espera
+### Pregunta 10 — Reconfirmación de FIFO estricto en lista de espera — ~~Abierta~~ **RESUELTA (2026-10-09)**
+
+> **Respuesta:** FIFO **sí**, pero con una mecánica distinta a la que se suponía. No hay carrera: se avisa **a una sola clienta a la vez**, con **1 hora** para responder; sin respuesta, pasa a la siguiente. El plazo debe ser **configurable**.
+> **Esto modifica `RN-AGE-13`**, que decía *"gana la primera en confirmar"* — lo que implicaba avisar a varias simultáneamente. El orden FIFO sobrevive; la carrera desaparece. Ver `PROJECT_STATUS.md` §15.3.
 **Contexto:** la Dueña confirmó FIFO para la prioridad general de agenda (`RN-AGE-13`, 2026-08-03: "el primero que conteste"), pero esto se infiere por consistencia para la lista de espera específicamente (`RN-AGE-07`) — nunca se confirmó de forma literal para ese caso.
 **Regla/documento afectado:** `RN-AGE-07` (`01-agenda.md`).
 **Por qué importa:** confirma si el mismo criterio aplica sin excepción a la lista de espera.
@@ -165,3 +173,14 @@ catalogación que ya se había señalado al extraer los bloqueos para el documen
 
 **Cuatro preguntas nuevas** (`N-01`..`N-04`) nacieron de estas respuestas; viven en
 `PROJECT_STATUS.md` §14.3 y en `FASE_2_AGENDA_ARQUITECTURA.md` §8.
+
+**Actualización 2026-10-09 — ronda de contexto operativo.** Se resolvieron además las
+**Preguntas 1 y 10**, con lo que de las 11 originales quedan **4 abiertas**: la 3 (parcial —
+`RN-COT-04`), la 5 (Google Calendar), la 8 (presupuesto de WhatsApp, ahora con dirección pero sin
+cifra), la 9 (umbral de clienta molesta) y la 11 (alcance de sucursales por rol). Las Preguntas 6 y
+7 siguen siendo no bloqueantes y dependen de terceros (capacidad operativa real y validación
+jurídica).
+
+Esa ronda abrió **ocho pendientes nuevos** (`N-05`..`N-12`), registrados en `PROJECT_STATUS.md`
+§15.5. El más urgente es **`N-07`**: verificar en la cuenta real de Meta si existe coexistencia
+entre la app de WhatsApp Business y la Cloud API — **bloquea `ADR-008` y `DEC-038`**.

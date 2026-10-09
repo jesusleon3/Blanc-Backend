@@ -451,6 +451,157 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 
 ---
 
+### DEC-036 — Submódulo "Horarios y Ausencias": la fuente de datos que `DEC-035` necesitaba
+**Estado actual:** `CLOSED` (decisión de negocio + alcance, 2026-10-09). Cierra el **Hueco A** detectado en la auditoría operativa.
+**Historial:**
+- **2026-10-09:** `DEC-035` definió la capacidad real como `MIN(sillas_libres, manicuristas_activas)`, pero **no existía ninguna fuente para `manicuristas_activas`** — `Manicurista` solo guarda nombre, `activa` y sucursales asignadas. Era una fórmula sin datos.
+
+  **Respuestas de la Dueña:** las manicuristas tienen **horario fijo**, no rotativo; **todas trabajan al mismo tiempo**, sin entradas escalonadas; **sí pueden cubrir en otra sucursal** un día suelto; y la ausencia *"se tiene que poder capturar en el sistema para tener certeza y exigir reagendar"*.
+
+  **Decisión:** se planea un submódulo **Horarios y Ausencias** (fase posterior, no Fase 2) con dos conceptos separados: el **horario base** por manicurista (fijo, semanal) y la **excepción diaria** (ausencia, salida temprana, cobertura en otra sucursal). `MotorDisponibilidad` cruza sillas libres contra el resultado de aplicar las excepciones del día al horario base.
+
+  **Por qué "horario fijo" NO simplifica tanto como parece:** que todas trabajen a la vez elimina el cálculo de solapamiento de turnos, pero la **cobertura cruzada** sí obliga a que la pertenencia a una sucursal sea *por día*, no estática. Si Ana, de Zibatá, cubre hoy en Lomas, Zibatá pierde una persona **y** Lomas gana una: dos sucursales cambian de capacidad con un solo registro. Es el caso que impide resolverlo con un simple booleano de ausencia.
+
+  **Explícitamente NO decidido:** si la excepción se captura por la Encargada o por la Dueña; con cuánta antelación; y si el sistema debe *exigir* el reagendamiento de las citas afectadas o solo alertar. La Dueña dijo "exigir reagendar o ver la manera de resolverlo" — las dos cosas, sin elegir.
+
+---
+
+### DEC-037 — Walk-ins: registro manual que consume una Silla Virtual
+**Estado actual:** `CLOSED` (decisión de negocio, 2026-10-09). Cierra el **Hueco B**.
+**Historial:**
+- **2026-10-09:** el patrón de Sillas Virtuales (`DEC-031`) asume que **toda** ocupación pasa por el sistema. Una clienta sin cita que se sienta invalida esa premisa: la silla está ocupada físicamente y libre para el sistema.
+
+  **Respuestas de la Dueña:** los walk-ins son **raros** (*"es poco o no pasa"*), pero existen; **se tienen que registrar en el momento**, por la Dueña o la Encargada; y **no tienen prioridad** sobre las citas agendadas.
+
+  **Decisión:** el walk-in se registra manualmente en la plataforma y **consume una Silla Virtual en tiempo real**, igual que cualquier cita. No es un tipo de entidad nuevo: es una cita creada en el momento.
+
+  **Lo que esto preserva:** la garantía anti-doble-booking de la base de datos sigue siendo cierta *sobre la realidad física*, no solo sobre lo agendado — que era exactamente el riesgo.
+
+  **Riesgo residual, aceptado:** la garantía depende de que alguien registre el walk-in **antes** de que la clienta se siente. Si se registra después, o no se registra, el sistema puede haber vendido ese hueco en el intervalo. Es un riesgo de proceso, no de software, y su baja frecuencia lo hace tolerable.
+
+  **Explícitamente NO decidido:** si un walk-in exige dar de alta a la clienta o admite un registro mínimo (sin teléfono, sin historial).
+
+---
+
+### DEC-038 — WhatsApp de doble canal: el mensaje saliente ajeno pausa el bot en esa conversación
+**Estado actual:** ~~`CLOSED`~~ **`SUPERSEDED` por `DEC-043` (2026-10-09, mismo día).** El diseño era correcto para el escenario que atendía, pero ese escenario **dejó de existir**: con la Cloud API el número se desconecta de la app móvil, no hay segundo emisor y la colisión se vuelve imposible por construcción, no gestionable. Se conserva el registro porque documenta un problema real y una verificación de plataforma (`N-07`) que fue precisamente la que llevó a tomar la decisión definitiva. Sus pendientes `N-05`, `N-06` y `N-07` quedan **cerrados por no aplicar**.
+**Historial:**
+- **2026-10-09:** la Dueña confirma que **el personal seguirá usando la app de WhatsApp Business en su celular** y que los **números actuales se conservan** (ya tienen clientas reales). Sin diseño, la clienta recibiría dos respuestas contradictorias el primer día, y la plataforma no se enteraría.
+
+  **Decisión:** la plataforma escucha los eventos de **mensaje saliente** del proveedor. Si sale un mensaje cuyo identificador **no está en el registro de envíos de la plataforma**, lo envió un humano → se fija `bot_pausado = true` **solo en esa conversación**. Es comparación de identificadores, no heurística de contenido.
+
+  **La pausa es por conversación, jamás global** — exigencia literal de la Dueña: *"debe ser individual para que no se queden mensajes sin responder"*. Una pausa global dejaría cuarenta hilos mudos por una sola intervención.
+
+  **Reanudar es siempre manual**, coherente con `RN-ESC-03` ya aprobada.
+
+  ⚠️ **Supuesto sin verificar que puede invalidar el mecanismo:** el eco de mensajes salientes **no existe en todos los proveedores**. Con la **API oficial de Meta en modo clásico**, dar de alta el número en la Cloud API **lo desconecta de la app de WhatsApp Business** — el problema desaparece, pero se incumple la condición de la Dueña de seguir usando el celular. El mecanismo requiere o bien el **modo de coexistencia** de Meta (sin verificar si está disponible para estos números) o bien **Evolution API**. Ver `WHATSAPP_ARQUITECTURA_CANAL.md` §3.
+
+  **Consecuencia:** esta verificación **fuerza la decisión de `ADR-008`**, abierta desde el inicio del proyecto. Deja de ser una preferencia técnica y pasa a ser "qué proveedor permite el modo de trabajo que el negocio dice que va a tener".
+
+  **Detalle completo, con los siete escenarios:** `docs/architecture/WHATSAPP_ARQUITECTURA_CANAL.md`.
+
+---
+
+### DEC-039 — El rol `Gerente` se renombra a `Encargada`
+**Estado actual:** `CLOSED` (decisión de negocio, 2026-10-09).
+**Historial:**
+- **2026-10-09:** *"Cambia el rol de gerente por encargada"*. Hay **una Encargada por sucursal**, y la Dueña puede operar sobre las tres.
+
+  **Es un renombrado, no un rol nuevo:** las capacidades no cambian. Afecta al `enum Rol` (hoy `GERENTE`), a la tabla de roles de `functional-scope.md`, a `RN-SEG-*` y a los textos de interfaz.
+
+  **Por qué importa más de lo que parece:** `DEC-031` dice que *"recepción reasigna la manicurista al llegar la clienta"*. Se preguntó quién hace eso en Álamos, de una sola silla. La respuesta cierra el hueco: **no hay recepcionistas; hay una Encargada en cada sucursal**, y es ella quien asigna. El rol `Recepcionista` sigue existiendo en el modelo pero **no corresponde a ninguna persona real hoy**.
+
+  **Explícitamente NO decidido:** si `Recepcionista` debe eliminarse del modelo o conservarse como rol previsto sin titular.
+
+---
+
+### DEC-040 — El iPad de la manicurista es de solo lectura; el registro real de servicios vive fuera del sistema
+**Estado actual:** `CLOSED` (decisión de negocio, 2026-10-09), **con una consecuencia grave aceptada**.
+**Historial:**
+- **2026-10-09:** un iPad **por manicurista**. Ve **su propia agenda** y **los precios**; **no** ve la lista roja. **No marca llegada ni finalización** — `completada` sigue siendo automática por paso del tiempo (`DEC-030`), sin que ella confirme nada. Sin conexión no opera: *"ellas pueden anotar los servicios que prestaron offline, por medio de Excel"*.
+
+  **Decisión:** el iPad **no produce ninguna mutación de estado en el backend**. Es un consumidor de lectura.
+
+  **Lo bueno:** elimina de raíz el conflicto de dos fuentes de verdad sobre el fin de una cita, que era el riesgo que motivó la pregunta.
+
+  ⚠️ **La consecuencia que hay que asumir con los ojos abiertos:** *"anotar los servicios prestados"* es, literalmente, **el registro de lo que de verdad ocurrió** — y vive en un Excel fuera de la plataforma. Por tanto:
+  - El sistema conoce lo **cotizado**, no lo **ejecutado**. Si la clienta añadió un servicio ya sentada (cosa que la Dueña confirma que pasa: *"se hace ahí mismo"*), el sistema nunca se entera.
+  - **Cualquier reporte de ingresos o de productividad calculado desde la plataforma será una estimación**, no un hecho. El `cotizacion_snapshot` no es la facturación.
+  - El módulo de **Analítica** (Fase 6) hereda este límite. Conviene decidir ahora si eso es aceptable o si en algún momento el Excel debe entrar al sistema.
+
+  Queda registrado como `ACCEPTED_RISK` en §7.
+
+---
+
+### DEC-041 — Sin pasarela de pago: anticipo porcentual por transferencia con confirmación humana
+**Estado actual:** `CLOSED` (decisión de negocio, 2026-10-09).
+**Historial:**
+- **2026-10-09:** *"No, no necesitamos pasarela de pago, el pago es aparte"*. El anticipo es un **porcentaje del servicio** (porcentaje exacto **sin definir**), se cobra por **transferencia manual**, y la confirmación **se escala a un humano**.
+
+  **Decisión:** no se integra ninguna pasarela. El sistema **no cobra**: registra que alguien confirmó que el dinero llegó.
+
+  **Consecuencias de diseño:**
+  - El estado `en_espera_pago` **no se resuelve solo**: depende de una acción humana. Combinado con `RN-ANT-03` —el horario *no* se retiene mientras tanto— significa que una clienta de lista roja puede transferir y perder igual el hueco si otra paga y la confirman antes. **Es el comportamiento ya aprobado**, pero conviene que el negocio sepa que ahora tiene una cara visible.
+  - El cobro del servicio es **al terminar** y ocurre **fuera del sistema**; las **propinas sí se registran**, lo que implica que algo del cobro sí entra — falta definir dónde y quién.
+
+  **Explícitamente NO decidido:** el porcentaje exacto; dónde se registran las propinas; y qué evidencia se guarda de la transferencia (captura, folio, nada).
+
+---
+
+### DEC-042 — Políticas operativas de citas confirmadas
+**Estado actual:** `CLOSED` (decisiones de negocio, 2026-10-09). Varias **modifican reglas ya aprobadas** — ver §15.3.
+**Historial:**
+- **2026-10-09:** bloque de respuestas operativas de la Dueña. Se registran juntas por pertenecer a un mismo cuerpo de decisión; cada una se propagará a su `RN-` correspondiente en una iteración posterior.
+
+  | Tema | Regla confirmada |
+  |---|---|
+  | **Tolerancia de retraso** | **15 minutos**, pero **lo decide la Encargada** caso por caso. Pasado el margen **se atiende recortando el servicio**, nunca invadiendo la cita siguiente |
+  | **Sobretiempo** | Si un servicio se alarga, **la cita siguiente no se mueve**; se compensa trabajando más rápido. La plataforma **no lo registra** |
+  | **Servicio añadido en sitio** | Se hace ahí mismo si queda tiempo. **Invisible para el sistema** (ver `DEC-040`) |
+  | **Cancelar** | **Siempre pasa por una persona**, también las clientas normales. Sin penalización si faltan más de 60 min, pero **todas las cancelaciones se registran** para detectar propensión y **sugerir** lista roja |
+  | **Cancelar ≠ reagendar** | Son acciones distintas: al cancelar **se pregunta si quiere reagendar** |
+  | **Tope de reagendamientos** | **3** por cita |
+  | **Lista de espera** | **El bot la ofrece**. Se avisa **a una sola clienta a la vez**, con **1 hora** para responder; sin respuesta, pasa a la siguiente. El plazo debe ser **configurable** |
+  | **Compatibilidad de hueco** | Si el hueco liberado es **más corto** que el servicio deseado, **no se ofrece** |
+  | **Hueco liberado a <30 min** | Se asume perdido, pero **se avisa a la Dueña** por si quiere aprovecharlo |
+  | **Lista roja** | **Solo la Dueña** puede marcarla. Es **interna y silenciosa**: no se avisa a la clienta. Se sale **manualmente** |
+  | **Bloqueada** | Se **deriva directamente a un humano** y el bot **no responde absolutamente nada** |
+  | **Bot** | Responde **24/7**, pero **no escala 24/7**: fuera de horario, el escalamiento espera a la mañana siguiente |
+  | **Temas vedados al bot** | Quejas de servicio mal hecho, reclamos de dinero, precios especiales y clientas en lista roja |
+  | **Transparencia** | **No se revela** que es un asistente automático |
+  | **Escalamiento** | Llega a la **Dueña o a la Encargada**, y debe poder **reasignarse** entre ellas |
+  | **Identidad** | Un mismo número puede corresponder a **varias clientas** (madre e hija). Desde un número nuevo se pide **nombre y número anterior**. La lista roja es **global** entre sucursales |
+  | **Citas simultáneas de dos amigas** | **Dos citas independientes**, no un bloque atómico |
+  | **Segunda cita futura** | Permitida; **se avisa en el mismo mensaje** que ya tiene otra próxima |
+  | **Menores** | Se atienden, **sin autorización** |
+  | **Especialización** | **No existe**: todas las manicuristas hacen todos los servicios |
+  | **Números de WhatsApp** | **Uno por sucursal**, confirmado. Se **conservan** los actuales (tienen clientas reales); la migración está sin resolver |
+
+---
+
+### DEC-043 — API oficial de Meta en exclusiva y Bandeja Compartida como canal único
+**Estado actual:** `CLOSED` (decisión técnica del cliente, 2026-10-09). **Resuelve `ADR-008` y `P7`**, abiertos desde el inicio del proyecto. Sustituye a `DEC-038`.
+**Historial:**
+- **2026-10-09:** *"el riesgo de baneo por usar APIs no oficiales (como Baileys o Evolution API) es inaceptable. El sistema Blanc utilizará estrictamente la API Oficial de Meta (Cloud API). Entendemos y aceptamos que esto desconecta los números de las apps móviles nativas de WhatsApp Business."*
+
+  **Revierte una petición previa del propio cliente.** El 2026-08-03 (`DISCOVERY_CHECKLIST.md` 1.29) había pedido **dos adaptadores configurables** — *"que exista la posibilidad de usar las dos… en la configuración decidamos"*. Esa petición **queda anulada**: habrá un solo adaptador. Se registra para que nadie reabra el doble adaptador creyendo que sigue vigente. `ADR-008` pasa a `Accepted` con "Enmienda 1" y recupera su `Decision` original sin reescritura.
+
+  **Por qué elimina el problema en vez de resolverlo:** dar de alta un número en la Cloud API **lo desconecta de la app de WhatsApp Business**. Si la app no puede emitir, no existe un segundo emisor: la colisión bot/humano que `DEC-038` detectaba se vuelve **imposible por construcción**. Además, el historial de conversación pasa a ser completo —todo el tráfico cruza el backend— y la autoría de cada mensaje es directa en vez de inferida.
+
+  🔴 **La consecuencia que cambia el plan de entrega:** hasta ahora el handoff humano tenía una red de seguridad implícita — si el panel de Blanc fallaba, el equipo seguía teniendo WhatsApp en el celular. **Esa red desaparece.** El panel queda como el **único lugar desde el que se puede responder a una clienta**. Por tanto:
+  - La **Bandeja Compartida** deja de ser una comodidad de Fase 4 y pasa a ser **condición de puesta en marcha**.
+  - **Ningún número puede migrarse antes de que la bandeja esté en producción y probada.** El momento de la migración es exactamente aquel en que el celular deja de servir; invertir ese orden deja al salón incomunicado.
+
+  **La ventana de 24 horas pasa a ser restricción dura.** Fuera de ella solo se puede escribir con plantilla preaprobada y de pago. Choca con tres flujos ya aprobados: los recordatorios de 24h (obligatorios según la Dueña), los avisos de lista de espera (`DEC-042`) y los escalamientos que *"esperan a mañana"* — si una clienta escribe el sábado por la noche y se le responde el lunes, la respuesta humana ya no es libre.
+
+  **El historial existente no migra.** No hay mecanismo por API para trasladar los hilos que hoy viven en los celulares. Blanc arranca con historial vacío por clienta. La Dueña había anticipado la duda (*"probablemente se tenga que hacer migración o si no ver la manera"*); la respuesta honesta es que **no hay manera por API**.
+
+  **Riesgo que cambia de naturaleza, no desaparece:** se elimina el riesgo de bloqueo de número por protocolo no oficial —motivo central de `ADR-008`— y a cambio aparece una **dependencia operativa total del panel**. Una caída ya no degrada el servicio: lo interrumpe, porque no queda canal alternativo. Debe tratarse como tal en `ADR-011` y `ADR-012`.
+
+  **Detalle completo:** `docs/architecture/WHATSAPP_ARQUITECTURA_CANAL.md`.
+
+---
+
 ---
 
 ## 6. Elementos explícitamente `OUT_OF_SCOPE` (por incremento, no en general)
@@ -479,6 +630,16 @@ No son "no implementados a secas" — son exclusiones deliberadas y ya verificad
 `FL-SEG-05` establece `activa=false` en `identidad_accesos.usuarios`, pero mientras `FL-SEG-06` no exista, **nada en el sistema consulta esa columna para autorizar** — ni `JwtAuthGuard`, ni ningún hook de claims (que no existe todavía). Un usuario desactivado conserva acceso completo hasta que su access token expire naturalmente, y puede seguir refrescando su sesión indefinidamente.
 **Estado:** `ACCEPTED_RISK`, no un bug de `FL-SEG-05` — es una consecuencia explícita y documentada del alcance por etapas, aceptada conscientemente por el cliente (2026-08-23).
 **Mitigación futura:** `FL-SEG-06` (y que el mecanismo de claims que ahí se construya efectivamente respete `activa`).
+
+### Riesgo: el sistema conoce lo COTIZADO, no lo EJECUTADO — `ACCEPTED_RISK` (2026-10-09)
+
+`DEC-040` fija que el iPad de la manicurista es de solo lectura y que ella **anota los servicios realmente prestados en un Excel, fuera de la plataforma**. La Dueña confirma además que una clienta puede **añadir un servicio ya sentada** (*"se hace ahí mismo"*) y que el sobretiempo **no se registra**.
+
+**Consecuencia:** el `cotizacion_snapshot` de una cita es lo que se *estimó al agendar*, no lo que se *hizo ni lo que se cobró*. Cualquier cifra de ingresos o productividad que salga de la plataforma es una **estimación**, no un hecho contable.
+
+**Por qué se acepta:** cerrar la brecha exigiría que la manicurista capture en el sistema, lo que la Dueña descartó explícitamente —el iPad no hace mutaciones y el registro offline en Excel es el flujo real del negocio.
+
+**Dónde duele más adelante:** el módulo de **Analítica** (Fase 6) hereda este techo. Antes de construirlo hay que decidir conscientemente si sus reportes se presentan como estimaciones o si el Excel debe incorporarse de alguna forma.
 
 ### Riesgo: el bloqueo duro de baja de manicurista **no protege nada todavía** — `ACCEPTED_RISK` (2026-09-30)
 
@@ -887,3 +1048,76 @@ Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñ
 ### 14.5 Prerrequisito técnico — ya resuelto
 
 El invariante anti-doble-booking exige `btree_gist`, `tstzrange` y `EXCLUDE USING gist`. `pg-mem` no soporta ninguno de los tres, lo que habría hecho imposible probar el módulo. Desde el 2026-09-15 las pruebas corren contra **PostgreSQL real** (Testcontainers) y `postgres-de-prueba.smoke.spec.ts` verifica la restricción en miniatura. Fase 2 puede empezar a construirse con pruebas reales desde el primer día.
+
+---
+
+## 15. Contexto operativo confirmado — ronda de la Dueña (2026-10-09)
+
+Cierre de la auditoría de contexto operativo. Las respuestas se registran como `DEC-036`..`DEC-042`. Esta sección recoge lo que **no cabe en una decisión aislada**: qué reglas previas quedan modificadas, qué preguntas se cerraron de paso, y qué se abrió.
+
+### 15.1 La directriz que lo gobierna todo
+
+> **Cero superficie web para la clienta.** Todo ocurre dentro de la conversación de WhatsApp: no hay liga de agendamiento, no hay liga de pago, no hay portal.
+
+Hasta ahora esto se mencionaba de palabra pero **no estaba escrito en ningún documento**. Queda asentado. Define el alcance del frontend: el panel administrativo es la **única** interfaz web, y es interna.
+
+### 15.1-bis Addendum (2026-10-09, mismo día) — canal único por API oficial
+
+Posterior a esta ronda, el cliente tomó una decisión técnica que **reemplaza parte de lo diseñado arriba**: la API oficial de Meta en exclusiva (`DEC-043`). Dos efectos que hay que leer junto con lo anterior:
+
+- **`DEC-038` (ecos) queda `SUPERSEDED`.** El personal **no** seguirá usando la app móvil, porque la Cloud API desconecta el número. El problema que ese diseño resolvía deja de existir.
+- **La Bandeja Compartida pasa a ser condición de puesta en marcha**, no una comodidad de Fase 4: sin app móvil, el panel es el único canal para hablar con una clienta.
+
+### 15.2 Preguntas abiertas que estas respuestas cerraron de paso
+
+| Pregunta | Resolución |
+|---|---|
+| **`Pregunta 1` / `PA-15`** — ¿cuándo vuelve el control al bot tras inactividad? *(estaba marcada como la de **mayor riesgo de negocio** de toda la lista)* | **Opción (b)**: el modo permanece en humano **indefinidamente** hasta que alguien lo libere. Literal: *"si una conversación queda muda, se queda así hasta que haya respuesta o se le pase al bot por medio del humano"* |
+| **`Pregunta 10` / `PA-23`** — ¿FIFO estricto en lista de espera? | Sí, pero con **mecánica distinta a la supuesta** — ver §15.3 |
+| **Rol de la Encargada** | Es el `Gerente` renombrado (`DEC-039`) |
+| **Tolerancia de retraso** | 15 minutos, criterio de la Encargada (`DEC-042`) |
+| **Pasarela de pago** | No se necesita (`DEC-041`) |
+
+### 15.3 ⚠️ Reglas ya aprobadas que estas respuestas MODIFICAN
+
+No son adiciones: cambian el contenido de reglas que ya estaban en `Aprobada`. Propagar a sus `RN-` es trabajo pendiente.
+
+| Regla | Decía | Ahora |
+|---|---|---|
+| **`RN-AGE-13`** | FIFO, *"gana la primera en confirmar"* — mecánica de **carrera**, implica avisar a varias a la vez | **Oferta secuencial**: se avisa a **una sola**, con **1 hora** para responder. El orden FIFO sobrevive; **la carrera desaparece**. Cambia el diseño de notificaciones y elimina el costo de marca de decepcionar a nueve |
+| **`RN-AGE-07`** | La solicitud de lista de espera expira **por evento** (se llena el cupo) | Coexisten **dos** expiraciones: por evento **y** por plazo de 1 hora. Gana la primera. El plazo debe ser **configurable en la plataforma** |
+| **`RN-CRM-03`** | La cancelación de una clienta en **lista roja** requiere aprobación de un empleado — lo que implicaba que las demás **sí** podían cancelar solas | **Ninguna clienta cancela sola.** Todas pasan por una persona. La distinción de `RN-CRM-03` **pierde su sentido operativo** y debe revisarse |
+| **`RN-ANT-03`** | El horario no se retiene mientras el anticipo está pendiente | Sin cambio, **pero ahora tiene cara visible**: como no hay pasarela y la confirmación es humana (`DEC-041`), una clienta puede transferir y aun así perder el hueco. Conviene confirmar que el negocio lo asume |
+
+### 15.4 Tres consecuencias incómodas que conviene mirar de frente
+
+Ninguna es un error: las tres se derivan correctamente de decisiones que la Dueña tomó. Pero no son evidentes hasta que se combinan.
+
+- **Una clienta bloqueada que escriba de madrugada recibe silencio absoluto.** `DEC-042` dice que a las bloqueadas el bot **no les responde nada** y las deriva a un humano, y que **no se escala fuera de horario**. A las 3am eso suma cero respuesta hasta la mañana. Puede ser exactamente lo deseado —es una clienta bloqueada— pero conviene que sea una elección, no un descubrimiento.
+- **El silencio de la lista roja tiene una fuga.** Es interna y no se avisa a la clienta (`DEC-042`), pero a una clienta recién marcada **se le empieza a pedir anticipo** (`RN-ANT-01`) cuando antes no se le pedía. El cambio de trato es perceptible aunque la etiqueta no se mencione.
+- **El recorte de servicio por retraso no tiene precio definido.** `DEC-042` establece que a quien llega tarde *"se le atiende recortando el servicio"*. No está definido si paga completo, si se recotiza, ni qué pasa con el `cotizacion_snapshot`, que es inmutable por diseño (`RN-AGE-08`). Queda como pendiente.
+
+### 15.5 Pendientes nuevos
+
+| # | Pendiente | Responde | Bloquea |
+|---|---|---|---|
+| ~~`N-05`~~ | ~~Qué eventos salientes cuentan como intervención humana~~ | — | **CERRADO: no aplica** (`DEC-043`) |
+| ~~`N-06`~~ | ~~Demora deliberada para mitigar la carrera bot/humano~~ | — | **CERRADO: no aplica** (`DEC-043`) |
+| ~~`N-07`~~ | ~~Verificar coexistencia app + API en Meta~~ | — | **CERRADO: no aplica** — la decisión de usar Cloud API en exclusiva lo vuelve irrelevante (`DEC-043`) |
+| `N-13` | **Verificar el modelo de precios vigente de Meta** y correr escenarios de costo | Externa + Dueña | `Pregunta 8`, diseño de notificaciones |
+| `N-14` | Inventario y redacción de las **plantillas**, con sus variables, para someterlas a aprobación de Meta | Dueña + Arquitectura | Fase 4 |
+| `N-15` | Plan de **migración de los 3 números**, con ventana de corte y aviso a clientas | Dueña | Puesta en marcha |
+| `N-16` | Alcance mínimo de la **Bandeja Compartida** necesario para poder migrar | Arquitectura | **Puesta en marcha** |
+| `N-08` | Porcentaje exacto del anticipo | Dueña | `RN-ANT-01` |
+| `N-09` | Qué se cobra cuando se recorta un servicio por retraso (§15.4) | Dueña | `RN-AGE-08` |
+| `N-10` | Dónde se registran las propinas, si el cobro ocurre fuera del sistema | Dueña + Arquitectura | Analítica |
+| `N-11` | Palabras con las que una clienta pide hablar con un humano — *la Dueña la dejó explícitamente como `PENDIENTE`* | Dueña | `RN-ESC-01` |
+| `N-12` | Si el rol `Recepcionista` se elimina del modelo o se conserva sin titular | Arquitectura | `enum Rol` |
+
+### 15.6 Sigue bloqueado, sin cambio
+
+- **`RN-COT-04`**: la ambigüedad del "+15 min" del drill y, sobre todo, que **la tabla numérica original no está en el repositorio**.
+- **`Pregunta 11`**: alcance por defecto de sucursales por rol. El código sigue comportándose de dos maneras contradictorias según si lee o escribe.
+- **`Pregunta 8`** (presupuesto de WhatsApp): sigue abierta, pero **ya no es aplazable** tras `DEC-043`. Con una integración no oficial el costo por mensaje no existía; con la Cloud API condiciona cuántos recordatorios son viables. La Dueña dio dirección —*"sí se asume el costo, pero que sea el menor posible"*, con recordatorios **obligatorios**— pero hace falta el análisis de precios y escenarios (`N-13`), no una cifra a ojo.
+- **`Pregunta 9` / `PA-14`**: umbral exacto de "clienta molesta".
+- **Máquinas de `Conversación` y `TicketEscalamiento`**: `Conversación` avanza mucho con la resolución de `Pregunta 1` y con `DEC-038`; `TicketEscalamiento` sigue sin valores de estado propuestos.
