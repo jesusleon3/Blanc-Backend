@@ -25,8 +25,17 @@ import { Database } from '../connection';
  * sobre un PostgreSQL limpio, algo que este proyecto nunca había verificado.
  */
 
-/** Esquemas creados por las migraciones. `drizzle` (control de migraciones) se excluye a propósito. */
-const ESQUEMAS_DE_NEGOCIO = ['sucursales_personal', 'auditoria', 'identidad_accesos', 'catalogo_cotizacion'];
+/**
+ * Esquemas que NO se vacían entre pruebas: los del sistema y el de control de migraciones de
+ * Drizzle — truncar este último obligaría a volver a migrar en cada llamada.
+ *
+ * La lista de esquemas a vaciar se **descubre consultando la base**, no se escribe a mano. Antes
+ * era una constante y provocó un fallo real: al añadir el esquema `agenda` nadie actualizó la
+ * lista, sus tablas dejaron de vaciarse y las filas se acumulaban entre pruebas del mismo worker,
+ * haciendo fallar aserciones correctas por datos sobrantes. Descubrirlos elimina ese pie de
+ * fallo para siempre: un esquema nuevo queda cubierto sin tocar este archivo.
+ */
+const ESQUEMAS_NO_VACIABLES = ['drizzle', 'public', 'information_schema'];
 
 let conexionDelWorker: { db: Database; cliente: postgres.Sql; tablas: string[] } | null = null;
 
@@ -80,8 +89,9 @@ async function provisionarBaseDelWorker(): Promise<{ db: Database; cliente: post
   const filas = await cliente.unsafe<{ tabla: string }[]>(
     `SELECT format('%I.%I', schemaname, tablename) AS tabla
        FROM pg_tables
-      WHERE schemaname = ANY($1)`,
-    [ESQUEMAS_DE_NEGOCIO as unknown as string],
+      WHERE schemaname NOT LIKE 'pg\\_%'
+        AND schemaname <> ALL($1)`,
+    [ESQUEMAS_NO_VACIABLES as unknown as string],
   );
 
   return { db, cliente, tablas: filas.map((f) => f.tabla) };

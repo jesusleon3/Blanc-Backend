@@ -1121,3 +1121,67 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 - **`Pregunta 8`** (presupuesto de WhatsApp): sigue abierta, pero **ya no es aplazable** tras `DEC-043`. Con una integración no oficial el costo por mensaje no existía; con la Cloud API condiciona cuántos recordatorios son viables. La Dueña dio dirección —*"sí se asume el costo, pero que sea el menor posible"*, con recordatorios **obligatorios**— pero hace falta el análisis de precios y escenarios (`N-13`), no una cifra a ojo.
 - **`Pregunta 9` / `PA-14`**: umbral exacto de "clienta molesta".
 - **Máquinas de `Conversación` y `TicketEscalamiento`**: `Conversación` avanza mucho con la resolución de `Pregunta 1` y con `DEC-038`; `TicketEscalamiento` sigue sin valores de estado propuestos.
+
+---
+
+## 16. Handoff / Trabajo Asíncrono
+
+> Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
+
+### 2026-10-09 — Kick-off Fase 2: capa de datos de Agenda
+
+**Alcance cubierto:** esquema, migración y repositorios base del patrón de Sillas Virtuales. **Sin casos de uso ni controladores**, por restricción de la orden.
+
+#### Archivos creados
+
+| Archivo | Qué es |
+|---|---|
+| `src/database/schema/agenda.schema.ts` | Esquema `agenda`: `sillas`, `citas`, `customType` de `tstzrange`, `ESTADOS_CITA`, `ESTADOS_QUE_LIBERAN_HORARIO` |
+| `src/database/migrations/0005_zippy_rawhide_kid.sql` | Tablas + `btree_gist` + `CHECK` de estado + **las dos `EXCLUDE USING gist`** |
+| `src/database/migrations/restricciones-agenda.spec.ts` | **18 pruebas sobre el SQL**, no sobre código de Blanc |
+| `src/modules/agenda/domain/entities/{silla,cita}.entity.ts` | Entidades (deliberadamente anémicas, ver más abajo) |
+| `src/modules/agenda/domain/entities/cita.entity.spec.ts` | 15 pruebas unitarias |
+| `src/modules/agenda/domain/ports/{silla,cita}.repository.ts` | Puertos |
+| `src/modules/agenda/infrastructure/persistence/drizzle-{silla,cita}.repository.ts` | Adaptadores Drizzle |
+| `src/modules/agenda/infrastructure/persistence/drizzle-cita.repository.spec.ts` | 12 pruebas de integración |
+| `src/modules/agenda/agenda.module.ts` | Módulo (solo repositorios; exporta los puertos) |
+
+#### Archivos modificados
+
+- `src/database/schema/index.ts` — exporta el esquema de agenda.
+- `drizzle.config.ts` — `agenda` añadido al `schemaFilter`.
+- `src/app.module.ts` — `AgendaModule` cableado (para que el contenedor valide el arranque).
+- `src/shared/errors/postgres-error.ts` — `esViolacionDeExclusion` (`23P01`) y `nombreDeRestriccion`.
+- `src/database/test-utils/postgres-de-prueba.ts` — **ver el defecto encontrado, abajo**.
+
+#### Pruebas implementadas: **45 nuevas** (434 → **479**, 48 suites)
+
+- **18 sobre las restricciones SQL** — el corazón del entregable. Verifican contra PostgreSQL real que se rechaza el solapamiento en la misma silla; que se acepta en sillas distintas; que **las citas consecutivas no chocan** (el rango es `[inicio, fin)`, con fin exclusivo — con `]` el salón no podría encadenar citas); que con 3 sillas la cuarta cita simultánea se rechaza **sin ningún contador en la aplicación**; que la misma manicurista no puede estar en dos sillas a la vez; que **asignar manicurista por `UPDATE` también queda validado**; y que cada estado ocupa o libera según `DEC-034`.
+- **12 de integración de repositorios** — incluido que el `23P01` crudo **nunca** sale: se traduce a `SILLA_OCUPADA` o `MANICURISTA_OCUPADA` según cuál restricción saltó.
+- **15 unitarias de entidades**.
+
+#### 🐛 Defecto encontrado y corregido (no estaba en la orden)
+
+Las pruebas de exclusión fallaron de forma desconcertante: *"manicuristas distintas en el mismo horario"* se rechazaba, cuando no debía. La causa **no era la restricción** sino el helper de pruebas: `ESQUEMAS_DE_NEGOCIO` era una lista escrita a mano y **nadie añadió `agenda`**, así que sus tablas no se vaciaban entre pruebas y las filas se acumulaban dentro del mismo worker.
+
+**Arreglado de raíz:** la lista de esquemas a vaciar ahora **se descubre consultando la base**, excluyendo solo `drizzle`, `public`, `information_schema` y los `pg_*`. Un esquema nuevo queda cubierto sin tocar ese archivo. Era un pie de fallo que habría mordido a quien añadiera el próximo Bounded Context.
+
+#### ⚠️ Divergencias respecto a la orden — decididas a favor de lo ya aprobado
+
+Tres puntos de la orden chocaban con arquitectura ya documentada. Resolví a favor de lo documentado; **si discrepas, los tres son de cambio barato ahora y caro después**.
+
+| La orden decía | Implementado | Por qué |
+|---|---|---|
+| `rango_horario` **`tsrange`** | **`tstzrange`** | `DEC-031` lo fija así y todo el resto del esquema usa `timestamp with time zone`. Mezclar un rango sin zona obligaría a castear en cada comparación y abre la puerta a comparar una hora "de pared" con un instante absoluto |
+| `estado` como **`enum`** | **`text` + `CHECK`** | Añadir un valor a un `enum` exige `ALTER TYPE … ADD VALUE`, que **no corre dentro de la transacción** en la que Drizzle envuelve cada migración. Y la lista de estados está demostrablemente incompleta (ver abajo), así que se van a añadir valores |
+| `sucursal_id (FK)`, `servicio_id (FK Catálogo)` | **uuid sin FK** | `ADR-005` prohíbe claves foráneas entre esquemas. Solo `silla_id` lleva FK real, porque `sillas` vive en el mismo esquema `agenda` |
+
+#### 🔴 Bloqueos y deuda para el siguiente turno
+
+1. **Faltan 2–3 estados de `Cita`.** La orden fijó seis; `DEC-034` aprobó ocho. **Falta `no_show`**, que `RN-CRM-06` necesita para disparar la sugerencia de lista roja, y el par `pendiente_confirmacion`/`confirmada` que `RN-CONV-11` exige por ser la confirmación interactiva. Añadirlos es editar el `CHECK` y el array `ESTADOS_CITA` — trivial **gracias a** haber evitado el `enum`. **Decidir antes de escribir casos de uso.**
+2. **Las restricciones `EXCLUDE` y el `CHECK` no están en el snapshot de Drizzle.** Drizzle no sabe expresarlos, así que están escritos a mano en `0005`. Consecuencia: `drizzle-kit generate` **no los conoce** y la migración es su única fuente de verdad. Quien cambie la lista de estados debe editar **dos sitios**: el array de TypeScript y el `CHECK` de la migración. No hay nada que lo obligue salvo esta nota y las pruebas.
+3. **Las entidades son anémicas a propósito.** `Cita` no tiene transiciones de estado legales (`P3` sigue sin cerrar), ni valida horario de sucursal, ni corte de mediodía (`RN-AGE-10`), ni duración según catálogo. Existen para que los repositorios tengan algo que mapear.
+4. **`MotorDisponibilidad` no existe.** `SillaRepository.contarActivasPorSucursal()` ya entrega la mitad izquierda de `MIN(sillas_libres, manicuristas_activas)` (`DEC-035`); la mitad derecha **no tiene fuente de datos** hasta que exista el submódulo de Horarios y Ausencias (`DEC-036`).
+5. **`CitaRepository.tieneCitasFuturasQueOcupan()` ya está lista** para que *Sucursales y Personal* sustituya `SinAgendaVerificarCitasFuturasAdapter` (`DEC-032`), que hoy **responde siempre `false` y por tanto no protege nada**. Es un cambio pequeño y de alto valor: buen primer ticket. Antes hay que cerrar `N-04` (qué estados cuentan como "cita futura") — la respuesta probable es reutilizar `ESTADOS_QUE_LIBERAN_HORARIO`, que es justo lo que el repositorio ya hace.
+6. **Sin `cotizacion_snapshot`.** La columna que congelará la cotización (`04-data-model.md` §5.2) no se creó: no estaba en el alcance y depende del motor de cotización (`FL-COT-03`).
+7. **Ninguna migración aplicada a base real.** `0000`–`0005` solo se ejecutan contra el PostgreSQL efímero de las pruebas.

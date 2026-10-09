@@ -11,7 +11,7 @@ export default {
   schema: './src/database/schema/index.ts',
   out: './src/database/migrations',
   dialect: 'postgresql',
-  schemaFilter: ['sucursales_personal', 'auditoria', 'identidad_accesos', 'catalogo_cotizacion'],
+  schemaFilter: ['sucursales_personal', 'auditoria', 'identidad_accesos', 'catalogo_cotizacion', 'agenda'],
   dbCredentials: {
     url: process.env.DATABASE_URL ?? 'postgresql://postgres:password@localhost:5432/blanc',
   },
