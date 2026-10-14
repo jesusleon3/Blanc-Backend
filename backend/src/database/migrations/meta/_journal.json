@@ -57,6 +57,13 @@
       "when": 1792011388147,
       "tag": "0007_maquina_estados_cita",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792012989225,
+      "tag": "0008_excepciones_personal",
+      "breakpoints": true
     }
   ]
 }

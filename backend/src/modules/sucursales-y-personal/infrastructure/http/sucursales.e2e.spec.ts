@@ -17,6 +17,7 @@ import { RolesGuard } from '../../../../shared/auth/roles.guard';
 import { Rol } from '../../../../shared/auth/rol';
 import { HttpExceptionFilter } from '../../../../shared/errors/http-exception.filter';
 import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
+import { VERIFICAR_CITAS_FUTURAS_PORT } from '../../domain/ports/verificar-citas-futuras.port';
 
 const SECRETO = 'secreto-e2e';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -72,8 +73,13 @@ let dbDePrueba: Database;
     { provide: DATABASE_CONNECTION, useFactory: () => dbDePrueba },
     { provide: AUDITORIA_PORT, useClass: DrizzleAuditoriaRepository },
     { provide: UNIT_OF_WORK, useClass: DrizzleUnitOfWork },
+    // El adaptador real vive en `IntegracionModule` (`@Global`), que esta prueba no monta. Se
+    // sustituye por un doble sin citas: estas pruebas no van sobre Agenda. Tiene que ir aquí
+    // dentro —y no en los `providers` raíz— porque `DesactivarManicuristaUseCase` se resuelve en
+    // el inyector de `SucursalesYPersonalModule`, al que el scope raíz no alcanza.
+    { provide: VERIFICAR_CITAS_FUTURAS_PORT, useValue: { tieneCitasFuturas: async () => false } },
   ],
-  exports: [DATABASE_CONNECTION, AUDITORIA_PORT, UNIT_OF_WORK],
+  exports: [DATABASE_CONNECTION, AUDITORIA_PORT, UNIT_OF_WORK, VERIFICAR_CITAS_FUTURAS_PORT],
 })
 class TestInfraModule {}
 

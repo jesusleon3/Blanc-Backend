@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Cita, validarRangoHorario } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
 import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
+import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError } from '../../../../shared/errors/domain-error';
@@ -31,16 +32,19 @@ export interface AgendarCitaInput {
  * de verdad no hay lugar. La autoridad final es siempre la restricción `EXCLUDE`, nunca esta
  * consulta.
  *
- * **Lo que este caso de uso NO valida todavía**, y no por olvido: que el servicio exista y esté
- * activo (exige un puerto hacia Catálogo), que el horario caiga dentro del horario de la sucursal,
- * que no cruce el corte de mediodía (`RN-AGE-10`) y que la duración corresponda a la del servicio
- * (`FL-COT-02`, pospuesto). Son los siguientes incrementos.
+ * **Validaciones delegadas en `MotorDisponibilidad`** (`DEC-035`): horario de la sucursal, corte
+ * de mediodía (`RN-AGE-10`), domingo cerrado (`RN-AGE-12`) y capacidad efectiva cruzando sillas
+ * contra personal operativo.
+ *
+ * **Lo que sigue sin validarse, y no por olvido:** que el servicio exista y esté activo (exige un
+ * puerto hacia Catálogo) y que la duración corresponda a la del servicio (`FL-COT-02`, pospuesto).
  */
 @Injectable()
 export class AgendarCitaUseCase {
   constructor(
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
     @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
+    private readonly motorDisponibilidad: MotorDisponibilidad,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
@@ -49,6 +53,11 @@ export class AgendarCitaUseCase {
     // ANTES de consultar la base: un rango invertido haría que PostgreSQL lanzara un error crudo
     // al construir el `tstzrange` de la consulta, en vez del error de dominio que corresponde.
     validarRangoHorario(input.rangoHorario);
+
+    // Horario de la sucursal (`RN-AGE-10`/`RN-AGE-12`) y capacidad efectiva
+    // `MIN(sillas, manicuristas)` (`DEC-035`). Antes de esto, el caso de uso repartía sillas sin
+    // saber si había manos para atenderlas.
+    await this.motorDisponibilidad.exigirDisponibilidad(input.sucursalId, input.rangoHorario);
 
     const candidatas = await this.sillasCandidatas(input);
 

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { VerificarCitasFuturasPort } from '../../domain/ports/verificar-citas-futuras.port';
-import { CITA_REPOSITORY, CitaRepository } from '../../../agenda/domain/ports/cita.repository';
+import { VerificarCitasFuturasPort } from '../sucursales-y-personal/domain/ports/verificar-citas-futuras.port';
+import { CITA_REPOSITORY, CitaRepository } from '../agenda/domain/ports/cita.repository';
 
 /**
  * Implementación **real** de `VerificarCitasFuturasPort` (`DEC-032`), respaldada por el Bounded

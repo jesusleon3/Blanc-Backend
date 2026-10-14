@@ -149,12 +149,30 @@ describe('Cita — aggregate raíz de Agenda', () => {
         },
       );
 
-      it.each(['completada', 'no_show', 'cancelada', 'expirada', 'reprogramada'] as const)('`%s` es terminal', (estado) => {
+      it.each(['no_show', 'cancelada', 'expirada', 'reprogramada'] as const)('`%s` es terminal', (estado) => {
         const cita = enEstado(estado);
         expect(cita.esTerminal).toBe(true);
 
         for (const destino of ESTADOS_CITA) {
           expect(() => cita.cambiarEstado(destino)).toThrow(expect.objectContaining({ code: 'TRANSICION_ESTADO_INVALIDA' }));
+        }
+      });
+
+      it('`completada` NO es terminal: admite la corrección a `no_show` (N-02)', () => {
+        const cita = enEstado('completada');
+        expect(cita.esTerminal).toBe(false);
+
+        // `completada` la pone un job por paso del tiempo; la Encargada puede descubrir el no-show
+        // horas después. Sin esta salida, ese caso sería incorregible.
+        cita.cambiarEstado('no_show');
+        expect(cita.estado).toBe('no_show');
+      });
+
+      it('pero `completada` solo admite ESA salida: no vuelve a estados activos', () => {
+        for (const destino of ['agendada', 'pendiente_confirmacion', 'confirmada', 'cancelada'] as const) {
+          expect(() => enEstado('completada').cambiarEstado(destino)).toThrow(
+            expect.objectContaining({ code: 'TRANSICION_ESTADO_INVALIDA' }),
+          );
         }
       });
 

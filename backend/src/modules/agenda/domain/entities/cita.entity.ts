@@ -42,7 +42,9 @@ export interface CitaProps {
  *   necesita confirmar sin recordatorio previo, es una transición a añadir conscientemente.
  * - **`agendada → en_espera_pago` NO es legal.** El anticipo se exige al agendar, no después:
  *   `RN-CRM-07` dice que la lista roja no aplica retroactivamente a citas ya confirmadas.
- * - **Los cinco estados terminales no tienen salida.** Incluido `reprogramada`: la cita nueva es
+ * - **`completada → no_show` SÍ es legal**, y es la única salida de un estado de cierre: es una
+ *   corrección administrativa, no un flujo normal. Ver `N-02`.
+ * - **Los otros cuatro terminales no tienen salida.** Incluido `reprogramada`: la cita nueva es
  *   otra fila, enlazada por `citaOrigenId`.
  */
 export const TRANSICIONES_LEGALES: Readonly<Record<EstadoCita, readonly EstadoCita[]>> = {
@@ -50,7 +52,12 @@ export const TRANSICIONES_LEGALES: Readonly<Record<EstadoCita, readonly EstadoCi
   pendiente_confirmacion: ['confirmada', 'completada', 'no_show', 'cancelada', 'reprogramada'],
   confirmada: ['completada', 'no_show', 'cancelada', 'reprogramada'],
   en_espera_pago: ['agendada', 'confirmada', 'expirada', 'cancelada', 'reprogramada'],
-  completada: [],
+  // `N-02` CERRADO (2026-10-14): corrección administrativa. `completada` la pone un job por el
+  // paso del tiempo (`DEC-030`), mientras que `no_show` es manual y la Encargada puede
+  // descubrirlo horas después. Sin esta transición, un no-show detectado a la mañana siguiente
+  // sería incorregible — y `RN-CRM-06` perdería casos reales de sugerencia de lista roja.
+  // No altera los predicados `EXCLUDE`: ambos estados ocupan horario.
+  completada: ['no_show'],
   no_show: [],
   cancelada: [],
   expirada: [],

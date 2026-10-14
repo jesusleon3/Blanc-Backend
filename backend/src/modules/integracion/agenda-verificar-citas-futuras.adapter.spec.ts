@@ -1,16 +1,16 @@
-import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
+import { crearBaseDeDatosDePrueba } from '../../database/test-utils/postgres-de-prueba';
 import { AgendaVerificarCitasFuturasAdapter } from './agenda-verificar-citas-futuras.adapter';
-import { DrizzleCitaRepository } from '../../../agenda/infrastructure/persistence/drizzle-cita.repository';
-import { DrizzleSillaRepository } from '../../../agenda/infrastructure/persistence/drizzle-silla.repository';
-import { DrizzleManicuristaRepository } from '../persistence/drizzle-manicurista.repository';
-import { Cita } from '../../../agenda/domain/entities/cita.entity';
-import { Silla } from '../../../agenda/domain/entities/silla.entity';
-import { Manicurista } from '../../domain/entities/manicurista.entity';
-import { DesactivarManicuristaUseCase } from '../../application/use-cases/desactivar-manicurista.use-case';
-import { ConflictoDeNegocioError } from '../../../../shared/errors/domain-error';
-import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
-import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
-import { EstadoCita } from '../../../../database/schema';
+import { DrizzleCitaRepository } from '../agenda/infrastructure/persistence/drizzle-cita.repository';
+import { DrizzleSillaRepository } from '../agenda/infrastructure/persistence/drizzle-silla.repository';
+import { DrizzleManicuristaRepository } from '../sucursales-y-personal/infrastructure/persistence/drizzle-manicurista.repository';
+import { Cita } from '../agenda/domain/entities/cita.entity';
+import { Silla } from '../agenda/domain/entities/silla.entity';
+import { Manicurista } from '../sucursales-y-personal/domain/entities/manicurista.entity';
+import { DesactivarManicuristaUseCase } from '../sucursales-y-personal/application/use-cases/desactivar-manicurista.use-case';
+import { ConflictoDeNegocioError } from '../../shared/errors/domain-error';
+import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
+import { crearUnitOfWorkFalso } from '../../shared/persistence/test-utils/unit-of-work-falso';
+import { EstadoCita } from '../../database/schema';
 
 const ACTOR: ClaimsUsuario = { sub: 'duena-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';

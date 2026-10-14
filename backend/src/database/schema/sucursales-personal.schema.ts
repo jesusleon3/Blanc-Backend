@@ -2,7 +2,8 @@
  * Esquema Drizzle — Bounded Context "Sucursales y Personal" (`sucursales_personal`).
  * Fuente: 04-data-model.md §5.7, §4.6 (convenciones de tipos), ADR-005 (esquema propio, sin FKs cruzadas).
  */
-import { boolean, date, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, date, index, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { tstzrange } from './tipos-rango';
 import { relations } from 'drizzle-orm';
 
 export const sucursalesPersonalSchema = pgSchema('sucursales_personal');
@@ -86,3 +87,51 @@ export const sucursalesRelations = relations(sucursales, ({ many }) => ({
 export const manicuristasRelations = relations(manicuristas, ({ many }) => ({
   manicuristasSucursales: many(manicuristasSucursales),
 }));
+
+/**
+ * Tipos de excepción al horario base de una manicurista (`DEC-036`).
+ *
+ * El horario base NO se modela: la Dueña confirmó que **todas trabajan al mismo tiempo**, el
+ * horario de su sucursal. Modelar un horario por persona sería inventar flexibilidad que el
+ * negocio no tiene. Lo que sí hay que capturar es la **excepción** de cada día.
+ */
+export const TIPOS_EXCEPCION_PERSONAL = ['ausencia', 'cobertura'] as const;
+export type TipoExcepcionPersonal = (typeof TIPOS_EXCEPCION_PERSONAL)[number];
+
+/**
+ * `sucursales_personal.excepciones_personal` — lo que `DEC-035` necesitaba y no tenía: la fuente
+ * de datos de `manicuristas_activas`.
+ *
+ * DOS TIPOS, UNA TABLA:
+ * - **`ausencia`**: la manicurista no está disponible en ningún sitio durante el rango (faltó,
+ *   se fue temprano). `sucursal_id` es `NULL`: no se ausenta "de una sucursal", se ausenta.
+ * - **`cobertura`**: trabaja en `sucursal_id` durante el rango. Es un movimiento, no una suma:
+ *   **resta capacidad en su sucursal base y la suma en la de destino**. Un solo registro cambia
+ *   la capacidad de DOS sucursales, que es justo lo que hacía imposible resolverlo con un
+ *   booleano de ausencia.
+ *
+ * El rango es `tstzrange`, no una fecha: la Dueña pidió poder registrar también **salidas
+ * anticipadas**, que son media jornada.
+ *
+ * `manicurista_id` lleva FK real porque `manicuristas` vive en este mismo esquema. `sucursal_id`
+ * también, por lo mismo.
+ */
+export const excepcionesPersonal = sucursalesPersonalSchema.table(
+  'excepciones_personal',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    manicuristaId: uuid('manicurista_id')
+      .notNull()
+      .references(() => manicuristas.id, { onDelete: 'cascade' }),
+    tipo: text('tipo').notNull(),
+    /** Solo para `cobertura`: la sucursal donde trabaja ese día. `NULL` en una `ausencia`. */
+    sucursalId: uuid('sucursal_id').references(() => sucursales.id),
+    rango: tstzrange('rango').notNull(),
+    motivo: text('motivo'),
+    creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (tabla) => ({
+    porManicurista: index('excepciones_personal_manicurista_idx').on(tabla.manicuristaId),
+    porSucursal: index('excepciones_personal_sucursal_idx').on(tabla.sucursalId),
+  }),
+);

@@ -6,6 +6,7 @@ import { SucursalesYPersonalModule } from './modules/sucursales-y-personal/sucur
 import { IdentidadYAccesosModule } from './modules/identidad-y-accesos/identidad-y-accesos.module';
 import { CatalogoYCotizacionModule } from './modules/catalogo-y-cotizacion/catalogo-y-cotizacion.module';
 import { AgendaModule } from './modules/agenda/agenda.module';
+import { IntegracionModule } from './modules/integracion/integracion.module';
 import { HealthController } from './shared/health/health.controller';
 
 /**
@@ -23,6 +24,7 @@ import { HealthController } from './shared/health/health.controller';
     IdentidadYAccesosModule,
     CatalogoYCotizacionModule,
     AgendaModule,
+    IntegracionModule,
   ],
   // `HealthController` se declara aquí, no en un módulo propio: no tiene providers, no tiene
   // dependencias y no pertenece a ningún Bounded Context — es infraestructura de despliegue.

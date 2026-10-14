@@ -11,6 +11,8 @@ import { CancelarCitaUseCase } from './application/use-cases/cancelar-cita.use-c
 import { ReprogramarCitaUseCase } from './application/use-cases/reprogramar-cita.use-case';
 import { MarcarNoShowUseCase } from './application/use-cases/marcar-no-show.use-case';
 import { CompletarCitaUseCase } from './application/use-cases/completar-cita.use-case';
+import { MotorDisponibilidad } from './domain/services/motor-disponibilidad';
+import { ConsultarDisponibilidadUseCase } from './application/use-cases/consultar-disponibilidad.use-case';
 
 /**
  * Módulo del Bounded Context **Agenda** (`ADR-001`, `ADR-002`) — kick-off de Fase 2.
@@ -35,7 +37,9 @@ import { CompletarCitaUseCase } from './application/use-cases/completar-cita.use
     ReprogramarCitaUseCase,
     MarcarNoShowUseCase,
     CompletarCitaUseCase,
+    MotorDisponibilidad,
+    ConsultarDisponibilidadUseCase,
   ],
-  exports: [SILLA_REPOSITORY, CITA_REPOSITORY],
+  exports: [SILLA_REPOSITORY, CITA_REPOSITORY, MotorDisponibilidad],
 })
 export class AgendaModule {}

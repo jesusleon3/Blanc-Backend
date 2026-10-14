@@ -13,6 +13,8 @@ import { Cita } from '../../domain/entities/cita.entity';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL' };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -29,6 +31,8 @@ async function preparar(numeroDeSillas = 2) {
   const citaRepo = new DrizzleCitaRepository(db);
   const sillaRepo = new DrizzleSillaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
+  // Horario abierto y personal de sobra: estas pruebas no van sobre disponibilidad.
+  const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso());
   const uow = crearUnitOfWorkFalso();
 
   for (let i = 1; i <= numeroDeSillas; i += 1) {
@@ -39,11 +43,11 @@ async function preparar(numeroDeSillas = 2) {
     citaRepo,
     sillaRepo,
     auditoria,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, uow),
     solicitar: new SolicitarConfirmacionCitaUseCase(citaRepo, auditoria, uow),
     confirmar: new ConfirmarCitaUseCase(citaRepo, auditoria, uow),
     cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow),
-    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, auditoria, uow),
+    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, uow),
     noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow),
     completar: new CompletarCitaUseCase(citaRepo, auditoria, uow),
   };
@@ -284,6 +288,30 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
 
       await expect(completar.ejecutar({ citaId: unaCita.id }, ACTOR)).resolves.toBeDefined();
       await expect(noShow.ejecutar({ citaId: otra.id }, ACTOR)).resolves.toBeDefined();
+    });
+
+    it('N-02: `completada -> no_show` es una corrección válida, no una transición rota', async () => {
+      const { agendar, completar, noShow, citaRepo, auditoria } = await preparar();
+      const cita = await agendar.ejecutar(reserva(), ACTOR);
+
+      // El job marca `completada` por paso del tiempo (`DEC-030`)...
+      await completar.ejecutar({ citaId: cita.id }, ACTOR);
+      // ...y a la mañana siguiente la Encargada descubre que la clienta nunca llegó.
+      await noShow.ejecutar({ citaId: cita.id }, ACTOR);
+
+      expect((await citaRepo.buscarPorId(cita.id))?.estado).toBe('no_show');
+      // Queda rastro de que vino de `completada`: es una corrección, no un no-show de origen.
+      expect(auditoria.registrar).toHaveBeenCalledWith(
+        expect.objectContaining({ detalle: expect.objectContaining({ estadoAnterior: 'completada', estadoNuevo: 'no_show' }) }),
+      );
+    });
+
+    it('pero `no_show -> completada` NO es legal: la corrección va en un solo sentido', async () => {
+      const { agendar, noShow, completar } = await preparar();
+      const cita = await agendar.ejecutar(reserva(), ACTOR);
+      await noShow.ejecutar({ citaId: cita.id }, ACTOR);
+
+      await expect(completar.ejecutar({ citaId: cita.id }, ACTOR)).rejects.toMatchObject({ code: 'TRANSICION_ESTADO_INVALIDA' });
     });
 
     it('auditan el estado anterior, que es lo que permite reconstruir cómo llegó ahí', async () => {

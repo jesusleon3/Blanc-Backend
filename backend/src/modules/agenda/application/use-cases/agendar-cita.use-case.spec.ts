@@ -7,6 +7,8 @@ import { Silla } from '../../domain/entities/silla.entity';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL' };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -26,6 +28,8 @@ async function preparar(numeroDeSillas = 2) {
   const citaRepo = new DrizzleCitaRepository(db);
   const sillaRepo = new DrizzleSillaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
+  // Horario abierto y personal de sobra: estas pruebas no van sobre disponibilidad.
+  const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso());
 
   for (let i = 1; i <= numeroDeSillas; i += 1) {
     await sillaRepo.guardar(Silla.crear({ sucursalId: SUCURSAL, nombre: `Lomas ${i}` }));
@@ -35,7 +39,7 @@ async function preparar(numeroDeSillas = 2) {
     citaRepo,
     sillaRepo,
     auditoria,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, auditoria, crearUnitOfWorkFalso()),
+    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, crearUnitOfWorkFalso()),
     asignar: new AsignarManicuristaEnSucursalUseCase(citaRepo, auditoria, crearUnitOfWorkFalso()),
   };
 }

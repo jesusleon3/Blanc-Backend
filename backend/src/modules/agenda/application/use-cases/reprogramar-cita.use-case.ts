@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Cita, validarRangoHorario } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
 import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
+import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
@@ -44,6 +45,7 @@ export class ReprogramarCitaUseCase {
   constructor(
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
     @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
+    private readonly motorDisponibilidad: MotorDisponibilidad,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
@@ -55,6 +57,10 @@ export class ReprogramarCitaUseCase {
     if (!original) throw new RecursoNoEncontradoError('Cita', input.citaId);
 
     this.validarReglas(original, input, ahora);
+
+    // La cita original se excluye del cálculo: está a punto de liberar su hueco, así que mover una
+    // cita dentro del mismo horario no debe chocar consigo misma.
+    await this.motorDisponibilidad.exigirDisponibilidad(original.sucursalId, input.nuevoRangoHorario, { excluirCitaId: original.id });
 
     const sillaId = await this.elegirSillaLibre(original.sucursalId, input.nuevoRangoHorario, original.id);
 

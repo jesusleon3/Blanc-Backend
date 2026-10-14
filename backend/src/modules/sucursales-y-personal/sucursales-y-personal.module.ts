@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
-import { AgendaModule } from '../agenda/agenda.module';
 import { SucursalesController } from './infrastructure/http/sucursales.controller';
 import { ManicuristasController } from './infrastructure/http/manicuristas.controller';
 import { MantenimientoController } from './infrastructure/http/mantenimiento.controller';
 import { SUCURSAL_REPOSITORY } from './domain/ports/sucursal.repository';
 import { MANICURISTA_REPOSITORY } from './domain/ports/manicurista.repository';
+import { EXCEPCION_PERSONAL_REPOSITORY } from './domain/ports/excepcion-personal.repository';
+import { DrizzleExcepcionPersonalRepository } from './infrastructure/persistence/drizzle-excepcion-personal.repository';
 import { VERIFICAR_CITAS_FUTURAS_PORT } from './domain/ports/verificar-citas-futuras.port';
-import { AgendaVerificarCitasFuturasAdapter } from './infrastructure/agenda/agenda-verificar-citas-futuras.adapter';
 import { DrizzleSucursalRepository } from './infrastructure/persistence/drizzle-sucursal.repository';
 import { DrizzleManicuristaRepository } from './infrastructure/persistence/drizzle-manicurista.repository';
 import { CrearSucursalUseCase } from './application/use-cases/crear-sucursal.use-case';
@@ -29,16 +29,11 @@ import { RemoverManicuristaDeSucursalUseCase } from './application/use-cases/rem
  * esquema de persistencia a otros módulos.
  */
 @Module({
-  // `AgendaModule` exporta `CITA_REPOSITORY`, que consume `AgendaVerificarCitasFuturasAdapter`.
-  // Agenda no depende de este módulo en código, así que la dirección es única y no hay ciclo.
-  imports: [AgendaModule],
   controllers: [SucursalesController, ManicuristasController, MantenimientoController],
   providers: [
     { provide: SUCURSAL_REPOSITORY, useClass: DrizzleSucursalRepository },
     { provide: MANICURISTA_REPOSITORY, useClass: DrizzleManicuristaRepository },
-    // Implementación real contra Agenda (`DEC-032`). El sustituto temporal que respondía
-    // siempre `false` se eliminó: el bloqueo duro ya protege de verdad.
-    { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: AgendaVerificarCitasFuturasAdapter },
+    { provide: EXCEPCION_PERSONAL_REPOSITORY, useClass: DrizzleExcepcionPersonalRepository },
     CrearSucursalUseCase,
     ActualizarConfiguracionSucursalUseCase,
     ListarSucursalesUseCase,
@@ -53,5 +48,7 @@ import { RemoverManicuristaDeSucursalUseCase } from './application/use-cases/rem
     AsignarManicuristaASucursalUseCase,
     RemoverManicuristaDeSucursalUseCase,
   ],
+  // Los exporta para que `IntegracionModule` pueda construir los adaptadores entre contextos.
+  exports: [MANICURISTA_REPOSITORY, SUCURSAL_REPOSITORY, EXCEPCION_PERSONAL_REPOSITORY],
 })
 export class SucursalesYPersonalModule {}

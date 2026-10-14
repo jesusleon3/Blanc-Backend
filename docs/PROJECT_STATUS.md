@@ -1043,7 +1043,7 @@ Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñ
 | # | Pregunta | Responde | Bloquea |
 |---|---|---|---|
 | ~~`N-01`~~ | ~~Capacidad física vs. personal en turno~~ | — | **CERRADO el 2026-09-30** por `DEC-035`: se resuelve en la capa de aplicación (`MotorDisponibilidad`), no en la base de datos |
-| `N-02` | Carrera `completada`/`no_show`: ¿ventana de gracia o sobrescritura? | Dueña | `RN-AGE-14`, `RN-CRM-06` |
+| ~~`N-02`~~ | ~~Carrera `completada`/`no_show`~~ | — | **CERRADO (2026-10-14)**: se habilita `completada → no_show` como corrección administrativa. Sin ventana de gracia: el job marca cuando toca y la Encargada corrige si hace falta |
 | `N-03` | Qué significa operativamente "la automatización se detiene" | Dueña + Arquitectura | Estado `pendiente_cotizacion` |
 | ~~`N-04`~~ | ~~Qué estados cuentan como "cita futura"~~ | — | **CERRADO (2026-10-14)**: reutiliza `ESTADOS_QUE_LIBERAN_HORARIO`, la misma lista que alimenta las restricciones de exclusión |
 
@@ -1135,6 +1135,76 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 ## 16. Handoff / Trabajo Asíncrono
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
+
+### 2026-10-14 (c) — Fase 2 (parte 4): horarios, ausencias y `MotorDisponibilidad`. **Bloqueo 4 CERRADO**
+
+#### 🔴 El problema estructural que había que resolver primero
+
+Agenda y Sucursales y Personal se necesitan **en los dos sentidos**: Personal pregunta por citas futuras (`DEC-032`), Agenda pregunta por personal operativo (`DEC-035`/`DEC-036`). Si cada módulo importara al otro habría un **ciclo de módulos** — que `madge` marcaría y que NestJS solo resolvería con `forwardRef`, una solución que no quita el ciclo, lo esconde.
+
+**Solución: `IntegracionModule`** (`@Global`, mismo mecanismo que `DatabaseModule`). **Ninguno de los dos BC importa al otro**: cada uno declara el puerto que necesita y la integración provee ambos adaptadores. `AgendaVerificarCitasFuturasAdapter` se movió ahí desde Sucursales.
+
+> **Regla para quien añada una dependencia cruzada nueva:** el puerto se define en el módulo que **consume**; el adaptador vive en `IntegracionModule`. Nunca un `import` directo entre dos Bounded Contexts.
+
+#### Archivos creados
+
+| Archivo | Qué es |
+|---|---|
+| `src/database/schema/tipos-rango.ts` | `tstzrange` extraído, ahora lo comparten Agenda y Personal |
+| `src/database/migrations/0008_excepciones_personal.sql` | Tabla + `CHECK` que liga `tipo` con `sucursal_id` |
+| `…/sucursales-y-personal/domain/entities/excepcion-personal.entity.ts` | Ausencias y coberturas |
+| `…/domain/ports/excepcion-personal.repository.ts` + adaptador Drizzle | Persistencia |
+| `…/agenda/domain/ports/contexto-personal.port.ts` | Lo que Agenda pregunta a Personal |
+| `…/agenda/domain/services/motor-disponibilidad.ts` | **`MIN(sillas, manicuristas)` + `RN-AGE-10`/`RN-AGE-12`** |
+| `…/agenda/application/use-cases/consultar-disponibilidad.use-case.ts` | Lectura para el futuro bot |
+| `…/agenda/test-utils/contexto-personal-falso.ts` | Dobles + horario real de Blanc |
+| `src/modules/integracion/` | `IntegracionModule`, `ContextoPersonalAdapter` y el adaptador movido |
+
+#### Archivos modificados
+
+- `cita.entity.ts` — **`completada → no_show`** (`N-02`); `completada` deja de ser terminal.
+- `agenda.schema.ts` / `sucursales-personal.schema.ts` — tipo compartido; tabla de excepciones.
+- `agendar-cita.use-case.ts`, `reprogramar-cita.use-case.ts` — invocan el motor.
+- `sucursales-y-personal.module.ts` — pierde `imports: [AgendaModule]`, gana el repositorio de excepciones y `exports`.
+- `app.module.ts` — `IntegracionModule`.
+- Tres specs ajustados; `sucursales.e2e.spec.ts` ahora provee el puerto en su `TestInfraModule`.
+
+#### Pruebas: **30 nuevas** (648 → **678**, 52 suites)
+
+- **16 de `MotorDisponibilidad`**, con horas **locales** de Querétaro. Incluye el escenario clave que pedía la orden: **3 sillas, 3 manicuristas, 1 ausente → entran 2 citas y la 3ª se rechaza aunque la silla 3 esté físicamente vacía**.
+- **`RN-AGE-10`**: rechaza una cita de 11:00 a 13:00 por cruzar el corte de las 12:00 — el ejemplo literal de la Dueña.
+- **`RN-AGE-12`**: rechaza el domingo. Y **no por una regla en código**: por un día con cero bloques en la configuración. Si mañana abren en domingo, se configura.
+- **12 del `ContextoPersonalAdapter`**: una cobertura **resta en la base y suma en el destino**; una ausencia gana sobre una cobertura; una salida anticipada cuenta por la mañana y no por la tarde; y el `CHECK` rechaza coberturas sin destino.
+- **2 de `N-02`**: `completada → no_show` corrige, y `no_show → completada` **no** es legal.
+
+#### ⚠️ Decisión de diseño que conviene conocer
+
+**Una cita sin manicurista asignada también descuenta una persona.** No descuenta a nadie en concreto, pero alguien tendrá que atenderla cuando la clienta llegue. Ignorarlo haría que el motor ofreciera más huecos de los que hay manos — exactamente lo que `DEC-035` existe para evitar.
+
+**Zona horaria explícita.** El horario de sucursal es **hora de pared**; `tstzrange` guarda **instantes**. Sin fijar `America/Mexico_City` el error no aparecería en pruebas: aparecería en producción, desplazado las horas que separan al servidor de Querétaro.
+
+#### ✅ Bloqueos resueltos
+
+| # | Estado |
+|---|---|
+| **4** `MotorDisponibilidad` no existía | **RESUELTO** — `DEC-035` y `DEC-036` implementados |
+| `N-02` | **CERRADO** — corrección `completada → no_show`, sin ventana de gracia |
+
+#### ⏳ Bloqueos abiertos para el siguiente turno
+
+| # | Sigue pendiente |
+|---|---|
+| **2** | Las `EXCLUDE` y los `CHECK` **no están en el snapshot de Drizzle** — ya son tres migraciones con SQL a mano |
+| **6** | Sin `cotizacion_snapshot` |
+| **7** | Ninguna migración aplicada a base real |
+
+#### Deuda nueva
+
+- **No hay casos de uso para registrar ausencias/coberturas.** El repositorio y la entidad existen y están probados, pero **nadie puede capturarlas todavía**: falta `RegistrarAusenciaUseCase` / `RegistrarCoberturaUseCase` con su auditoría. Sin eso, `DEC-036` está construido pero no es operable.
+- **Sin controladores HTTP en Agenda.** Nada de Fase 2 es alcanzable desde fuera del backend.
+- **El horario base no se valida contra el de la sucursal**: una cobertura puede registrarse en un rango en que la sucursal destino está cerrada. Hoy el motor lo frena al agendar, pero el dato quedaría raro.
+
+---
 
 ### 2026-10-14 (b) — Fase 2 (parte 3): máquina de estados y ciclo de vida. **`P3` CERRADO**
 
