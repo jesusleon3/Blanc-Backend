@@ -67,27 +67,47 @@ export const sillas = agendaSchema.table(
 );
 
 /**
- * Estados de `Cita` creados en este incremento.
+ * Estados de `Cita`, alineados con `DEC-034` (migración `0006`, 2026-10-14).
  *
- * ⚠️ **LISTA INCOMPLETA RESPECTO A `DEC-034`, A PROPÓSITO.** La orden de trabajo fijó estos seis.
- * La lista aprobada en `DEC-034` tiene ocho: faltan `no_show` —que `RN-CRM-06` necesita para
- * disparar la sugerencia de lista roja— y el par `pendiente_confirmacion`/`confirmada`, que
- * `RN-CONV-11` exige por ser la confirmación interactiva. Ver el handoff de `PROJECT_STATUS.md`.
+ * La columna es `text` + `CHECK` y **no** un `enum` de PostgreSQL: añadir un valor a un `enum`
+ * requiere `ALTER TYPE … ADD VALUE`, que no corre dentro de la transacción en la que Drizzle
+ * envuelve cada migración. Esta ampliación —de 6 a 9 valores— es exactamente el caso que
+ * justificó esa decisión, y se resolvió con un `DROP`/`ADD CONSTRAINT`.
  *
- * Por eso la columna es `text` + `CHECK` y **no** un `enum` de PostgreSQL: añadir un valor a un
- * `enum` requiere `ALTER TYPE … ADD VALUE`, que no puede ejecutarse dentro de la transacción en
- * la que Drizzle envuelve cada migración. Con `CHECK` es un `DROP`/`ADD CONSTRAINT` trivial.
+ * ⚠️ **AL AÑADIR O QUITAR UN ESTADO HAY QUE TOCAR DOS SITIOS:** este arreglo y el `CHECK` de la
+ * migración correspondiente. Drizzle no conoce el `CHECK` (no está en su snapshot), así que nada
+ * lo obliga salvo esta nota y las pruebas de `restricciones-agenda.spec.ts`.
+ *
+ * SOBRE LA SEMÁNTICA DE LOS TRES PRIMEROS — **propuesta, no decidida.** La máquina de estados
+ * formal sigue abierta (`P3`). La lectura coherente con lo aprobado es:
+ * `agendada` (creada, aún no se le pide confirmar) → `pendiente_confirmacion` (recordatorio
+ * enviado, esperando respuesta, `RN-CONV-11`) → `confirmada` (la clienta respondió que sí).
+ * Las transiciones LEGALES entre ellos no están fijadas todavía.
  */
-export const ESTADOS_CITA = ['agendada', 'en_espera_pago', 'completada', 'cancelada', 'expirada', 'reprogramada'] as const;
+export const ESTADOS_CITA = [
+  'agendada',
+  'pendiente_confirmacion',
+  'confirmada',
+  'en_espera_pago',
+  'completada',
+  'no_show',
+  'cancelada',
+  'expirada',
+  'reprogramada',
+] as const;
 export type EstadoCita = (typeof ESTADOS_CITA)[number];
 
 /**
  * Estados que **liberan** el horario (`DEC-034`). Todo lo demás lo **ocupa**.
  *
  * Se formula por la negativa a propósito: un estado nuevo que alguien añada en el futuro ocupará
- * por defecto, que es el lado seguro del error. Esta lista es la que alimenta el `WHERE` de las
- * dos restricciones de exclusión, y `VerificarCitasFuturasPort` (`DEC-032`) debe reutilizarla en
- * vez de escribir una segunda definición que pueda divergir (pendiente `N-04`).
+ * por defecto, que es el lado seguro del error. **Eso ya se cobró su primer dividendo**: la
+ * ampliación de 6 a 9 estados (`0006`) **no requirió tocar el `WHERE` de ninguna de las dos
+ * restricciones de exclusión** — `no_show`, `pendiente_confirmacion` y `confirmada` pasaron a
+ * ocupar horario automáticamente, que es lo que `DEC-034` exige.
+ *
+ * `VerificarCitasFuturasPort` (`DEC-032`) reutiliza esta misma lista en vez de escribir una
+ * segunda definición que pueda divergir — así se resolvió el pendiente `N-04`.
  */
 export const ESTADOS_QUE_LIBERAN_HORARIO = ['cancelada', 'expirada', 'reprogramada'] as const satisfies readonly EstadoCita[];
 

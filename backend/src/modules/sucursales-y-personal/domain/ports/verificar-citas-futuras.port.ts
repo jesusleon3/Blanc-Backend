@@ -15,9 +15,9 @@ export const VERIFICAR_CITAS_FUTURAS_PORT = 'VERIFICAR_CITAS_FUTURAS_PORT';
  * es consumidor de este módulo (`01-domain-discovery.md` §4, horarios y manicuristas), así que la
  * dependencia inversa debe viajar por una interfaz que Agenda implemente, nunca al revés.
  *
- * ESTADO: sin implementación real. *Agenda* no existe todavía (Fase 2); hoy lo satisface
- * `SinAgendaVerificarCitasFuturasAdapter`, un sustituto que **siempre responde `false`**. Ver ese
- * archivo antes de confiar en esta verificación.
+ * ESTADO: **implementado de verdad** desde 2026-10-14 por `AgendaVerificarCitasFuturasAdapter`,
+ * respaldado por `CitaRepository`. El sustituto temporal que respondía siempre `false` se
+ * eliminó, no se conservó de respaldo.
  */
 export interface VerificarCitasFuturasPort {
   /**
@@ -26,7 +26,7 @@ export interface VerificarCitasFuturasPort {
    * "Futura" significa *programada a partir de ahora y en un estado que ocupa el horario*. La lista
    * de estados que ocupan la fija `DEC-034` — liberan `cancelada`, `expirada` y `reprogramada`;
    * todo lo demás ocupa. Cuando Agenda implemente este puerto **debe reutilizar esa misma lista**,
-   * no escribir una segunda definición que pueda divergir (pendiente `N-04`).
+   * no escribir una segunda definición que pueda divergir. **`N-04` resuelto:** la implementación reutiliza `ESTADOS_QUE_LIBERAN_HORARIO`, la misma lista que alimenta las restricciones de exclusión.
    */
   tieneCitasFuturas(manicuristaId: string): Promise<boolean>;
 }

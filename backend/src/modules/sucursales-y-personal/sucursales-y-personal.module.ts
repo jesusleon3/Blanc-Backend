@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
+import { AgendaModule } from '../agenda/agenda.module';
 import { SucursalesController } from './infrastructure/http/sucursales.controller';
 import { ManicuristasController } from './infrastructure/http/manicuristas.controller';
 import { MantenimientoController } from './infrastructure/http/mantenimiento.controller';
 import { SUCURSAL_REPOSITORY } from './domain/ports/sucursal.repository';
 import { MANICURISTA_REPOSITORY } from './domain/ports/manicurista.repository';
 import { VERIFICAR_CITAS_FUTURAS_PORT } from './domain/ports/verificar-citas-futuras.port';
-import { SinAgendaVerificarCitasFuturasAdapter } from './infrastructure/agenda/sin-agenda-verificar-citas-futuras.adapter';
+import { AgendaVerificarCitasFuturasAdapter } from './infrastructure/agenda/agenda-verificar-citas-futuras.adapter';
 import { DrizzleSucursalRepository } from './infrastructure/persistence/drizzle-sucursal.repository';
 import { DrizzleManicuristaRepository } from './infrastructure/persistence/drizzle-manicurista.repository';
 import { CrearSucursalUseCase } from './application/use-cases/crear-sucursal.use-case';
@@ -28,13 +29,16 @@ import { RemoverManicuristaDeSucursalUseCase } from './application/use-cases/rem
  * esquema de persistencia a otros módulos.
  */
 @Module({
+  // `AgendaModule` exporta `CITA_REPOSITORY`, que consume `AgendaVerificarCitasFuturasAdapter`.
+  // Agenda no depende de este módulo en código, así que la dirección es única y no hay ciclo.
+  imports: [AgendaModule],
   controllers: [SucursalesController, ManicuristasController, MantenimientoController],
   providers: [
     { provide: SUCURSAL_REPOSITORY, useClass: DrizzleSucursalRepository },
     { provide: MANICURISTA_REPOSITORY, useClass: DrizzleManicuristaRepository },
-    // ⚠️ Sustituto temporal: siempre responde `false`. Debe reemplazarse por un adaptador real
-    // contra Agenda en Fase 2, o el bloqueo duro de `DEC-032` no protegerá nada.
-    { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: SinAgendaVerificarCitasFuturasAdapter },
+    // Implementación real contra Agenda (`DEC-032`). El sustituto temporal que respondía
+    // siempre `false` se eliminó: el bloqueo duro ya protege de verdad.
+    { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: AgendaVerificarCitasFuturasAdapter },
     CrearSucursalUseCase,
     ActualizarConfiguracionSucursalUseCase,
     ListarSucursalesUseCase,

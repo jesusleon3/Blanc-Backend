@@ -393,7 +393,7 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 
   **Consecuencia arquitectónica — cruza un Bounded Context:** la baja ocurre en Sucursales y Personal; las citas viven en Agenda. `ADR-005` prohíbe FKs entre esquemas y `ADR-001`/`ADR-002` que un módulo consulte las tablas de otro, así que **no puede ser un `JOIN`**: requiere un puerto explícito que Agenda implemente y Sucursales y Personal consuma, mismo patrón que `PERMISOS_USUARIO_PORT` en `DEC-029`. Invierte la dirección de dependencia declarada en `01-domain-discovery.md` §4 (Agenda es consumidor de Sucursales), por lo que debe verificarse con `madge` al implementarlo.
 
-  **Abierto (`N-04`):** qué estados cuentan como "cita futura". Debe reutilizar la misma lista de estados que ocupan horario (`DEC-034`), no una segunda definición que pueda divergir.
+  ~~**Abierto (`N-04`)**~~ **CERRADO (2026-10-14):** "cita futura" = programada a partir de ahora y en un estado que **ocupa** horario. La implementación reutiliza `ESTADOS_QUE_LIBERAN_HORARIO`, la misma lista que alimenta las restricciones de exclusión, de modo que no existe una segunda definición que pueda divergir. El sustituto temporal fue **eliminado**.
 
   **Detalle completo:** `docs/architecture/FASE_2_AGENDA_ARQUITECTURA.md` §4.
 
@@ -641,13 +641,15 @@ No son "no implementados a secas" — son exclusiones deliberadas y ya verificad
 
 **Dónde duele más adelante:** el módulo de **Analítica** (Fase 6) hereda este techo. Antes de construirlo hay que decidir conscientemente si sus reportes se presentan como estimaciones o si el Excel debe incorporarse de alguna forma.
 
-### Riesgo: el bloqueo duro de baja de manicurista **no protege nada todavía** — `ACCEPTED_RISK` (2026-09-30)
+### Riesgo: el bloqueo duro de baja de manicurista no protege nada — ~~`ACCEPTED_RISK`~~ **CERRADO (2026-10-14)**
 
 `DEC-032` exige rechazar la baja de una manicurista con citas futuras, y `DesactivarManicuristaUseCase` ya consulta `VerificarCitasFuturasPort` para hacerlo. Pero el puerto lo satisface `SinAgendaVerificarCitasFuturasAdapter`, un sustituto temporal que **siempre responde `false`**.
 
 **Hoy es inofensivo y literalmente correcto:** el Bounded Context *Agenda* no existe, no hay tabla de citas, luego no puede haber citas futuras. **Deja de serlo en el instante en que Fase 2 cree la primera cita**, y entonces el bloqueo duro queda desactivado en silencio.
 
-**Mitigación:** el riesgo está registrado en tres sitios — el comentario de cabecera del adaptador, su propia prueba (que fija el comportamiento a propósito, de modo que sustituirlo rompa la prueba y obligue a borrarla conscientemente) y esta entrada. **Acción obligatoria de Fase 2:** reemplazar el proveedor en `sucursales-y-personal.module.ts` por un adaptador real contra Agenda y **borrar** el sustituto, no dejarlo de respaldo.
+**Mitigación:** el riesgo se registró en tres sitios — el comentario del adaptador, su propia prueba (que fijaba el comportamiento a propósito para que sustituirlo rompiera el test) y esta entrada.
+
+> **CERRADO el 2026-10-14.** `AgendaVerificarCitasFuturasAdapter` consulta `agenda.citas` de verdad, vía el puerto que `AgendaModule` expone. El sustituto **se eliminó**, no se conservó de respaldo. Cubierto por 13 pruebas de integración que recorren el camino completo (caso de uso → puerto → repositorio → PostgreSQL), incluida una por cada uno de los nueve estados. `madge --circular`: 0 ciclos pese a la nueva dependencia `SucursalesYPersonal → Agenda`.
 
 ### Riesgo: `pg-mem` no revierte transacciones de verdad
 Verificado empíricamente (hardening 2026-08-11) — `pg-mem` acepta `BEGIN`/`ROLLBACK` sin error pero no revierte los datos. Las pruebas de atomicidad de este proyecto prueban la orquestación del código (`UnitOfWork`), no que Postgres real revierta.
@@ -1037,7 +1039,7 @@ Cinco respuestas cerraron tres bloqueos y abrieron cuatro preguntas más pequeñ
 | ~~`N-01`~~ | ~~Capacidad física vs. personal en turno~~ | — | **CERRADO el 2026-09-30** por `DEC-035`: se resuelve en la capa de aplicación (`MotorDisponibilidad`), no en la base de datos |
 | `N-02` | Carrera `completada`/`no_show`: ¿ventana de gracia o sobrescritura? | Dueña | `RN-AGE-14`, `RN-CRM-06` |
 | `N-03` | Qué significa operativamente "la automatización se detiene" | Dueña + Arquitectura | Estado `pendiente_cotizacion` |
-| `N-04` | Qué estados cuentan como "cita futura" para bloquear la baja | Arquitectura | `CITAS_FUTURAS_PORT` |
+| ~~`N-04`~~ | ~~Qué estados cuentan como "cita futura"~~ | — | **CERRADO (2026-10-14)**: reutiliza `ESTADOS_QUE_LIBERAN_HORARIO`, la misma lista que alimenta las restricciones de exclusión |
 
 ### 14.4 Lo que sigue bloqueado, sin cambio
 
@@ -1127,6 +1129,69 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 ## 16. Handoff / Trabajo Asíncrono
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
+
+### 2026-10-14 — Fase 2 (parte 2): estados alineados, puerto real y primeros casos de uso
+
+**Alcance:** cerrar la deuda inmediata antes de exponer endpoints. Sin controladores HTTP, por restricción de la orden.
+
+#### Archivos creados
+
+| Archivo | Qué es |
+|---|---|
+| `src/database/migrations/0006_alinear_estados_cita.sql` | `CHECK` de estado ampliado de 6 a 9 valores |
+| `src/modules/sucursales-y-personal/infrastructure/agenda/agenda-verificar-citas-futuras.adapter.ts` | **Implementación real** de `VerificarCitasFuturasPort` |
+| `…/agenda-verificar-citas-futuras.adapter.spec.ts` | 13 pruebas de integración del camino completo |
+| `src/modules/agenda/application/use-cases/agendar-cita.use-case.ts` | Reserva sobre Silla Virtual |
+| `src/modules/agenda/application/use-cases/asignar-manicurista-en-sucursal.use-case.ts` | Asignación en mostrador |
+| `…/agendar-cita.use-case.spec.ts` | 18 pruebas de integración de ambos casos de uso |
+
+#### Archivos eliminados
+
+- `…/infrastructure/agenda/sin-agenda-verificar-citas-futuras.adapter.ts` **y su spec**. El sustituto que respondía siempre `false` **ya no existe**; no se dejó de respaldo, como exigía su propia nota.
+
+#### Archivos modificados
+
+- `src/database/schema/agenda.schema.ts` — `ESTADOS_CITA` de 6 a 9.
+- `src/database/migrations/restricciones-agenda.spec.ts` — +6 pruebas (24 en total).
+- `src/modules/agenda/domain/entities/cita.entity.ts` — `validarRangoHorario` exportado (ver el defecto, abajo).
+- `src/modules/agenda/agenda.module.ts` — los dos casos de uso.
+- `src/modules/sucursales-y-personal/sucursales-y-personal.module.ts` — importa `AgendaModule`, proveedor real.
+- `…/desactivar-manicurista.use-case.ts` y `…/verificar-citas-futuras.port.ts` — comentarios que afirmaban que la verificación "no protege nada": ya era falso.
+
+#### Pruebas: **35 nuevas** (479 → **514**, 49 suites)
+
+- **+6 sobre las restricciones SQL** (24 en ese archivo): que los tres estados nuevos pasan el `CHECK`; que **`no_show` OCUPA** —es la diferencia con `cancelada`: cancelar avisa y libera, no presentarse no libera nada porque nadie pudo aprovechar el hueco—; y una que inspecciona `pg_get_constraintdef` para comprobar que **ampliar la lista no tocó las restricciones**.
+- **+13 del puerto real**, con una por cada uno de los nueve estados.
+- **+18 de los casos de uso**, incluida la capacidad de la sucursal respetada extremo a extremo y que `MANICURISTA_OCUPADA` **no** se reintenta en otra silla.
+
+#### 🐛 Defecto encontrado (lo cazó una prueba TDD)
+
+`AgendarCitaUseCase` consultaba la base **antes** de validar el rango. Con un rango invertido, PostgreSQL rechazaba el `tstzrange` de la consulta con un error crudo (*"range lower bound must be less than or equal to range upper bound"*) en lugar del `CITA_RANGO_INVALIDO` que corresponde. Corregido exportando `validarRangoHorario` desde la entidad —una sola definición— y llamándolo al inicio del caso de uso.
+
+#### ✅ Bloqueos del turno anterior resueltos
+
+| # | Estado |
+|---|---|
+| **1** Faltaban `no_show`, `pendiente_confirmacion`, `confirmada` | **RESUELTO** — migración `0006` |
+| **5** `tieneCitasFuturasQueOcupan` sin conectar; adaptador temporal sin proteger nada | **RESUELTO** — adaptador real, sustituto eliminado, `ACCEPTED_RISK` cerrado, `N-04` cerrado |
+
+#### ⏳ Bloqueos que siguen abiertos
+
+| # | Sigue pendiente |
+|---|---|
+| **2** | Las `EXCLUDE` y el `CHECK` **no están en el snapshot de Drizzle**. La ampliación de estados lo confirmó: hubo que editar **dos sitios** (el array de TS y el `CHECK` de `0006`). Nada lo obliga salvo las pruebas |
+| **3** | Entidades aún sin **transiciones legales** entre estados (`P3` sigue abierto). `cambiarEstado` valida que el valor exista, no que la transición sea legal |
+| **4** | **`MotorDisponibilidad` no existe.** `AgendarCitaUseCase` reparte sillas pero **no cruza contra personal en turno** (`DEC-035`): falta el submódulo de Horarios y Ausencias (`DEC-036`) |
+| **6** | Sin `cotizacion_snapshot` |
+| **7** | Ninguna migración aplicada a base real |
+
+#### Deuda nueva de este turno
+
+- **La semántica de `agendada` / `pendiente_confirmacion` / `confirmada` no está decidida.** Se documentó una lectura *propuesta* en `agenda.schema.ts`, pero las transiciones legales son `P3`. Hoy toda cita nace `agendada` y nada la mueve.
+- **`AgendarCitaUseCase` no valida horario de sucursal, corte de mediodía (`RN-AGE-10`) ni duración según catálogo.** Lo primero necesita un puerto hacia Sucursales; lo último, `FL-COT-02`.
+- **La carrera de `DEC-035` sigue viva, y ahora tiene mitigación parcial:** el caso de uso **recorre las sillas candidatas** y reintenta si la base rechaza una. No elimina la carrera —la autoridad sigue siendo la restricción `EXCLUDE`— pero evita fallar cuando sí quedaba lugar.
+
+---
 
 ### 2026-10-09 — Kick-off Fase 2: capa de datos de Agenda
 

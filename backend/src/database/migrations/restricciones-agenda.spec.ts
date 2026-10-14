@@ -185,12 +185,52 @@ describe('Restricciones de exclusión de `agenda.citas` (migración 0005)', () =
       await expect(insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE })).resolves.toBeDefined();
     });
 
-    it.each(['agendada', 'en_espera_pago', 'completada'])('un estado `%s` SIGUE OCUPANDO la silla', async (estado) => {
+    it.each(['agendada', 'pendiente_confirmacion', 'confirmada', 'en_espera_pago', 'completada', 'no_show'])(
+      'un estado `%s` SIGUE OCUPANDO la silla',
+      async (estado) => {
+        const db = await crearBaseDeDatosDePrueba();
+        const silla = await crearSilla(db, 'Lomas 1');
+
+        await insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado });
+        await expect(insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE })).rejects.toThrow(/exclusion constraint|sin_solapamiento/i);
+      },
+    );
+
+    it('`no_show` OCUPA el horario: la clienta no llegó, pero el hueco se consumió igual', async () => {
       const db = await crearBaseDeDatosDePrueba();
       const silla = await crearSilla(db, 'Lomas 1');
 
-      await insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado });
+      await insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado: 'no_show' });
+
+      // Es la diferencia con `cancelada`: cancelar avisa y libera; no presentarse no libera nada,
+      // porque nadie pudo aprovechar ese hueco. Confundirlos falsearía la ocupación histórica.
       await expect(insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE })).rejects.toThrow(/exclusion constraint|sin_solapamiento/i);
+    });
+
+    it('los tres estados nuevos de la migración 0006 son aceptados por el CHECK', async () => {
+      const db = await crearBaseDeDatosDePrueba();
+
+      for (const estado of ['pendiente_confirmacion', 'confirmada', 'no_show']) {
+        const silla = await crearSilla(db, `Silla ${estado}`);
+        await expect(insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado })).resolves.toBeDefined();
+      }
+    });
+
+    it('AMPLIAR LA LISTA NO TOCÓ LAS RESTRICCIONES: el WHERE por la negativa hizo que los nuevos ocupen solos', async () => {
+      const db = await crearBaseDeDatosDePrueba();
+      const definiciones = await db.execute<{ definicion: string }>(sql`
+        SELECT pg_get_constraintdef(oid) AS definicion
+          FROM pg_constraint
+         WHERE conrelid = 'agenda.citas'::regclass AND contype = 'x'
+      `);
+
+      // Las dos siguen enumerando SOLO los tres estados que liberan. Ningún estado nuevo aparece.
+      for (const { definicion } of definiciones) {
+        expect(definicion).toContain("'cancelada'");
+        expect(definicion).not.toContain("'no_show'");
+        expect(definicion).not.toContain("'confirmada'");
+      }
+      expect(definiciones).toHaveLength(2);
     });
 
     it('cancelar una cita libera el hueco de inmediato (el UPDATE desactiva la restricción para esa fila)', async () => {

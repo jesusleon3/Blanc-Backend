@@ -18,8 +18,9 @@ export interface DesactivarManicuristaInput {
  * reasigna nada automáticamente. La verificación viaja por `VerificarCitasFuturasPort` porque las
  * citas viven en otro Bounded Context y `ADR-005` prohíbe consultarlas directamente.
  *
- * ⚠️ **Hoy esa verificación no protege nada**: el puerto lo satisface un sustituto temporal que
- * siempre responde `false` (Agenda no existe). Ver `SinAgendaVerificarCitasFuturasAdapter`.
+ * **Desde 2026-10-14 la verificación es real** (`AgendaVerificarCitasFuturasAdapter`): consulta
+ * `agenda.citas` a través del puerto que Agenda expone. Hasta esa fecha la satisfacía un
+ * sustituto que respondía siempre `false` y, por tanto, no protegía nada.
  *
  * **Orden de las comprobaciones, deliberado:** primero existencia (404), después citas futuras
  * (409). Un id inexistente debe dar el error más informativo, no un conflicto sobre algo que no

@@ -38,7 +38,7 @@ export class Cita {
     manicuristaId?: string | null;
     estado?: EstadoCita;
   }): Cita {
-    validarRango(input.rangoHorario);
+    validarRangoHorario(input.rangoHorario);
 
     return new Cita({
       id: randomUUID(),
@@ -109,7 +109,12 @@ export class Cita {
   }
 }
 
-function validarRango(rango: RangoHorario): void {
+/**
+ * Validación del rango, exportada para que un caso de uso pueda ejecutarla **antes** de consultar
+ * la base: un `tstzrange` invertido hace que PostgreSQL lance un error crudo ("range lower bound
+ * must be less than or equal to range upper bound") en lugar de un error de dominio legible.
+ */
+export function validarRangoHorario(rango: RangoHorario): void {
   if (Number.isNaN(rango.inicio.getTime()) || Number.isNaN(rango.fin.getTime())) {
     throw new DomainError('CITA_RANGO_INVALIDO', 'El rango horario contiene una fecha inválida.', 400);
   }
