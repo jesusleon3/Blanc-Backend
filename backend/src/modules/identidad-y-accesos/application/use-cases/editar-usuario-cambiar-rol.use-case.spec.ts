@@ -23,7 +23,7 @@ const auditoriaFalsa = (): jest.Mocked<AuditoriaPort> => ({ registrar: jest.fn()
 describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
   it('lanza RecursoNoEncontradoError si el usuario no existe', async () => {
     const useCase = new EditarUsuarioCambiarRolUseCase(crearRepoFalso(null), auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'inexistente', nombre: 'X' }, actor)).rejects.toThrow(RecursoNoEncontradoError);
   });
@@ -33,7 +33,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const repo = crearRepoFalso(objetivo);
     const auditoria = auditoriaFalsa();
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoria, crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     const editado = await useCase.ejecutar({ usuarioId: 'u-1', nombre: 'Ana María' }, actor);
 
@@ -50,7 +50,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const repo = crearRepoFalso(objetivo);
     const auditoria = auditoriaFalsa();
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoria, crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await useCase.ejecutar({ usuarioId: 'u-1', nombre: 'Ana', email: 'ana@blanc.mx' }, actor);
 
@@ -62,7 +62,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     const editado = await useCase.ejecutar({ usuarioId: 'u-1', rol: Rol.GERENTE }, actor);
 
@@ -73,7 +73,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const objetivo = Usuario.reconstruir({ id: 'actor-1', email: 'super@blanc.mx', nombre: 'Super', rol: Rol.SUPER_ADMIN, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'actor-1', rol: Rol.ADMINISTRADOR }, actor)).rejects.toThrow(AsignacionDeRolNoPermitidaError);
     expect(repo.guardar).not.toHaveBeenCalled();
@@ -83,7 +83,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1', rol: Rol.SUPER_ADMIN }, actor)).rejects.toThrow(AsignacionDeRolNoPermitidaError);
   });
@@ -92,7 +92,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'super@blanc.mx', nombre: 'Otro Super', rol: Rol.SUPER_ADMIN, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1', rol: Rol.RECEPCIONISTA }, actor)).rejects.toThrow(AsignacionDeRolNoPermitidaError);
   });
@@ -101,7 +101,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'super@blanc.mx', nombre: 'Otro Super', rol: Rol.SUPER_ADMIN, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     const editado = await useCase.ejecutar({ usuarioId: 'u-1', rol: Rol.ADMINISTRADOR }, actor);
     expect(editado.rol).toBe(Rol.ADMINISTRADOR);
@@ -112,7 +112,7 @@ describe('EditarUsuarioCambiarRolUseCase — FL-SEG-03', () => {
     const otro = Usuario.reconstruir({ id: 'u-2', email: 'ocupado@blanc.mx', nombre: 'Otro', rol: Rol.RECEPCIONISTA, activa: true });
     const repo = crearRepoFalso(objetivo, otro);
     const useCase = new EditarUsuarioCambiarRolUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1', email: 'ocupado@blanc.mx' }, actor)).rejects.toThrow(ConflictoDeNegocioError);
   });

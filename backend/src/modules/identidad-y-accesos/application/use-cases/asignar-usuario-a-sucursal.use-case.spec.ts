@@ -23,7 +23,7 @@ const auditoriaFalsa = (): jest.Mocked<AuditoriaPort> => ({ registrar: jest.fn()
 describe('AsignarUsuarioASucursalUseCase — FL-SEG-04', () => {
   it('lanza RecursoNoEncontradoError si el usuario no existe', async () => {
     const useCase = new AsignarUsuarioASucursalUseCase(crearRepoFalso(null), auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'inexistente', sucursalId: 'suc-1' }, actor)).rejects.toThrow(RecursoNoEncontradoError);
   });
@@ -32,7 +32,7 @@ describe('AsignarUsuarioASucursalUseCase — FL-SEG-04', () => {
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new AsignarUsuarioASucursalUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actorSinAlcance: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['otra-sucursal'] };
+    const actorSinAlcance: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['otra-sucursal'], manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1', sucursalId: 'suc-1' }, actorSinAlcance)).rejects.toThrow(AccesoFueraDeAlcanceError);
     expect(repo.asignarASucursal).not.toHaveBeenCalled();
@@ -42,7 +42,7 @@ describe('AsignarUsuarioASucursalUseCase — FL-SEG-04', () => {
     const propio = Usuario.reconstruir({ id: 'actor-1', email: 'admin@blanc.mx', nombre: 'Admin', rol: Rol.ADMINISTRADOR, activa: true });
     const repo = crearRepoFalso(propio);
     const useCase = new AsignarUsuarioASucursalUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['sucursal-propia'] };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['sucursal-propia'], manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'actor-1', sucursalId: 'sucursal-ajena' }, actor)).rejects.toThrow(AccesoFueraDeAlcanceError);
   });
@@ -52,7 +52,7 @@ describe('AsignarUsuarioASucursalUseCase — FL-SEG-04', () => {
     const repo = crearRepoFalso(objetivo);
     const auditoria = auditoriaFalsa();
     const useCase = new AsignarUsuarioASucursalUseCase(repo, auditoria, crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['suc-1'] };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['suc-1'], manicuristaId: null };
 
     await useCase.ejecutar({ usuarioId: 'u-1', sucursalId: 'suc-1' }, actor);
 
@@ -64,7 +64,7 @@ describe('AsignarUsuarioASucursalUseCase — FL-SEG-04', () => {
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'ana@blanc.mx', nombre: 'Ana', rol: Rol.RECEPCIONISTA, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new AsignarUsuarioASucursalUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const superAdmin: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: [] };
+    const superAdmin: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: [], manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1', sucursalId: 'cualquier-sucursal' }, superAdmin)).resolves.toBeUndefined();
   });

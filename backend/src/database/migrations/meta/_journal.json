@@ -64,6 +64,13 @@
       "when": 1792012989225,
       "tag": "0008_excepciones_personal",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792014332905,
+      "tag": "0009_vinculo_usuario_manicurista_y_snapshot",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ import { ConflictoDeNegocioError, RecursoNoEncontradoError } from '../../../../s
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 
-const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
 function crearRepoFalso(manicurista: Manicurista | null): jest.Mocked<ManicuristaRepository> {
   return {

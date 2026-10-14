@@ -5,6 +5,8 @@ import { CONTEXTO_PERSONAL_PORT } from '../agenda/domain/ports/contexto-personal
 import { VERIFICAR_CITAS_FUTURAS_PORT } from '../sucursales-y-personal/domain/ports/verificar-citas-futuras.port';
 import { ContextoPersonalAdapter } from './contexto-personal.adapter';
 import { AgendaVerificarCitasFuturasAdapter } from './agenda-verificar-citas-futuras.adapter';
+import { CONSULTA_AGENDA_PORT } from '../sucursales-y-personal/domain/ports/consulta-agenda.port';
+import { ConsultaAgendaAdapter } from './consulta-agenda.adapter';
 
 /**
  * Punto único donde se cablean las dependencias **entre Bounded Contexts**.
@@ -32,7 +34,8 @@ import { AgendaVerificarCitasFuturasAdapter } from './agenda-verificar-citas-fut
   providers: [
     { provide: CONTEXTO_PERSONAL_PORT, useClass: ContextoPersonalAdapter },
     { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: AgendaVerificarCitasFuturasAdapter },
+    { provide: CONSULTA_AGENDA_PORT, useClass: ConsultaAgendaAdapter },
   ],
-  exports: [CONTEXTO_PERSONAL_PORT, VERIFICAR_CITAS_FUTURAS_PORT],
+  exports: [CONTEXTO_PERSONAL_PORT, VERIFICAR_CITAS_FUTURAS_PORT, CONSULTA_AGENDA_PORT],
 })
 export class IntegracionModule {}

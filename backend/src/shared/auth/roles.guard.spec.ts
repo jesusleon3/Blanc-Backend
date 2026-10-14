@@ -17,13 +17,13 @@ describe('RolesGuard — ADR-010, nivel 1 de RBAC', () => {
   it('permite el acceso si el endpoint no exige ningún rol', () => {
     const reflector = { getAllAndOverride: () => undefined } as unknown as Reflector;
     const guard = new RolesGuard(reflector);
-    expect(guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.SOLO_LECTURA, sucursales: 'GLOBAL' }, undefined))).toBe(true);
+    expect(guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.SOLO_LECTURA, sucursales: 'GLOBAL', manicuristaId: null }, undefined))).toBe(true);
   });
 
   it('rechaza si el usuario no tiene el rol exigido', () => {
     const reflector = { getAllAndOverride: () => [Rol.SUPER_ADMIN] } as unknown as Reflector;
     const guard = new RolesGuard(reflector);
-    expect(() => guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' }, [Rol.SUPER_ADMIN]))).toThrow(
+    expect(() => guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null }, [Rol.SUPER_ADMIN]))).toThrow(
       ForbiddenException,
     );
   });
@@ -32,14 +32,14 @@ describe('RolesGuard — ADR-010, nivel 1 de RBAC', () => {
     const reflector = { getAllAndOverride: () => [Rol.SUPER_ADMIN, Rol.ADMINISTRADOR] } as unknown as Reflector;
     const guard = new RolesGuard(reflector);
     expect(
-      guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' }, [Rol.SUPER_ADMIN, Rol.ADMINISTRADOR])),
+      guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null }, [Rol.SUPER_ADMIN, Rol.ADMINISTRADOR])),
     ).toBe(true);
   });
 
   it('RN-SUC-02: rechaza a un Administrador cuando el endpoint exige exclusivamente Super Admin', () => {
     const reflector = { getAllAndOverride: () => [Rol.SUPER_ADMIN] } as unknown as Reflector;
     const guard = new RolesGuard(reflector);
-    expect(() => guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' }, [Rol.SUPER_ADMIN]))).toThrow(
+    expect(() => guard.canActivate(contextoConUsuario({ sub: '1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null }, [Rol.SUPER_ADMIN]))).toThrow(
       ForbiddenException,
     );
   });

@@ -34,7 +34,7 @@ const puertoQueFalla = (): jest.Mocked<PermisosUsuarioPort> => ({
 describe('AuthorizationGuard — DEC-029 (C2: PostgreSQL como fuente de autorización)', () => {
   describe('éxito — enriquecimiento de la petición', () => {
     it('sobrescribe request.usuario con el rol y las sucursales leídos de la base de datos', async () => {
-      const puerto = puertoFalso({ rol: Rol.GERENTE, activa: true, sucursales: [SUC_1] });
+      const puerto = puertoFalso({ rol: Rol.GERENTE, activa: true, sucursales: [SUC_1], manicuristaId: null });
       const guard = new AuthorizationGuard(puerto, reflectorFalso(false));
       // `JwtAuthGuard` ya no propaga rol alguno: los permisos salen solo de la base de datos.
       const context = contextoConIdentidad({ sub: SUB });
@@ -46,17 +46,23 @@ describe('AuthorizationGuard — DEC-029 (C2: PostgreSQL como fuente de autoriza
         sub: SUB,
         rol: Rol.GERENTE,
         sucursales: [SUC_1],
+        // `null` para un rol que no es manicurista: el vínculo de `P9` existe siempre en la forma,
+        // y las usuarias que no atienden simplemente no lo tienen.
+        manicuristaId: null,
       });
     });
 
     it('expone exactamente la forma que RolesGuard y los casos de uso ya esperan', async () => {
-      const guard = new AuthorizationGuard(puertoFalso({ rol: Rol.ANALISTA, activa: true, sucursales: 'GLOBAL' }), reflectorFalso(false));
+      const guard = new AuthorizationGuard(puertoFalso({ rol: Rol.ANALISTA, activa: true, sucursales: 'GLOBAL', manicuristaId: null }), reflectorFalso(false));
       const context = contextoConIdentidad({ sub: SUB });
 
       await guard.canActivate(context);
 
       const usuario = context.switchToHttp().getRequest().usuario;
-      expect(Object.keys(usuario).sort()).toEqual(['rol', 'sub', 'sucursales']);
+      // `manicuristaId` entró con `P9`: es lo que permite que la vista de iPad filtre "sus
+      // propias citas" sin aceptar el id por la petición. Esta prueba fija la forma a propósito —
+      // añadir un campo aquí es ampliar lo que todo caso de uso puede leer del actor.
+      expect(Object.keys(usuario).sort()).toEqual(['manicuristaId', 'rol', 'sub', 'sucursales']);
     });
   });
 
@@ -74,7 +80,7 @@ describe('AuthorizationGuard — DEC-029 (C2: PostgreSQL como fuente de autoriza
   describe('usuario inactivo (FL-SEG-05 con efecto real)', () => {
     it('responde 403 USUARIO_INACTIVO aunque el rol sea válido', async () => {
       const guard = new AuthorizationGuard(
-        puertoFalso({ rol: Rol.ADMINISTRADOR, activa: false, sucursales: 'GLOBAL' }),
+        puertoFalso({ rol: Rol.ADMINISTRADOR, activa: false, sucursales: 'GLOBAL', manicuristaId: null }),
         reflectorFalso(false),
       );
 
@@ -85,7 +91,7 @@ describe('AuthorizationGuard — DEC-029 (C2: PostgreSQL como fuente de autoriza
 
     it('no deja rastro de permisos en la petición cuando deniega', async () => {
       const guard = new AuthorizationGuard(
-        puertoFalso({ rol: Rol.ADMINISTRADOR, activa: false, sucursales: 'GLOBAL' }),
+        puertoFalso({ rol: Rol.ADMINISTRADOR, activa: false, sucursales: 'GLOBAL', manicuristaId: null }),
         reflectorFalso(false),
       );
       const context = contextoConIdentidad({ sub: SUB });
@@ -129,7 +135,7 @@ describe('AuthorizationGuard — DEC-029 (C2: PostgreSQL como fuente de autoriza
 
   describe('defensa ante una cadena de guards mal ordenada', () => {
     it('falla cerrado si no hay identidad autenticada en la petición', async () => {
-      const puerto = puertoFalso({ rol: Rol.SUPER_ADMIN, activa: true, sucursales: 'GLOBAL' });
+      const puerto = puertoFalso({ rol: Rol.SUPER_ADMIN, activa: true, sucursales: 'GLOBAL', manicuristaId: null });
       const guard = new AuthorizationGuard(puerto, reflectorFalso(false));
 
       await expect(guard.canActivate(contextoConIdentidad(undefined))).rejects.toMatchObject({

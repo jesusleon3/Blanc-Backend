@@ -18,6 +18,7 @@ import { Rol } from '../../../../shared/auth/rol';
 import { HttpExceptionFilter } from '../../../../shared/errors/http-exception.filter';
 import { crearBaseDeDatosDePrueba } from '../../../../database/test-utils/postgres-de-prueba';
 import { VERIFICAR_CITAS_FUTURAS_PORT } from '../../domain/ports/verificar-citas-futuras.port';
+import { CONSULTA_AGENDA_PORT } from '../../domain/ports/consulta-agenda.port';
 
 const SECRETO = 'secreto-e2e';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -40,7 +41,7 @@ const permisosDePrueba: PermisosUsuarioPort = {
 };
 
 function token(rol: Rol, sucursales: 'GLOBAL' | string[] = 'GLOBAL') {
-  permisosPorSub.set('test-user', { rol, activa: true, sucursales });
+  permisosPorSub.set('test-user', { rol, activa: true, sucursales, manicuristaId: null });
   return jwt.sign({ iss: ISSUER, aud: 'authenticated', sub: 'test-user' }, SECRETO);
 }
 
@@ -78,8 +79,12 @@ let dbDePrueba: Database;
     // dentro —y no en los `providers` raíz— porque `DesactivarManicuristaUseCase` se resuelve en
     // el inyector de `SucursalesYPersonalModule`, al que el scope raíz no alcanza.
     { provide: VERIFICAR_CITAS_FUTURAS_PORT, useValue: { tieneCitasFuturas: async () => false } },
+    // Mismo motivo: `RegistrarExcepcionPersonalUseCase` pregunta a Agenda qué citas quedan
+    // comprometidas. El ciclo completo se prueba en `excepciones-personal.e2e.spec.ts`, que sí
+    // monta `IntegracionModule`; aquí basta con que el inyector resuelva.
+    { provide: CONSULTA_AGENDA_PORT, useValue: { citasAfectadasPorExcepcion: async () => [] } },
   ],
-  exports: [DATABASE_CONNECTION, AUDITORIA_PORT, UNIT_OF_WORK, VERIFICAR_CITAS_FUTURAS_PORT],
+  exports: [DATABASE_CONNECTION, AUDITORIA_PORT, UNIT_OF_WORK, VERIFICAR_CITAS_FUTURAS_PORT, CONSULTA_AGENDA_PORT],
 })
 class TestInfraModule {}
 

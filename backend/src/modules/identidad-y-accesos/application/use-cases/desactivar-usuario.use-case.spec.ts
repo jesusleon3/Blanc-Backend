@@ -23,7 +23,7 @@ const auditoriaFalsa = (): jest.Mocked<AuditoriaPort> => ({ registrar: jest.fn()
 describe('DesactivarUsuarioUseCase — FL-SEG-05 (alcance mínimo, sin Supabase)', () => {
   it('lanza RecursoNoEncontradoError si el usuario no existe', async () => {
     const useCase = new DesactivarUsuarioUseCase(crearRepoFalso(null), auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'inexistente' }, actor)).rejects.toThrow(RecursoNoEncontradoError);
   });
@@ -33,7 +33,7 @@ describe('DesactivarUsuarioUseCase — FL-SEG-05 (alcance mínimo, sin Supabase)
     const repo = crearRepoFalso(objetivo);
     const auditoria = auditoriaFalsa();
     const useCase = new DesactivarUsuarioUseCase(repo, auditoria, crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await useCase.ejecutar({ usuarioId: 'u-1' }, actor);
 
@@ -48,7 +48,7 @@ describe('DesactivarUsuarioUseCase — FL-SEG-05 (alcance mínimo, sin Supabase)
     const propio = Usuario.reconstruir({ id: 'actor-1', email: 'admin@blanc.mx', nombre: 'Admin', rol: Rol.ADMINISTRADOR, activa: true });
     const repo = crearRepoFalso(propio);
     const useCase = new DesactivarUsuarioUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'actor-1' }, actor)).rejects.toThrow(DesactivacionNoPermitidaError);
     expect(repo.guardar).not.toHaveBeenCalled();
@@ -58,7 +58,7 @@ describe('DesactivarUsuarioUseCase — FL-SEG-05 (alcance mínimo, sin Supabase)
     const propio = Usuario.reconstruir({ id: 'actor-1', email: 'super@blanc.mx', nombre: 'Super', rol: Rol.SUPER_ADMIN, activa: true });
     const repo = crearRepoFalso(propio);
     const useCase = new DesactivarUsuarioUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'actor-1' }, actor)).rejects.toThrow(DesactivacionNoPermitidaError);
   });
@@ -67,7 +67,7 @@ describe('DesactivarUsuarioUseCase — FL-SEG-05 (alcance mínimo, sin Supabase)
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'super@blanc.mx', nombre: 'Otro Super', rol: Rol.SUPER_ADMIN, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new DesactivarUsuarioUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1' }, actor)).rejects.toThrow(DesactivacionNoPermitidaError);
   });
@@ -76,7 +76,7 @@ describe('DesactivarUsuarioUseCase — FL-SEG-05 (alcance mínimo, sin Supabase)
     const objetivo = Usuario.reconstruir({ id: 'u-1', email: 'super@blanc.mx', nombre: 'Otro Super', rol: Rol.SUPER_ADMIN, activa: true });
     const repo = crearRepoFalso(objetivo);
     const useCase = new DesactivarUsuarioUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     await useCase.ejecutar({ usuarioId: 'u-1' }, actor);
     expect(objetivo.activa).toBe(false);
@@ -87,7 +87,7 @@ describe('DesactivarUsuarioUseCase — FL-SEG-05 (alcance mínimo, sin Supabase)
     const repo = crearRepoFalso(objetivo);
     const auditoria = auditoriaFalsa();
     const useCase = new DesactivarUsuarioUseCase(repo, auditoria, crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1' }, actor)).resolves.toBeUndefined();
     expect(repo.guardar).not.toHaveBeenCalled();

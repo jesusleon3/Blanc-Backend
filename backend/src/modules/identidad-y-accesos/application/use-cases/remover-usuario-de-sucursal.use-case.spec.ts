@@ -23,7 +23,7 @@ describe('RemoverUsuarioDeSucursalUseCase — FL-SEG-04', () => {
   it('rechaza a un actor sin alcance sobre la sucursal objetivo (nivel 2)', async () => {
     const repo = crearRepoFalso();
     const useCase = new RemoverUsuarioDeSucursalUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actorSinAlcance: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['otra-sucursal'] };
+    const actorSinAlcance: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['otra-sucursal'], manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1', sucursalId: 'suc-1' }, actorSinAlcance)).rejects.toThrow(AccesoFueraDeAlcanceError);
     expect(repo.removerDeSucursal).not.toHaveBeenCalled();
@@ -33,7 +33,7 @@ describe('RemoverUsuarioDeSucursalUseCase — FL-SEG-04', () => {
     const repo = crearRepoFalso();
     const auditoria = auditoriaFalsa();
     const useCase = new RemoverUsuarioDeSucursalUseCase(repo, auditoria, crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['suc-1'] };
+    const actor: ClaimsUsuario = { sub: 'actor-1', rol: Rol.ADMINISTRADOR, sucursales: ['suc-1'], manicuristaId: null };
 
     await useCase.ejecutar({ usuarioId: 'u-1', sucursalId: 'suc-1' }, actor);
 
@@ -45,7 +45,7 @@ describe('RemoverUsuarioDeSucursalUseCase — FL-SEG-04', () => {
   it('Super Admin puede remover de cualquier sucursal sin restricción', async () => {
     const repo = crearRepoFalso();
     const useCase = new RemoverUsuarioDeSucursalUseCase(repo, auditoriaFalsa(), crearUnitOfWorkFalso());
-    const superAdmin: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: [] };
+    const superAdmin: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: [], manicuristaId: null };
 
     await expect(useCase.ejecutar({ usuarioId: 'u-1', sucursalId: 'cualquier-sucursal' }, superAdmin)).resolves.toBeUndefined();
   });

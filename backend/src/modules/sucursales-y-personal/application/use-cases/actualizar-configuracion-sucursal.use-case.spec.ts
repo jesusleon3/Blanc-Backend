@@ -34,7 +34,7 @@ const auditoriaFalsa = (): jest.Mocked<AuditoriaPort> => ({ registrar: jest.fn()
 describe('ActualizarConfiguracionSucursalUseCase — RN-SUC-01, nivel 2 de RBAC (ADR-010)', () => {
   it('lanza RecursoNoEncontradoError si la sucursal no existe', async () => {
     const useCase = new ActualizarConfiguracionSucursalUseCase(crearRepoFalso(null), auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actor: ClaimsUsuario = { sub: '1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+    const actor: ClaimsUsuario = { sub: '1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
     await expect(useCase.ejecutar({ sucursalId: 'inexistente', nombre: 'X' }, actor)).rejects.toThrow(RecursoNoEncontradoError);
   });
@@ -42,7 +42,7 @@ describe('ActualizarConfiguracionSucursalUseCase — RN-SUC-01, nivel 2 de RBAC 
   it('rechaza a un Administrador sin alcance sobre la sucursal (defensa en profundidad, ADR-010)', async () => {
     const sucursal = Sucursal.crear({ nombre: 'Blanc Polanco', horarioSemanal: HORARIO });
     const useCase = new ActualizarConfiguracionSucursalUseCase(crearRepoFalso(sucursal), auditoriaFalsa(), crearUnitOfWorkFalso());
-    const actorSinAlcance: ClaimsUsuario = { sub: '1', rol: Rol.ADMINISTRADOR, sucursales: ['otra-sucursal-id'] };
+    const actorSinAlcance: ClaimsUsuario = { sub: '1', rol: Rol.ADMINISTRADOR, sucursales: ['otra-sucursal-id'], manicuristaId: null };
 
     await expect(useCase.ejecutar({ sucursalId: sucursal.id, nombre: 'Nuevo nombre' }, actorSinAlcance)).rejects.toThrow(AccesoFueraDeAlcanceError);
   });
@@ -52,7 +52,7 @@ describe('ActualizarConfiguracionSucursalUseCase — RN-SUC-01, nivel 2 de RBAC 
     const repo = crearRepoFalso(sucursal);
     const auditoria = auditoriaFalsa();
     const useCase = new ActualizarConfiguracionSucursalUseCase(repo, auditoria, crearUnitOfWorkFalso());
-    const actorConAlcance: ClaimsUsuario = { sub: '1', rol: Rol.ADMINISTRADOR, sucursales: [sucursal.id] };
+    const actorConAlcance: ClaimsUsuario = { sub: '1', rol: Rol.ADMINISTRADOR, sucursales: [sucursal.id], manicuristaId: null };
 
     const resultado = await useCase.ejecutar({ sucursalId: sucursal.id, nombre: 'Blanc Polanco Norte' }, actorConAlcance);
 
@@ -64,7 +64,7 @@ describe('ActualizarConfiguracionSucursalUseCase — RN-SUC-01, nivel 2 de RBAC 
   it('Super Admin siempre tiene alcance, sin importar el claim de sucursales', async () => {
     const sucursal = Sucursal.crear({ nombre: 'Blanc Polanco', horarioSemanal: HORARIO });
     const useCase = new ActualizarConfiguracionSucursalUseCase(crearRepoFalso(sucursal), auditoriaFalsa(), crearUnitOfWorkFalso());
-    const superAdmin: ClaimsUsuario = { sub: '1', rol: Rol.SUPER_ADMIN, sucursales: [] };
+    const superAdmin: ClaimsUsuario = { sub: '1', rol: Rol.SUPER_ADMIN, sucursales: [], manicuristaId: null };
 
     await expect(useCase.ejecutar({ sucursalId: sucursal.id, nombre: 'Blanc Polanco Norte' }, superAdmin)).resolves.toBeDefined();
   });

@@ -11,9 +11,12 @@ import { HealthController } from './shared/health/health.controller';
 
 /**
  * Modular Monolith (ADR-001) — un solo desplegable, módulos con frontera estricta.
- * `SucursalesYPersonalModule`, `IdentidadYAccesosModule` (alcance mínimo FL-SEG-01/03) y
- * `CatalogoYCotizacionModule` (FL-COT-01) y `AgendaModule` (Fase 2, solo capa de datos) están cableados hasta ahora
- * (arranque parcial controlado, IMPLEMENTATION_MASTER_PLAN.md, Enmienda 2026-08-04).
+ * Cableados hasta ahora: `SucursalesYPersonalModule`, `IdentidadYAccesosModule` (alcance mínimo
+ * FL-SEG-01/03), `CatalogoYCotizacionModule` (FL-COT-01), `AgendaModule` (Fase 2, con API HTTP) e
+ * `IntegracionModule` (dependencias entre Bounded Contexts) — arranque parcial controlado,
+ * IMPLEMENTATION_MASTER_PLAN.md, Enmienda 2026-08-04.
+ *
+ * `app.module.spec.ts` comprueba que este grafo resuelve de verdad: el build no lo garantiza.
  */
 @Module({
   imports: [

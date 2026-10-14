@@ -29,6 +29,15 @@ export interface IdentidadAutenticada {
  * casos de uso.
  */
 export interface ClaimsUsuario extends IdentidadAutenticada {
+  /**
+   * `P9` — id del registro de personal, cuando la usuaria ES una manicurista. `null` en cualquier
+   * otro rol.
+   *
+   * Viaja con los permisos resueltos contra PostgreSQL (`DEC-029`), no en el JWT, por la misma
+   * razón que el rol: es un dato administrativo cuya fuente de verdad es Blanc. Es lo que permite
+   * filtrar "sus propias citas" **sin fiarse de un id que mande el cliente**.
+   */
+  manicuristaId: string | null;
   rol: Rol;
   sucursales: AlcanceSucursales;
 }

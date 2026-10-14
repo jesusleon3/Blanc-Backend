@@ -23,6 +23,8 @@ export interface CitaRepository {
   buscarPorId(id: string): Promise<Cita | null>;
   /** Citas que **ocupan** horario en el rango dado (`DEC-034`); las canceladas/expiradas/reprogramadas no salen. */
   listarQueOcupanEnRango(sucursalId: string, rango: RangoHorario): Promise<Cita[]>;
-  /** Alimenta `VerificarCitasFuturasPort` (`DEC-032`) cuando Agenda lo implemente. Pendiente `N-04`. */
+  /** Citas que OCUPAN horario de una manicurista concreta dentro del rango (`DEC-036`). */
+  listarQueOcupanDeManicuristaEnRango(manicuristaId: string, rango: RangoHorario): Promise<Cita[]>;
+  /** Alimenta `VerificarCitasFuturasPort` (`DEC-032`). */
   tieneCitasFuturasQueOcupan(manicuristaId: string, desde: Date): Promise<boolean>;
 }

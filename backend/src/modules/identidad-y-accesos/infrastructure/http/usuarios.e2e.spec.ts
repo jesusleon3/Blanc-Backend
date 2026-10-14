@@ -41,7 +41,7 @@ const permisosDePrueba: PermisosUsuarioPort = {
 };
 
 function token(rol: Rol, sub = 'test-user', sucursales: 'GLOBAL' | string[] = 'GLOBAL') {
-  permisosPorSub.set(sub, { rol, activa: true, sucursales });
+  permisosPorSub.set(sub, { rol, activa: true, sucursales, manicuristaId: null });
   return jwt.sign({ iss: ISSUER, aud: 'authenticated', sub }, SECRETO);
 }
 

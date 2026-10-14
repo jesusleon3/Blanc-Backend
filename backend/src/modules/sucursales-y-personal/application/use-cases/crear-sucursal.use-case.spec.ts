@@ -16,7 +16,7 @@ const HORARIO = {
   domingo: [],
 };
 
-const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
 describe('CrearSucursalUseCase — FL-SUC-01', () => {
   function crearRepoFalso(): jest.Mocked<SucursalRepository> {

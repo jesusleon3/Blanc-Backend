@@ -32,6 +32,16 @@ export const usuarios = identidadAccesosSchema.table(
     // estado esperado, no un error. Sin FK: `auth.users` vive en otro sistema (ADR-005 ya prohíbe
     // FKs cruzadas incluso entre esquemas, aquí el cruce es aún más fuerte).
     supabaseUserId: uuid('supabase_user_id'),
+    /**
+     * `P9` — vínculo con el registro de personal. **Sin FK**: `manicuristas` vive en
+     * `sucursales_personal` y `ADR-005` prohíbe las claves foráneas entre esquemas.
+     *
+     * Es lo que permite que una usuaria con rol `MANICURISTA` vea **solo sus propias citas**: sin
+     * este dato, "sus citas" no se puede resolver desde el token de forma segura, y filtrar por un
+     * id que mande el cliente sería dejar que cualquiera lea la agenda ajena.
+     * `NULL` para todo rol que no sea manicurista.
+     */
+    manicuristaId: uuid('manicurista_id'),
     creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
     actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
   },

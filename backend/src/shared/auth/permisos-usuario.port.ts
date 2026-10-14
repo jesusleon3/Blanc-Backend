@@ -7,6 +7,8 @@ export interface PermisosUsuario {
   rol: Rol;
   activa: boolean;
   sucursales: AlcanceSucursales;
+  /** `P9` — ver `ClaimsUsuario.manicuristaId`. */
+  manicuristaId: string | null;
 }
 
 /**

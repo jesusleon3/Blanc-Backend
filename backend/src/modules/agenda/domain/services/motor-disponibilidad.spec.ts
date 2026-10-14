@@ -10,7 +10,7 @@ import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 
-const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL' };
+const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
 const CLIENTA = '22222222-2222-2222-2222-222222222222';
 const SERVICIO = '33333333-3333-3333-3333-333333333333';
@@ -49,6 +49,17 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
     motor,
     agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, crearUnitOfWorkFalso()),
     consultar: new ConsultarDisponibilidadUseCase(motor),
+    /**
+     * Otro motor sobre LA MISMA base, con otro personal operativo. Es como se simula el efecto de
+     * una ausencia sin tener que montar el Bounded Context de Personal: las citas ya vendidas
+     * siguen ahí y lo único que cambia es quién está para atenderlas.
+     */
+    motorCon: (manicuristas: string[]) =>
+      new MotorDisponibilidad(
+        citaRepo,
+        sillaRepo,
+        crearContextoPersonalFalso({ horario: horarioRealDeBlanc(), manicuristas }),
+      ),
   };
 }
 
@@ -145,6 +156,34 @@ describe('MotorDisponibilidad — capacidad efectiva MIN(sillas, manicuristas) �
   it('una sucursal sin sillas configuradas da un error de configuración, no "no hay lugar"', async () => {
     const { agendar } = await preparar({ sillas: 0 });
     await expect(agendar.ejecutar(reserva(), ACTOR)).rejects.toMatchObject({ code: 'SUCURSAL_SIN_SILLAS' });
+  });
+
+  describe('`deficitDePersonal` — el aviso que `capacidad` no puede dar', () => {
+    it('es 0 mientras el personal alcance para las citas ya vendidas', async () => {
+      const { motor, agendar } = await preparar({ sillas: 3, manicuristas: [ANA, BEA, CARO] });
+      await agendar.ejecutar(reserva(), ACTOR);
+
+      expect((await motor.calcularCapacidad(SUCURSAL, LUNES_10_11)).deficitDePersonal).toBe(0);
+    });
+
+    it('CUENTA LAS CITAS QUE SE QUEDAN SIN MANOS, que es lo que `capacidad` no puede expresar', async () => {
+      const { agendar, motorCon } = await preparar({ sillas: 3, manicuristas: [ANA, BEA] });
+      await agendar.ejecutar(reserva(), ACTOR);
+      await agendar.ejecutar(reserva(), ACTOR);
+
+      // Con las dos manicuristas, las dos citas están cubiertas: no hay déficit.
+      expect((await motorCon([ANA, BEA]).calcularCapacidad(SUCURSAL, LUNES_10_11)).deficitDePersonal).toBe(0);
+
+      // Si BEA falta, una de las dos citas se queda sin quién la atienda.
+      const trasLaAusencia = await motorCon([ANA]).calcularCapacidad(SUCURSAL, LUNES_10_11);
+      expect(trasLaAusencia.deficitDePersonal).toBe(1);
+
+      // Y aquí está el motivo de que sea un campo aparte: `capacidad` vale 0 en LOS DOS casos,
+      // porque se recorta. Por sí sola no distingue "justo lleno" de "pasado de rosca" — y esa
+      // distinción es toda la pregunta al registrar una ausencia.
+      expect(trasLaAusencia.capacidad).toBe(0);
+      expect((await motorCon([ANA, BEA]).calcularCapacidad(SUCURSAL, LUNES_10_11)).capacidad).toBe(0);
+    });
   });
 
   it('un horario libre reporta capacidad completa', async () => {

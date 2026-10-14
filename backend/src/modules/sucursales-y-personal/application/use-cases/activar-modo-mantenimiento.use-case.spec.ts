@@ -17,7 +17,7 @@ const HORARIO = {
   domingo: [],
 };
 
-const SUPER_ADMIN: ClaimsUsuario = { sub: 'super-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
+const SUPER_ADMIN: ClaimsUsuario = { sub: 'super-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
 
 function crearRepoFalso(sucursales: Sucursal[]): jest.Mocked<SucursalRepository> {
   return {

@@ -13,6 +13,8 @@ export interface CitaProps {
   estado: EstadoCita;
   citaOrigenId: string | null;
   numeroDeReprogramaciones: number;
+  /** Cotización congelada al agendar (`04-data-model.md` §5.2). `null` hasta que exista `FL-COT-03`. */
+  cotizacionSnapshot: unknown;
 }
 
 /**
@@ -93,6 +95,7 @@ export class Cita {
     estado?: EstadoCita;
     citaOrigenId?: string | null;
     numeroDeReprogramaciones?: number;
+    cotizacionSnapshot?: unknown;
   }): Cita {
     validarRangoHorario(input.rangoHorario);
 
@@ -119,6 +122,7 @@ export class Cita {
       estado,
       citaOrigenId: input.citaOrigenId ?? null,
       numeroDeReprogramaciones: input.numeroDeReprogramaciones ?? 0,
+      cotizacionSnapshot: input.cotizacionSnapshot ?? null,
     });
   }
 
@@ -200,6 +204,9 @@ export class Cita {
   }
   get numeroDeReprogramaciones(): number {
     return this.props.numeroDeReprogramaciones;
+  }
+  get cotizacionSnapshot(): unknown {
+    return this.props.cotizacionSnapshot;
   }
 }
 

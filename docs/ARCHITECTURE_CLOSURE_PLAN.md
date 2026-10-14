@@ -121,9 +121,11 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 - **Fase que bloquea:** Ya no bloquea el arranque parcial autorizado. Sigue bloqueando el resto de Fase 1/2+ hasta que cada módulo tenga su contrato.
 - **¿Puede resolverse durante desarrollo?** Las convenciones transversales, no (ya cerradas antes de empezar). Los contratos específicos, sí — módulo por módulo, mismo principio ya aplicado a los Decision Flows (`IMPLEMENTATION_MASTER_PLAN.md` §11).
 
-### P9 — Agregar la referencia `usuarios ↔ manicuristas_recurso`
+### P9 — Agregar la referencia `usuarios ↔ manicuristas_recurso` — **RESUELTO (2026-10-14)**
 
-- **¿Por qué sigue abierto?** Vacío verificado directamente en `04-data-model.md` §5.10 — ninguna tabla conecta a un usuario con rol Manicurista con su recurso agendable.
+- **Estado:** **Resuelto.** La columna `identidad_accesos.usuarios.manicurista_id` existe (migración `0009`) y está documentada en `04-data-model.md` §5.10. Se implementó con el nombre `manicurista_id` y no `manicurista_recurso_id`: la tabla destino se llama `manicuristas`, así que el sufijo describiría una distinción que el nombre de la tabla no hace.
+- **Cómo se resolvió, y por qué antes de lo previsto:** no se cerró por planificación sino **por necesidad**. Al construir la API HTTP de Agenda (Fase 2, parte 5) el requisito "la Manicurista ve únicamente sus propias citas" resultó no ser implementable de forma segura sin este vínculo — el único id disponible venía de la petición, y aceptarlo dejaría leer la agenda ajena cambiando un uuid. Confirma la evaluación original de este pendiente: columna aditiva, sin riesgo, resoluble durante desarrollo.
+- **¿Por qué estaba abierto?** Vacío verificado directamente en `04-data-model.md` §5.10 — ninguna tabla conectaba a un usuario con rol Manicurista con su recurso agendable.
 - **¿Quién debe resolverlo?** Arquitectura.
 - **Documento que cambia:** `04-data-model.md` §5.10 (agregar `manicurista_recurso_id` a `usuarios`).
 - **Criterio de cierre:** la columna existe y está documentada.
@@ -177,13 +179,13 @@ Este documento se escribió el 2026-07-16, antes de que existieran `PLATFORM_ARC
 |---|---|---|---|---|---|
 | P1 — Conjunto Supabase / BD / ORM / Auth | Desarrollo | `03-technical-architecture.md` | ~~Fase 1 completa~~ Ninguna | **Resuelto (2026-08-04)** | Ninguna — Supabase (BD/Auth/Storage/Realtime) + Drizzle + Railway. Validación en producción de Auth/Railway pendiente como tarea de Fase 1 |
 | P2 — `PA-19` (alcance RBAC) | Cliente | `RN-SEG-03`, `99-open-questions.md` | ~~Fase 1 (modelo de permisos), `05-api-design.md`~~ Ninguna | **Resuelto (2026-08-04)** | Ninguna — `RN-SEG-03: Aprobada`, transcrito a `99-open-questions.md` en Paso 11 |
-| P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | Fase 2, Fase 4 | **Abierto — parcialmente desbloqueado (2026-09-30)**: `Cita` tiene ya disparador de `completada` (`DEC-030`) y lista de estados que ocupan horario (`DEC-034`); `Conversación` y `TicketEscalamiento` siguen intactas | Cerrar `Cita` (falta `pendiente_confirmacion`); las otras dos esperan a Fase 4 |
+| P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | ~~Fase 2~~ Fase 4 | **Abierto — `Cita` CERRADA (2026-10-14)**: máquina formal implementada y probada (`TRANSICIONES_LEGALES`, 9 estados, `ESTADOS_INICIALES`, transición administrativa `completada → no_show` de `N-02`). `Conversación` y `TicketEscalamiento` siguen intactas | Solo quedan las dos de Fase 4 — ya no bloquea Fase 2 |
 | P4 — Invariante de capacidad sin manicurista | Cliente + Arquitectura | `01-domain-discovery.md`, `decision-flows-catalogo-diseno.md` | ~~Fase 2~~ Ninguna | **Resuelto (2026-09-30)** | Ninguna — límite físico por sucursal (Zibatá 5, Lomas 3, Álamos 1) + patrón de Sillas Virtuales, `DEC-031` |
 | P5 — Circular Agenda↔Anticipos | Arquitectura | `decision-flows-catalogo-diseno.md` | Fase 2/3 | Abierto | Corregir una fila del catálogo |
 | P6 — Ratificar F-27 y F-14 | Arquitectura + Cliente | ADR nuevo + enmienda ADR-007/017/022 | Fase 4 | Abierto | Redactar y aprobar |
 | P7 — Sign-off ADR-008 | Cliente | `ADR-008-*.md` | ~~Fase 4 + trámite Meta~~ Ninguna | **Resuelto (2026-10-09)** | Ninguna — API oficial en exclusiva (`DEC-043`); `ADR-008` pasa a `Accepted` con Enmienda 1. Revierte la petición de doble adaptador de 1.29. **Dispara el trámite de Meta: ahora es camino crítico** |
 | P8 — `05-api-design.md` | Arquitectura | `05-api-design.md` (ya existe, parcial) | Módulos sin contrato específico todavía | Abierto (parcialmente iniciado) | Redactar contratos módulo por módulo |
-| P9 — `usuarios↔manicuristas_recurso` | Arquitectura | `04-data-model.md` | Rol Manicurista (Fase 1/2) | Abierto | Agregar columna |
+| P9 — `usuarios↔manicuristas_recurso` | Arquitectura | `04-data-model.md` | Rol Manicurista (Fase 1/2) | **Resuelto (2026-10-14)** | Columna `usuarios.manicurista_id`, migración `0009` |
 
 ---
 
@@ -231,7 +233,7 @@ Cuando estas nueve condiciones se cumplen, la arquitectura está oficialmente ce
 - [ ] Máquina de estados de `TicketEscalamiento` documentada (P3)
 - [ ] Invariante de capacidad para citas sin manicurista resuelta (P4)
 - [ ] `FL-ANT-01` corregido en el catálogo de Decision Flows (P5)
-- [ ] `usuarios.manicurista_recurso_id` agregado a `04-data-model.md` (P9)
+- [x] `usuarios.manicurista_recurso_id` agregado a `04-data-model.md` (P9) — implementado como `usuarios.manicurista_id`, migración `0009`, 2026-10-14
 - [ ] F-27 ratificado como ADR (P6)
 - [ ] F-14 ratificado como enmienda (P6)
 - [ ] `ADR-008` con sign-off explícito del cliente (P7)
@@ -258,7 +260,9 @@ Cuando los quince puntos están en verde, el proyecto puede empezar a programars
 
 ## Riesgos que NO deben aceptarse
 
-Los siete pendientes abiertos de la Sección 1/2 (P3-P9) — sin excepción; P1 y P2 ya están resueltos (ver §1). Ninguno se pospone a "durante desarrollo" sin las salvedades ya indicadas explícitamente en cada uno (P5 y P9 son de bajo riesgo real pero no hay motivo para no cerrarlos ya, dado su bajo costo). Los verdaderos bloqueadores no negociables antes de escribir el primer módulo de dominio real (Fase 2, Agenda) son **P3, P4 y P5** — sin ellos, el invariante central del sistema (no-doble-booking) queda con huecos ya demostrados, no hipotéticos.
+Los pendientes que siguen abiertos en la Sección 1/2. **Actualizado 2026-10-14:** ya están resueltos `P1`, `P2`, `P4`, `P7` y `P9`; `P3` está cerrado para `Cita` y solo le quedan las dos máquinas de Fase 4. **Siguen abiertos: `P5`, `P6`, `P8` y `P10`** (más la parte de Fase 4 de `P3`).
+
+Ninguno se pospone a "durante desarrollo" sin las salvedades ya indicadas explícitamente en cada uno. De los tres que este documento señalaba como bloqueadores no negociables antes de escribir el primer módulo de dominio real (Fase 2, Agenda) —**`P3`, `P4` y `P5`**—, `P3` y `P4` están resueltos y el invariante central (no-doble-booking) **está implementado y probado contra PostgreSQL real** mediante el patrón de Sillas Virtuales y dos restricciones `EXCLUDE USING gist`. **`P5` (circularidad Agenda↔Anticipos) sigue abierto y es el único de los tres que falta**; no ha bloqueado hasta ahora porque Anticipos no se ha construido, pero bloquea Fase 3.
 
 ---
 

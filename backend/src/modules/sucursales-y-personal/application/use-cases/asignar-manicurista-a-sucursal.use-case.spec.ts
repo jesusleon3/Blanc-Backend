@@ -7,7 +7,7 @@ import { ConflictoDeNegocioError, RecursoNoEncontradoError } from '../../../../s
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 
-const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 const HORARIO = {
   lunes: [{ horaInicio: '09:00', horaFin: '18:00' }],
   martes: [{ horaInicio: '09:00', horaFin: '18:00' }],

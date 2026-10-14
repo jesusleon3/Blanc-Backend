@@ -77,6 +77,7 @@ export class AuthorizationGuard implements CanActivate {
       sub: autenticado.sub,
       rol: permisos.rol,
       sucursales: permisos.sucursales,
+      manicuristaId: permisos.manicuristaId,
     };
 
     // Se sobrescribe deliberadamente: lo que venga en el token no es autoridad sobre rol ni

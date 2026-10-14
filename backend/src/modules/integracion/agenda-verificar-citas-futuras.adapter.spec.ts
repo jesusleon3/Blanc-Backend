@@ -12,7 +12,7 @@ import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../shared/persistence/test-utils/unit-of-work-falso';
 import { EstadoCita } from '../../database/schema';
 
-const ACTOR: ClaimsUsuario = { sub: 'duena-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+const ACTOR: ClaimsUsuario = { sub: 'duena-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
 const CLIENTA = '22222222-2222-2222-2222-222222222222';
 const SERVICIO = '33333333-3333-3333-3333-333333333333';
@@ -58,6 +58,7 @@ async function preparar() {
       estado,
       citaOrigenId: null,
       numeroDeReprogramaciones: 0,
+      cotizacionSnapshot: null,
     });
     await citaRepo.guardar(cita);
     return cita;

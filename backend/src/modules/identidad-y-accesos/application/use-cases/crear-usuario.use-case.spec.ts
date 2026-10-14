@@ -6,8 +6,8 @@ import { AsignacionDeRolNoPermitidaError, ConflictoDeNegocioError } from '../../
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 
-const SUPER_ADMIN: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL' };
-const ADMINISTRADOR: ClaimsUsuario = { sub: 'actor-2', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+const SUPER_ADMIN: ClaimsUsuario = { sub: 'actor-1', rol: Rol.SUPER_ADMIN, sucursales: 'GLOBAL', manicuristaId: null };
+const ADMINISTRADOR: ClaimsUsuario = { sub: 'actor-2', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 
 function crearRepoFalso(existente: Usuario | null = null): jest.Mocked<UsuarioRepository> {
   return {

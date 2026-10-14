@@ -1,7 +1,7 @@
 import { ClaimsUsuario, puedeAsignarRol, Rol, tieneAlcanceSucursal } from './rol';
 
 function claims(overrides: Partial<ClaimsUsuario>): ClaimsUsuario {
-  return { sub: 'user-1', rol: Rol.ADMINISTRADOR, sucursales: [], ...overrides };
+  return { sub: 'user-1', rol: Rol.ADMINISTRADOR, sucursales: [], manicuristaId: null, ...overrides };
 }
 
 describe('tieneAlcanceSucursal — ADR-010, 05-api-design.md §6', () => {

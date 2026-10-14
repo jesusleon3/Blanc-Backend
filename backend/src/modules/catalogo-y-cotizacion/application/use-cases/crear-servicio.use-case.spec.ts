@@ -8,7 +8,7 @@ import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { UnitOfWork } from '../../../../shared/persistence/unit-of-work.port';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 
-const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL' };
+const ACTOR: ClaimsUsuario = { sub: 'admin-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 const INPUT_VALIDO = { nombre: 'Gelish', categoria: 'aplicacion', duracionBaseMinutos: 60, precioBaseCentavos: 45000 };
 
 function crearRepoFalso(servicios: Servicio[] = []): jest.Mocked<ServicioRepository> {

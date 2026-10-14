@@ -1136,6 +1136,121 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-14 (d) — Fase 2 (parte 5): API HTTP de Agenda, excepciones operables y RBAC de iPad. **Bloqueos 2 y 6 CERRADOS**
+
+Con esta entrega **todo lo construido en Fase 2 es alcanzable desde fuera del backend** y `DEC-036` pasa de "construido" a **operable**: ya se puede capturar una ausencia.
+
+#### 🐛 El defecto de fondo: el aviso de sobrecupo no se emitía nunca
+
+`ConsultaAgendaAdapter` debía devolver **dos** clases de cita afectada al registrar una ausencia. La segunda —`sobrecupo_en_sucursal`— estaba escrita pero era **código muerto**: su guardia era `capacidad >= 0`, y `calcularCapacidad` recorta con `Math.max(0, …)`, así que la condición era **siempre verdadera** y el bucle nunca entraba.
+
+**Por qué importaba.** Esa clase es la única que detecta el caso en el que *ninguna cita lleva el nombre de la manicurista ausente*: 2 citas sin asignar, 2 manicuristas, falta una → a las 10:00 hay dos clientas y una sola persona. Una detección ingenua reporta "cero afectadas" y la Encargada se enteraría al llegar la segunda clienta.
+
+**Causa raíz, y es un patrón a vigilar:** `capacidad` se recorta a `0` porque responde *"¿cabe otra?"*, y ahí no hay diferencia entre "justo lleno" y "pasado de rosca". Pero esa diferencia **es toda la pregunta** al registrar una ausencia. El clamp destruía la información justo antes de usarla.
+
+**Arreglo:** `CapacidadEfectiva` expone ahora `deficitDePersonal` — cuántas citas ya vendidas se quedarían sin manos, **sin recortar**. El adaptador usa ese campo y la rama convolucionada (`cupoDisponible`) desapareció.
+
+#### Archivos creados
+
+| Archivo | Qué es |
+|---|---|
+| `agenda/application/use-cases/consultar-agenda.use-case.ts` | Lectura de agenda **con el filtro de iPad dentro del caso de uso** |
+| `agenda/application/use-cases/gestionar-sillas.use-case.ts` | Alta/baja/listado de sillas — auditado como cambio de configuración |
+| `agenda/infrastructure/http/citas.controller.ts` | `/v1/agenda/citas` — ciclo de vida completo |
+| `agenda/infrastructure/http/sillas.controller.ts` | `/v1/agenda/sillas` y `/v1/agenda/disponibilidad` |
+| `agenda/infrastructure/http/cita.presenter.ts` | DTO **dependiente del rol** |
+| `agenda/infrastructure/http/dto/agendar-cita.dto.ts` | 6 DTOs con validación estricta |
+| `agenda/infrastructure/http/citas.e2e.spec.ts` | **24 pruebas E2E HTTP** |
+| `sucursales-y-personal/application/use-cases/registrar-excepcion-personal.use-case.ts` | `registrarAusencia` / `registrarCobertura` / `revocar` |
+| `sucursales-y-personal/application/use-cases/registrar-excepcion-personal.use-case.spec.ts` | **11 pruebas de integración** con adaptadores reales |
+| `sucursales-y-personal/domain/ports/consulta-agenda.port.ts` | Lo que Personal pregunta a Agenda |
+| `sucursales-y-personal/infrastructure/http/excepciones-personal.controller.ts` | `/v1/sucursales-y-personal/excepciones` |
+| `sucursales-y-personal/infrastructure/http/excepciones-personal.e2e.spec.ts` | **17 pruebas E2E HTTP** |
+| `integracion/consulta-agenda.adapter.ts` | Implementa el puerto viendo los dos BC |
+| `database/schema/deriva-restricciones-agenda.spec.ts` | **Detector de deriva (cierra el bloqueo 2)** |
+| `database/migrations/0009_vinculo_usuario_manicurista_y_snapshot.sql` | `usuarios.manicurista_id` + `citas.cotizacion_snapshot` |
+| `app.module.spec.ts` | **Prueba de humo del contenedor completo** |
+
+#### `P9` resuelto por necesidad
+
+La orden pedía que una `Manicurista` viera *"únicamente sus propias citas"*. **No existía ningún vínculo `usuarios ↔ manicuristas`**, así que esa regla no era implementable de forma segura: el único id disponible venía de la petición, y aceptarlo dejaría leer la agenda ajena cambiando un uuid.
+
+`manicurista_id` se añadió a `usuarios` (migración `0009`) y viaja por `PermisosUsuario` → `AuthorizationGuard` → `ClaimsUsuario`. **El filtro vive en `ConsultarAgendaUseCase`, no en el controlador**, para que viaje con la agenda a cualquier adaptador futuro (el bot, un job). Una usuaria con rol `MANICURISTA` y sin vínculo **no ve nada** — el lado seguro del error.
+
+#### API HTTP y RBAC
+
+| Método y ruta | Roles |
+|---|---|
+| `GET /v1/agenda/citas` | Super Admin, Administrador, Gerente, **Manicurista (solo las suyas)** |
+| `POST /v1/agenda/citas` | Super Admin, Administrador, Gerente |
+| `POST /v1/agenda/citas/:id/{manicurista,solicitar-confirmacion,confirmar,cancelar,no-show,completar}` | Super Admin, Administrador, Gerente |
+| `POST /v1/agenda/citas/:id/reprogramar` | Super Admin, Administrador, Gerente |
+| `GET /v1/agenda/sillas` | Super Admin, Administrador, Gerente |
+| `POST /v1/agenda/sillas`, `POST /v1/agenda/sillas/:id/desactivar` | Super Admin, Administrador |
+| `GET /v1/agenda/disponibilidad` | Super Admin, Administrador, Gerente |
+| `POST /v1/sucursales-y-personal/excepciones/{ausencias,coberturas}`, `DELETE …/:id` | Super Admin, Administrador, **Gerente** |
+
+Tres decisiones de RBAC que conviene conocer antes de cambiarlas:
+
+- **Las sillas son configuración de capacidad, no operación diaria** — solo Administración. El número de filas *es* la capacidad vendible de la sucursal; la Encargada opera la agenda del día pero no redefine cuántas estaciones tiene el local.
+- **Las excepciones sí las captura la `GERENTE`.** Es un registro *del día*: si solo pudiera capturarlo Administración, nadie lo anotaría a las 8 de la mañana cuando alguien avisa que no viene, y el motor seguiría vendiendo huecos imposibles.
+- **El `@Roles` va por método, no por clase.** El precio es que **toda ruta nueva debe declarar el suyo**: sin decorador, `RolesGuard` la deja pasar a cualquier autenticado.
+
+#### Códigos HTTP corregidos
+
+Solo `POST /citas` y `POST /:id/reprogramar` devuelven `201`, porque son los únicos donde nace una cita. Las demás son transiciones de estado sobre algo que ya existe y devuelven `200`: un `201 Created` le diría al cliente que se creó un recurso nuevo en otra URL.
+
+#### Pruebas: **+117** (624 → **741**, 57 suites)
+
+Destacan las que prueban algo que podría romperse en silencio:
+
+- **La Manicurista no ve `clientaId`** — es la llave con la que se consultaría el historial y la clasificación de la clienta, lista roja incluida. El `cita.presenter.ts` separa las dos formas **antes de que exista el BC de CRM**, porque el día que exista va a ser tentador adjuntar ese dato a la respuesta de la agenda.
+- **El filtro no se toma de la query** — hay una prueba que pasa explícitamente el id de otra manicurista y espera `[]`.
+- **403 al cancelar y al completar** (`DEC-040`: la manicurista no marca llegada ni finalización), al agendar, al reprogramar, al marcar no-show y al dar de alta una silla.
+- **Desactivar una silla reduce la capacidad vendible**, no solo cambia una bandera: tras desactivar una de dos, la segunda cita simultánea recibe `409`.
+- **La cobertura es un movimiento**: sacar a una manicurista deja 2 sillas libres y `capacidad 1`; la segunda cita se rechaza aunque la silla esté físicamente vacía.
+- **Prueba de humo de `AppModule`** — `npm run build` compila tipos pero no resuelve el grafo de inyección. Sin esto, un cableado roto que solo `AppModule` monta pasaba el build y las 740 pruebas, y fallaba al arrancar en producción. Se detectó justo así: al registrar el caso de uso nuevo, `sucursales.e2e.spec.ts` dejó de resolver `CONSULTA_AGENDA_PORT`.
+
+#### Bloqueos de Fase 2 — estado final
+
+| # | Estado |
+|---|---|
+| **1** Faltaban estados de `Cita` | **RESUELTO** (parte 2) |
+| **2** `EXCLUDE`/`CHECK` fuera del snapshot de Drizzle | **CERRADO** — ver abajo |
+| **3** Entidades anémicas | **RESUELTO** (parte 3, `P3`) |
+| **4** `MotorDisponibilidad` no existía | **RESUELTO** (parte 4) |
+| **5** `VerificarCitasFuturasPort` sin implementar | **RESUELTO** (parte 2) |
+| **6** Sin `cotizacion_snapshot` | **CERRADO en su parte estructural** — ver abajo |
+| **7** Ninguna migración aplicada a base real | **NO ES DEUDA DE FASE 2** — ver abajo |
+
+**Bloqueo 2 — cerrado con un detector de deriva, no con un comentario.** `deriva-restricciones-agenda.spec.ts` consulta `pg_constraint` en la base migrada y compara los literales del `CHECK` y de los dos `WHERE` de las `EXCLUDE` contra `ESTADOS_CITA` y `ESTADOS_QUE_LIBERAN_HORARIO`. Antes, la regla "edita cuatro sitios" la sostenía solo un comentario, y un comentario no falla el build. Lo que atrapa:
+
+- *Olvidar el `CHECK`*: PostgreSQL rechaza el insert — molesto pero ruidoso.
+- *Olvidar un `WHERE`*: **silencioso y grave**. Si el estado nuevo debía liberar y la `EXCLUDE` no lo sabe, el hueco queda ocupado por una cita muerta. Si debía ocupar y no lo cuenta, **se puede sobrevender la misma silla y la invariante física deja de ser invariante**.
+
+Incluye dos guardias que una comparación de listas no daría: que el predicado **siga siendo una negación** (con `= ANY` la misma lista significaría lo contrario) y que `en_espera_pago` siga liberando (`RN-ANT-03` por encima de `DEC-034`). **El detector se verificó introduciendo deriva deliberada**: falla.
+
+**Bloqueo 6 — la columna y la tubería están; producir el valor es de `FL-COT-03`.** `cotizacion_snapshot` existe (migración `0009`), la entidad la transporta, el repositorio la persiste y el presenter la expone — la Manicurista **sí ve precios**, confirmado por la Dueña.
+
+> **Lo que deliberadamente NO se hizo: `cotizacionSnapshot` no se aceptó como campo del DTO HTTP.** Si el cliente pudiera enviar el snapshot, estaría fijando precios desde fuera del backend. Es el mismo error de clase que la arquitectura ya prohíbe para OpenAI: *el backend y el dominio son la única autoridad sobre reglas de negocio*. El snapshot tiene que **calcularlo el motor de cotización** (`FL-COT-03`) a partir del catálogo. Hasta entonces la columna queda en `null`, que es honesto; aceptarla por HTTP sería una puerta difícil de cerrar después.
+
+**Bloqueo 7 — no es deuda de Fase 2.** Aplicar migraciones a una base real es una actividad de despliegue (Fase 7) y está fuera de alcance por restricción explícita y repetida de todas las órdenes. Las 10 migraciones se ejecutan íntegras contra PostgreSQL real (Testcontainers) en cada corrida, así que **están verificadas; lo que no existe todavía es el entorno al que aplicarlas**. Se reclasifica como tarea de Fase 7, no como bloqueo abierto.
+
+#### Validación
+
+`tsc --noEmit` 0 · `tsc -p tsconfig.eslint.json` 0 · `lint` 0 errores 0 avisos · `build` OK · `drizzle-kit check` OK · `madge --circular` 0 ciclos · **741/741 pruebas** en 57 suites.
+
+#### 🔴 Deuda nueva y riesgos para el siguiente turno
+
+1. **`servicioId` y `clientaId` no se validan contra nada.** Llegan como uuid y el DTO solo comprueba el formato: `ADR-005` prohíbe la FK cruzada, y los puertos hacia Catálogo y CRM no existen. **Hoy se puede agendar una cita de un servicio inexistente para una clienta inexistente.** Es el hueco más grande que queda en la API de Agenda.
+2. **La duración de la cita no se valida contra el servicio.** El cliente manda `inicio` y `fin` libres; nada obliga a que correspondan a la duración del catálogo (`FL-COT-02`, pospuesto).
+3. **El aviso de sobrecupo reporta TODAS las citas sin asignar de la sucursal**, no solo las `deficitDePersonal` que se quedarán sin atender. Es deliberado —el déficit dice *cuántas*, no *cuáles*, porque ninguna tiene dueña— pero en una sucursal muy cargada la lista será ruidosa. Si molesta, la decisión correcta es ordenarlas, no recortarlas al azar.
+4. **El rango de una excepción no se valida contra el horario de la sucursal** (deuda heredada de la parte 4, sigue abierta).
+5. **`GET /v1/agenda/citas` no pagina ni acota el rango.** Un rango de un año devolvería todas las citas de la sucursal en un solo JSON.
+6. **El `GET` de disponibilidad no está abierto al bot todavía.** Cuando exista el canal de WhatsApp necesitará un principal propio; hoy solo lo alcanzan roles humanos.
+
+---
+
 ### 2026-10-14 (c) — Fase 2 (parte 4): horarios, ausencias y `MotorDisponibilidad`. **Bloqueo 4 CERRADO**
 
 #### 🔴 El problema estructural que había que resolver primero

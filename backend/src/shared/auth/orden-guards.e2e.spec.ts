@@ -94,7 +94,7 @@ describe('Cadena de guards — JwtAuthGuard → AuthorizationGuard → RolesGuar
   it('la base de datos gana sobre los claims del token', async () => {
     // El token dice SUPER_ADMIN/GLOBAL; la base de datos dice RECEPCIONISTA con una sucursal.
     app = await levantar({
-      obtenerPermisosPorSupabaseUserId: async () => ({ rol: Rol.RECEPCIONISTA, activa: true, sucursales: [SUC_1] }),
+      obtenerPermisosPorSupabaseUserId: async () => ({ rol: Rol.RECEPCIONISTA, activa: true, sucursales: [SUC_1], manicuristaId: null }),
     });
 
     const respuesta = await request(app.getHttpServer()).get('/prueba/abierto').set('Authorization', `Bearer ${token()}`).expect(200);
@@ -104,7 +104,7 @@ describe('Cadena de guards — JwtAuthGuard → AuthorizationGuard → RolesGuar
 
   it('RolesGuard decide con el rol REAL, no con el del token (403 pese a un token de Super Admin)', async () => {
     app = await levantar({
-      obtenerPermisosPorSupabaseUserId: async () => ({ rol: Rol.RECEPCIONISTA, activa: true, sucursales: [SUC_1] }),
+      obtenerPermisosPorSupabaseUserId: async () => ({ rol: Rol.RECEPCIONISTA, activa: true, sucursales: [SUC_1], manicuristaId: null }),
     });
 
     const respuesta = await request(app.getHttpServer())
@@ -117,7 +117,7 @@ describe('Cadena de guards — JwtAuthGuard → AuthorizationGuard → RolesGuar
 
   it('un usuario desactivado en base de datos recibe 403 aunque su token siga vigente', async () => {
     app = await levantar({
-      obtenerPermisosPorSupabaseUserId: async () => ({ rol: Rol.SUPER_ADMIN, activa: false, sucursales: 'GLOBAL' }),
+      obtenerPermisosPorSupabaseUserId: async () => ({ rol: Rol.SUPER_ADMIN, activa: false, sucursales: 'GLOBAL', manicuristaId: null }),
     });
 
     const respuesta = await request(app.getHttpServer())

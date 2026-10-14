@@ -21,8 +21,18 @@ export const ZONA_HORARIA_NEGOCIO = 'America/Mexico_City';
 export interface CapacidadEfectiva {
   sillasLibres: number;
   manicuristasDisponibles: number;
-  /** `MIN(sillasLibres, manicuristasDisponibles)` — `DEC-035`. */
+  /** `MIN(sillasLibres, manicuristasDisponibles)` — `DEC-035`. Nunca negativo. */
   capacidad: number;
+  /**
+   * Cuántas citas que ya ocupan el horario se quedarían **sin manos** (`0` si alcanza para todas).
+   *
+   * POR QUÉ ES UN CAMPO APARTE. `capacidad` responde "¿cabe una más?" y para eso se recorta a `0`:
+   * no hay diferencia práctica entre "justo lleno" y "pasado de rosca" cuando lo que se pregunta
+   * es si se puede vender otra cita. Pero esa diferencia es **toda la pregunta** al registrar una
+   * ausencia: lo que la Encargada necesita saber es si el personal que queda ya no alcanza para
+   * las citas que **ya están vendidas**. Recortado a cero, ese aviso no existiría.
+   */
+  deficitDePersonal: number;
 }
 
 /**
@@ -105,7 +115,17 @@ export class MotorDisponibilidad {
 
     const manicuristasDisponibles = Math.max(0, operativas.filter((id) => !nombradasComprometidas.has(id)).length - sinAsignar);
 
-    return { sillasLibres, manicuristasDisponibles, capacidad: Math.min(sillasLibres, manicuristasDisponibles) };
+    // Sobrecupo: citas ya vendidas que ocupan este horario frente al personal que realmente está.
+    // Se mide contra el total de citas que ocupan, con nombre o sin él, porque una manicurista
+    // ausente sigue teniendo sus citas en el libro — simplemente ya no está para atenderlas.
+    const deficitDePersonal = Math.max(0, citasQueOcupan.length - operativas.length);
+
+    return {
+      sillasLibres,
+      manicuristasDisponibles,
+      capacidad: Math.min(sillasLibres, manicuristasDisponibles),
+      deficitDePersonal,
+    };
   }
 
   /** `RN-AGE-10` y `RN-AGE-12`: dentro de un bloque del día, sin cruzar el corte, y no en domingo. */

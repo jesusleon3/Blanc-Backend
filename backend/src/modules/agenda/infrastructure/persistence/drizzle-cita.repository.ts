@@ -35,6 +35,7 @@ export class DrizzleCitaRepository implements CitaRepository {
           servicioId: cita.servicioId,
           rangoHorario: cita.rangoHorario,
           estado: cita.estado,
+          cotizacionSnapshot: cita.cotizacionSnapshot,
           citaOrigenId: cita.citaOrigenId,
           numeroDeReprogramaciones: cita.numeroDeReprogramaciones,
         })
@@ -45,6 +46,7 @@ export class DrizzleCitaRepository implements CitaRepository {
             manicuristaId: cita.manicuristaId,
             rangoHorario: cita.rangoHorario,
             estado: cita.estado,
+            cotizacionSnapshot: cita.cotizacionSnapshot,
             citaOrigenId: cita.citaOrigenId,
             numeroDeReprogramaciones: cita.numeroDeReprogramaciones,
             actualizadoEn: new Date(),
@@ -93,6 +95,20 @@ export class DrizzleCitaRepository implements CitaRepository {
     return filas.map((fila) => this.aEntidad(fila));
   }
 
+  async listarQueOcupanDeManicuristaEnRango(manicuristaId: string, rango: RangoHorario): Promise<Cita[]> {
+    const filas = await this.db
+      .select()
+      .from(citas)
+      .where(
+        and(
+          eq(citas.manicuristaId, manicuristaId),
+          notInArray(citas.estado, [...ESTADOS_QUE_LIBERAN_HORARIO]),
+          sql`${citas.rangoHorario} && ${aRangoSql(rango)}`,
+        ),
+      );
+    return filas.map((fila) => this.aEntidad(fila));
+  }
+
   async tieneCitasFuturasQueOcupan(manicuristaId: string, desde: Date): Promise<boolean> {
     const filas = await this.db
       .select({ id: citas.id })
@@ -118,6 +134,7 @@ export class DrizzleCitaRepository implements CitaRepository {
       servicioId: fila.servicioId,
       rangoHorario: fila.rangoHorario,
       estado: fila.estado as EstadoCita,
+      cotizacionSnapshot: fila.cotizacionSnapshot,
       citaOrigenId: fila.citaOrigenId,
       numeroDeReprogramaciones: fila.numeroDeReprogramaciones,
     });

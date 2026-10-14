@@ -29,6 +29,7 @@ function enEstado(estado: EstadoCita): Cita {
     estado,
     citaOrigenId: null,
     numeroDeReprogramaciones: 0,
+    cotizacionSnapshot: null,
   });
 }
 

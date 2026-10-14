@@ -30,7 +30,9 @@ export class ConsultarDisponibilidadUseCase {
       await this.motorDisponibilidad.exigirHorarioValido(input.sucursalId, input.rangoHorario);
     } catch (error) {
       if (error instanceof DomainError) {
-        return { sillasLibres: 0, manicuristasDisponibles: 0, capacidad: 0, hayLugar: false, motivo: error.code };
+        // La sucursal no abre: no se mira capacidad ni déficit, porque no hay horario contra el
+        // que medirlos.
+        return { sillasLibres: 0, manicuristasDisponibles: 0, capacidad: 0, deficitDePersonal: 0, hayLugar: false, motivo: error.code };
       }
       throw error;
     }

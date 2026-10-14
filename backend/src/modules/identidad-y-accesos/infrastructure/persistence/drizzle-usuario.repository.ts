@@ -124,7 +124,7 @@ export class DrizzleUsuarioRepository implements UsuarioRepository {
    */
   async obtenerPermisosPorSupabaseUserId(supabaseUserId: string): Promise<PermisosUsuario | null> {
     const filas = await this.db
-      .select({ id: usuarios.id, rol: usuarios.rol, activa: usuarios.activa })
+      .select({ id: usuarios.id, rol: usuarios.rol, activa: usuarios.activa, manicuristaId: usuarios.manicuristaId })
       .from(usuarios)
       .where(eq(usuarios.supabaseUserId, supabaseUserId))
       .limit(1);
@@ -141,6 +141,9 @@ export class DrizzleUsuarioRepository implements UsuarioRepository {
     return {
       rol,
       activa: usuario.activa,
+      // `P9` — viaja con los permisos, no en el JWT: es lo que permite filtrar "sus propias
+      // citas" sin fiarse de un id que mande el cliente.
+      manicuristaId: usuario.manicuristaId,
       sucursales: resolverAlcanceSucursales(
         rol,
         asignadas.map((fila) => fila.sucursalId),

@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgSchema, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgSchema, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { RangoHorario, tstzrange } from './tipos-rango';
 
 export { RangoHorario, tstzrange };
@@ -132,6 +132,16 @@ export const citas = agendaSchema.table(
      * una consulta por eslabón para responder una pregunta que cabe en un entero.
      */
     numeroDeReprogramaciones: integer('numero_de_reprogramaciones').notNull().default(0),
+    /**
+     * Cotización **congelada** en el momento de agendar (`04-data-model.md` §5.2): precio y
+     * duración tal como estaban, no una referencia viva al catálogo. Si mañana sube el precio del
+     * gelish, esta cita conserva lo que se le dijo a la clienta.
+     *
+     * `NULL` mientras el motor de cotización (`FL-COT-03`) no exista: hoy se acepta por parámetro
+     * y nadie lo rellena automáticamente. **No se crean tablas `cotizaciones` ni
+     * `composiciones_por_una`** — son Value Objects que viven aquí dentro.
+     */
+    cotizacionSnapshot: jsonb('cotizacion_snapshot'),
     creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
     actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
   },
