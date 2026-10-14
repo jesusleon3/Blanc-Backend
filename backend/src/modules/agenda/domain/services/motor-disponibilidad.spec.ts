@@ -6,6 +6,8 @@ import { DrizzleCitaRepository } from '../../infrastructure/persistence/drizzle-
 import { DrizzleSillaRepository } from '../../infrastructure/persistence/drizzle-silla.repository';
 import { Silla } from '../entities/silla.entity';
 import { crearContextoPersonalFalso, horarioRealDeBlanc } from '../../test-utils/contexto-personal-falso';
+import { ResolutorDeServicio } from './resolutor-de-servicio';
+import { crearCatalogoPorDuraciones, crearVerificarClientaFalso } from '../../test-utils/contexto-catalogo-falso';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
@@ -13,7 +15,6 @@ import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
 const CLIENTA = '22222222-2222-2222-2222-222222222222';
-const SERVICIO = '33333333-3333-3333-3333-333333333333';
 const [ANA, BEA, CARO] = ['a1', 'b2', 'c3'].map((s) => `${s}000000-0000-0000-0000-00000000000${s[1]}`);
 
 /**
@@ -47,7 +48,15 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
 
   return {
     motor,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, crearUnitOfWorkFalso()),
+    agendar: new AgendarCitaUseCase(
+      citaRepo,
+      sillaRepo,
+      motor,
+      new ResolutorDeServicio(CATALOGO.port),
+      crearVerificarClientaFalso(),
+      auditoria,
+      crearUnitOfWorkFalso(),
+    ),
     consultar: new ConsultarDisponibilidadUseCase(motor),
     /**
      * Otro motor sobre LA MISMA base, con otro personal operativo. Es como se simula el efecto de
@@ -63,11 +72,18 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
   };
 }
 
+/**
+ * El `servicioId` se elige según el tamaño del rango que la prueba quiere ocupar: el fin lo deriva
+ * el catálogo, así que pedir dos horas exige un servicio de dos horas.
+ */
+const CATALOGO = crearCatalogoPorDuraciones([30, 60, 120]);
+
 const reserva = (rangoHorario = LUNES_10_11, extra = {}) => ({
   sucursalId: SUCURSAL,
-  servicioId: SERVICIO,
+  servicioId: CATALOGO.idPara(Math.round((rangoHorario.fin.getTime() - rangoHorario.inicio.getTime()) / 60_000)),
   clientaId: CLIENTA,
-  rangoHorario,
+  inicio: rangoHorario.inicio,
+  fin: rangoHorario.fin,
   ...extra,
 });
 

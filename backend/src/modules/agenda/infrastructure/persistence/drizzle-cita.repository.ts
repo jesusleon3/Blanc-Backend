@@ -109,6 +109,32 @@ export class DrizzleCitaRepository implements CitaRepository {
     return filas.map((fila) => this.aEntidad(fila));
   }
 
+  async listarParaConsulta(
+    sucursalId: string,
+    rango: RangoHorario,
+    opciones: { manicuristaId?: string; limite: number; desplazamiento: number },
+  ): Promise<Cita[]> {
+    const filas = await this.db
+      .select()
+      .from(citas)
+      .where(
+        and(
+          eq(citas.sucursalId, sucursalId),
+          notInArray(citas.estado, [...ESTADOS_QUE_LIBERAN_HORARIO]),
+          sql`${citas.rangoHorario} && ${aRangoSql(rango)}`,
+          // Filtro en SQL, no en memoria: ver la nota del puerto sobre por qué con `LIMIT` esto
+          // no es equivalente.
+          ...(opciones.manicuristaId ? [eq(citas.manicuristaId, opciones.manicuristaId)] : []),
+        ),
+      )
+      // Orden estable: sin él, dos páginas consecutivas pueden repetir u omitir filas.
+      .orderBy(sql`lower(${citas.rangoHorario})`, citas.id)
+      .limit(opciones.limite)
+      .offset(opciones.desplazamiento);
+
+    return filas.map((fila) => this.aEntidad(fila));
+  }
+
   async tieneCitasFuturasQueOcupan(manicuristaId: string, desde: Date): Promise<boolean> {
     const filas = await this.db
       .select({ id: citas.id })

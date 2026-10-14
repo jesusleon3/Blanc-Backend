@@ -45,5 +45,8 @@ import { ObtenerModificadoresDeServicioUseCase } from './application/use-cases/o
     DesvincularModificadorDeServicioUseCase,
     ObtenerModificadoresDeServicioUseCase,
   ],
+  // Lo exporta para que `IntegracionModule` pueda construir `ContextoCatalogoAdapter`. Agenda
+  // NO importa este módulo: el adaptador vive en la integración (`ADR-005`, sin ciclos).
+  exports: [SERVICIO_REPOSITORY],
 })
 export class CatalogoYCotizacionModule {}

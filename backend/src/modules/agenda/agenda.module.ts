@@ -12,6 +12,7 @@ import { ReprogramarCitaUseCase } from './application/use-cases/reprogramar-cita
 import { MarcarNoShowUseCase } from './application/use-cases/marcar-no-show.use-case';
 import { CompletarCitaUseCase } from './application/use-cases/completar-cita.use-case';
 import { MotorDisponibilidad } from './domain/services/motor-disponibilidad';
+import { ResolutorDeServicio } from './domain/services/resolutor-de-servicio';
 import { ConsultarDisponibilidadUseCase } from './application/use-cases/consultar-disponibilidad.use-case';
 import { ConsultarAgendaUseCase } from './application/use-cases/consultar-agenda.use-case';
 import { GestionarSillasUseCase } from './application/use-cases/gestionar-sillas.use-case';
@@ -42,6 +43,7 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     MarcarNoShowUseCase,
     CompletarCitaUseCase,
     MotorDisponibilidad,
+    ResolutorDeServicio,
     ConsultarDisponibilidadUseCase,
     ConsultarAgendaUseCase,
     GestionarSillasUseCase,

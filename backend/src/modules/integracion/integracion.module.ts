@@ -7,6 +7,11 @@ import { ContextoPersonalAdapter } from './contexto-personal.adapter';
 import { AgendaVerificarCitasFuturasAdapter } from './agenda-verificar-citas-futuras.adapter';
 import { CONSULTA_AGENDA_PORT } from '../sucursales-y-personal/domain/ports/consulta-agenda.port';
 import { ConsultaAgendaAdapter } from './consulta-agenda.adapter';
+import { CatalogoYCotizacionModule } from '../catalogo-y-cotizacion/catalogo-y-cotizacion.module';
+import { CONTEXTO_CATALOGO_PORT } from '../agenda/domain/ports/contexto-catalogo.port';
+import { ContextoCatalogoAdapter } from './contexto-catalogo.adapter';
+import { VERIFICAR_CLIENTA_PORT } from '../agenda/domain/ports/verificar-clienta.port';
+import { CrmNoConstruidoVerificarClientaAdapter } from './crm-no-construido-verificar-clienta.adapter';
 
 /**
  * Punto único donde se cablean las dependencias **entre Bounded Contexts**.
@@ -17,6 +22,10 @@ import { ConsultaAgendaAdapter } from './consulta-agenda.adapter';
  *   (`DEC-032`).
  * - Agenda necesita saber qué manicuristas están **operativas** para calcular capacidad
  *   (`DEC-035`/`DEC-036`).
+ * - Agenda necesita saber si un **servicio** existe, está activo y cuánto dura, para no reservar
+ *   un hueco del tamaño equivocado ni de un servicio dado de baja. Este sentido es de una sola
+ *   dirección (Catálogo no pregunta nada a Agenda), pero el adaptador vive aquí igualmente: la
+ *   regla es que ningún BC importe a otro, no que solo se aplique cuando hay ciclo.
  *
  * Si cada módulo importara al otro habría un **ciclo de módulos**, que `madge` marcaría y que
  * NestJS solo resolvería con `forwardRef` — una solución que no quita el ciclo, lo esconde.
@@ -30,12 +39,15 @@ import { ConsultaAgendaAdapter } from './consulta-agenda.adapter';
  */
 @Global()
 @Module({
-  imports: [AgendaModule, SucursalesYPersonalModule],
+  imports: [AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule],
   providers: [
     { provide: CONTEXTO_PERSONAL_PORT, useClass: ContextoPersonalAdapter },
     { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: AgendaVerificarCitasFuturasAdapter },
     { provide: CONSULTA_AGENDA_PORT, useClass: ConsultaAgendaAdapter },
+    { provide: CONTEXTO_CATALOGO_PORT, useClass: ContextoCatalogoAdapter },
+    // Provisional y a la vista: ver la cabecera del adaptador. Fase 3 lo sustituye.
+    { provide: VERIFICAR_CLIENTA_PORT, useClass: CrmNoConstruidoVerificarClientaAdapter },
   ],
-  exports: [CONTEXTO_PERSONAL_PORT, VERIFICAR_CITAS_FUTURAS_PORT, CONSULTA_AGENDA_PORT],
+  exports: [CONTEXTO_PERSONAL_PORT, VERIFICAR_CITAS_FUTURAS_PORT, CONSULTA_AGENDA_PORT, CONTEXTO_CATALOGO_PORT, VERIFICAR_CLIENTA_PORT],
 })
 export class IntegracionModule {}

@@ -608,6 +608,23 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 
 ---
 
+### DEC-044 — El Bot es un *principal de sistema*, no un octavo rol
+**Estado actual:** `CLOSED` en cuanto a la decisión; **construcción diferida a Fase 4 a propósito** (ver abajo). Resuelve la deuda 6 de §16.
+**Historial:**
+- **2026-10-14:** al definir el RBAC de las operaciones que ejecutará el Bot de WhatsApp, la opción obvia era añadir `Rol.BOT` al enum. **Se rechazó por dos motivos independientes.**
+
+  **(1) Habría sido una desviación silenciosa de una decisión aceptada.** El catálogo de 7 roles es **cerrado** por `RN-SEG-01` y `functional-scope.md` §2, y `ADR-024` lo ratificó explícitamente al elegir el `Rol` enum estático frente a una tabla de permisos dinámica. Ampliar el enum exige una ADR nueva que modifique esos documentos, nunca un valor más.
+
+  **(2) Es incorrecto de fondo, no solo formalmente.** Los 7 roles describen **personas**: tienen alcance de sucursales, jerarquía de asignación (`puedeAsignarRol`), un registro en `identidad_accesos.usuarios` y alguien a quien responsabilizar. El bot no tiene ninguna de esas cosas. Meterlo en el mismo enum obligaría además a que **cada `@Roles(...)` ya escrito** tuviera que preguntarse si incluye al bot — un coste que se paga en todo el código a cambio de nada.
+
+  **Decisión:** el Bot es un **principal de sistema**, un concepto separado. `shared/auth/principal-de-sistema.ts` fija la lista cerrada de operaciones que podrá ejecutar (`OPERACIONES_PERMITIDAS_AL_BOT`), **todas de lectura**: `DEC-042` establece que ninguna clienta cancela sola y `DEC-040` que la finalización no es automática, así que un bot con capacidad de escritura contradiría ambas. Agendar por WhatsApp llegará, pero es una decisión de negocio que **no está tomada**; cuando se tome, se añade ahí con su propia ADR.
+
+  **Lo que Fase 4 debe construir:** (a) autenticación propia del principal (token de servicio con rotación), separada de Supabase Auth — el bot no es un usuario de Supabase; (b) un guard que lo contraste contra la lista de operaciones y **nunca** contra `@Roles`; (c) auditoría con el principal como `actor`, distinguible de una persona, porque `RN-AUD-01` exige saber quién hizo qué y *"lo hizo el bot"* es una respuesta distinta de *"lo hizo la Encargada"*.
+
+  🔵 **Lo que deliberadamente NO se construyó, y es revocable:** no se emitió credencial ni se abrió ningún endpoint al bot. El canal de WhatsApp es de Fase 4 y no existe; una vía de autenticación viva, sin consumidor y sin nadie ejercitándola en serio, es superficie de ataque a cambio de nada. **La postura efectiva hoy es denegar**, y `shared/auth/principal-de-sistema.spec.ts` lo verifica junto con el cierre del enum de roles — convierte "el catálogo es cerrado" en algo que falla el build, en vez de un comentario. Si se prefiere construir ya el token de servicio, es una orden de trabajo pequeña y aislada, pero debería justificarse con un consumidor real.
+
+---
+
 ---
 
 ## 6. Elementos explícitamente `OUT_OF_SCOPE` (por incremento, no en general)
@@ -1135,6 +1152,159 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 ## 16. Handoff / Trabajo Asíncrono
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
+
+### 2026-10-14 (e) — Fase 2 (parte 6): integración Agenda ↔ Catálogo y saneamiento de §16. **4 de 6 deudas cerradas**
+
+**Lista de Espera NO entra en este commit.** La orden autorizaba priorizar explícitamente, y se priorizó: es un submódulo completo (esquema, migración, entidad, repositorio, FIFO con ventana de expiración y su enganche en cancelar/reprogramar) con **dos dependencias de infraestructura que hoy no existen**. Diseño preciso al final de esta entrada.
+
+#### El cambio de fondo: la duración de la cita ya no la decide el cliente
+
+Hasta ahora `inicio` y `fin` llegaban libres por HTTP. Se podía **reservar una hora para un servicio de dos** —y la silla quedaba libre a mitad del trabajo, lista para venderse otra vez— o **tres horas para uno de una**, bloqueando capacidad que el salón podía vender. El único filtro sobre `servicioId` era el formato del uuid, así que también se podía agendar **un servicio inexistente o dado de baja**.
+
+Ahora el `fin` se **deriva** de `inicio + duración del catálogo`. Si el cliente lo envía, tiene que coincidir al minuto o recibe `409 DURACION_NO_COINCIDE_CON_SERVICIO` con el `finEsperado` en el detalle, para que pueda corregirse solo. `ReprogramarCitaUseCase` **también** revalida el catálogo: antes no lo hacía, así que una cita de un servicio de baja se podía mover indefinidamente.
+
+#### `cotizacion_snapshot` lo construye el backend (cierra el bloqueo 6 por completo)
+
+`ResolutorDeServicio.construirSnapshot()` congela nombre, categoría, duración y precio **desde el catálogo oficial**. El DTO sigue sin aceptar el campo, así que un cliente que lo envíe recibe `400`: los precios no entran desde fuera, igual que no los decide OpenAI.
+
+Tres decisiones del snapshot que conviene conocer antes de tocarlo:
+
+- **`DEC-033`: con `requiereCotizacionManual`, `totalCentavos` es `null`, no `0`.** Un cero diría "cuesta nada"; `null` dice "nadie lo ha cotizado todavía", que es la verdad. El precio de referencia del catálogo sí se conserva, para quien vaya a cotizar a mano.
+- **`incluyeModificadores: false`, explícito.** Una `Cita` transporta un solo `servicioId` y ninguna composición por uña, así que no hay de dónde sacarlos — y sumar duraciones o precios de modificadores **contradiría `RN-COT-01`**, que exige una tabla de combinaciones específicas y *nunca* una suma. Ese cálculo es de `FL-COT-03`.
+- **Lleva `version: 1`.** Cuando `FL-COT-03` amplíe la forma, los snapshots ya congelados seguirán siendo legibles sin adivinar su estructura.
+- **Reprogramar NO recotiza.** `RN-AGE-08` declara el snapshot inmutable y `DEC-042` separa reprogramar de cancelar: mover la hora no es una venta nueva. Si el catálogo subió de precio entretanto, la clienta conserva el que se le dijo. Hay una prueba E2E que sube el precio del catálogo entre agendar y reprogramar y verifica que el snapshot no cambia.
+
+#### Archivos creados
+
+| Archivo | Qué es |
+|---|---|
+| `agenda/domain/ports/contexto-catalogo.port.ts` | Lo que Agenda pregunta a Catálogo (6 campos, no la entidad) |
+| `agenda/domain/ports/verificar-clienta.port.ts` | **El gancho exacto de Fase 3** para CRM/Clientas |
+| `agenda/domain/services/resolutor-de-servicio.ts` | Resolver + derivar rango + congelar snapshot |
+| `agenda/domain/services/resolutor-de-servicio.spec.ts` | 14 pruebas unitarias |
+| `agenda/test-utils/contexto-catalogo-falso.ts` | Dobles, incluido un catálogo con un servicio por duración |
+| `integracion/contexto-catalogo.adapter.ts` | Traduce `Servicio` → `ServicioAgendable` |
+| `integracion/crm-no-construido-verificar-clienta.adapter.ts` | **Provisional y a la vista** — ver abajo |
+| `shared/tiempo/zona-horaria-negocio.ts` | `ZONA_HORARIA_NEGOCIO` y helpers de hora de pared |
+| `shared/auth/principal-de-sistema.ts` | Decisión de RBAC del Bot (`DEC-044`) |
+| `shared/auth/principal-de-sistema.spec.ts` | Guardia del catálogo cerrado de 7 roles |
+
+#### Archivos modificados de forma relevante
+
+- `agenda/application/use-cases/agendar-cita.use-case.ts` — `rangoHorario` → `inicio` + `fin?`; valida catálogo y clienta; congela el snapshot **fuera del bucle** de reintento de sillas (reintentar en otra silla no recotiza nada).
+- `agenda/application/use-cases/reprogramar-cita.use-case.ts` — `nuevoRangoHorario` → `nuevoInicio` + `nuevoFin?`; revalida catálogo; **arrastra** el snapshot original.
+- `agenda/application/use-cases/consultar-agenda.use-case.ts` — paginación y tope de rango; devuelve `PaginaDeAgenda`.
+- `agenda/domain/ports/cita.repository.ts` + adaptador Drizzle — `listarParaConsulta` con `LIMIT`/`OFFSET`, `ORDER BY` estable y **filtro de manicurista en SQL**.
+- `integracion/consulta-agenda.adapter.ts` — déficit **por franja**, ver abajo.
+- `sucursales-y-personal/domain/entities/excepcion-personal.entity.ts` — `MAXIMO_DIAS_DE_EXCEPCION = 90`.
+- `sucursales-y-personal/application/use-cases/registrar-excepcion-personal.use-case.ts` — valida que el destino de una cobertura esté abierto.
+- `catalogo-y-cotizacion.module.ts` — exporta `SERVICIO_REPOSITORY` para que la integración construya el adaptador.
+- `agenda/domain/services/motor-disponibilidad.ts` — los helpers de zona horaria se movieron a `shared/tiempo` y se reexportan desde aquí.
+
+**Sin migraciones nuevas.** Nada de esta entrega cambió el esquema: `cotizacion_snapshot` ya existía desde la migración `0009`.
+
+#### Las 6 deudas de §16
+
+| # | Deuda | Estado |
+|---|---|---|
+| **1** | `servicioId` y `clientaId` sin validar | **`servicioId` CERRADA. `clientaId` PARCIAL** — ver abajo |
+| **2** | Duración sin validar contra el servicio | **CERRADA** |
+| **3** | Ruido del aviso de sobrecupo | **CERRADA** — era un bug, no ruido |
+| **4** | Rango de excepción sin validar | **CERRADA** |
+| **5** | `GET` de agenda sin paginar ni acotar | **CERRADA** |
+| **6** | Principal del Bot | **DECIDIDA (`DEC-044`), construcción en Fase 4 a propósito** |
+
+**Deuda 3 — era un bug, no ruido.** El déficit se calculaba sobre **todo el rango de la excepción**. Una ausencia de un día agregaba las citas de las 9:00 con las de las 17:00 y las comparaba contra el personal del día entero. Eso producía **dos errores a la vez**: señalaba citas de horas tranquilas que nadie iba a dejar sin atender *y podía ocultar un sobrecupo real de una franja concreta* dentro de un promedio diario que cuadraba. **La capacidad es por instante, no por día.** Ahora el déficit se mide en el rango de cada cita, con caché por rango para no repetir la consulta. La prueba se verificó midiendo sobre el rango de la excepción: falla.
+
+**Deuda 4 — dos validaciones distintas.** (a) `MAXIMO_DIAS_DE_EXCEPCION = 90`: un `2027` por `2026` creaba una ausencia de siglos que el motor respetaba en silencio — la sucursal empezaba a rechazar citas y el registro culpable estaba en una fecha que nadie iba a mirar. Noventa días es holgado para una incapacidad larga y corto frente a un error de año; más que eso no es un dato operativo, es una baja. (b) El destino de una cobertura debe estar **abierto en algún momento del rango**: una cobertura es un *movimiento*, así que con el destino cerrado la resta en la sucursal base ocurre igual y la suma no sirve de nada. Se exige solape con **algún** bloque y no que quepa en uno, porque cubrir el lunes entero cruza el corte de las 12:00 por definición. **Una ausencia no se valida contra ningún horario**: avisar que no vienes el domingo es información válida aunque el salón esté cerrado.
+
+**Deuda 5 — y un fallo que la paginación habría introducido.** `ConsultarAgendaDto` exige `sucursalId` uuid, fechas ISO-8601, tope de **31 días** y `limite ≤ 200`. El tope de rango se comprueba **también en el caso de uso**, no solo en el DTO: el DTO protege la ruta HTTP, pero la regla tiene que valer igual para el bot y para cualquier job futuro.
+
+> ⚠️ **El filtro de manicurista tuvo que bajar a SQL.** Filtraba en memoria *después* de traer las filas. Con un `LIMIT` eso da resultados falsos: una manicurista con sus citas en la página 2 vería la página 1 vacía y concluiría que no tiene trabajo. Quién decide el `manicuristaId` sigue siendo el caso de uso a partir de los permisos (`P9`), nunca la petición — lo que cambió es que ese filtro viaja a la consulta. Hay una prueba E2E específica. La consulta lleva `ORDER BY` estable (inicio, luego id) porque sin él PostgreSQL no garantiza el mismo orden entre páginas y una cita podría salir dos veces o ninguna.
+
+**Efecto lateral deseable:** al tener DTO, el `GET` ahora **rechaza con 400** un `manicuristaId` en la query, en vez de ignorarlo. Es más fuerte que ignorarlo — quien lo intenta se entera de que ese filtro no se acepta en lugar de creer que se aplicó.
+
+**Deuda 6 — `DEC-044`: el Bot no es un octavo rol.** Era la opción obvia y es la incorrecta. El catálogo de 7 roles es **cerrado** por `RN-SEG-01`/`functional-scope.md` §2 y `ADR-024` lo ratificó al elegir el enum estático; añadir un valor habría sido una desviación silenciosa de una decisión aceptada. Y es incorrecto de fondo: los 7 roles describen personas con alcance de sucursales, jerarquía (`puedeAsignarRol`) y registro en `usuarios` — el bot no tiene nada de eso, y meterlo en el enum obligaría a **cada `@Roles(...)` existente** a preguntarse si lo incluye.
+
+Se fija en código la lista de operaciones (`OPERACIONES_PERMITIDAS_AL_BOT`), **todas de lectura**: `DEC-042` dice que ninguna clienta cancela sola y `DEC-040` que la finalización no es automática, así que un bot con escritura contradiría ambas.
+
+> **Decisión consciente, señalada para que pueda revocarse:** **no se emitió credencial ni se abrió ningún endpoint al bot.** El canal de WhatsApp es de Fase 4 y no existe; una vía de autenticación viva, sin consumidor y sin nadie ejercitándola en serio, es superficie de ataque a cambio de nada. La postura efectiva hoy es **denegar**. Si se prefiere construir ya el token de servicio, es una orden de trabajo pequeña y aislada — pero debería justificarse con un consumidor real.
+
+`principal-de-sistema.spec.ts` convierte "el catálogo es cerrado" en algo exigible: falla si el enum `Rol` crece. Mismo criterio que el detector de deriva de `agenda.citas` — una regla que solo vive en un comentario no falla el build.
+
+#### `clientaId`: el gancho de Fase 3, y lo que hoy NO protege
+
+`VerificarClientaPort` existe y `AgendarCitaUseCase` **ya lo llama en producción**, así que la costura está ejercitada: al construir Fase 3 solo se sustituye el proveedor en `IntegracionModule`, sin tocar los casos de uso.
+
+> ⚠️ **`CrmNoConstruidoVerificarClientaAdapter` acepta cualquier uuid no vacío. Se sigue pudiendo agendar para una clienta inexistente.** Está dicho en el nombre de la clase, en el encabezado del puerto y con un `Logger.warn` en el primer arranque. El precedente es `SinAgendaVerificarCitasFuturasAdapter`, que respondía siempre `false` y durante un tiempo **pareció** proteger la baja de manicuristas. La lección no fue "no usar adaptadores provisionales" sino que tienen que ser imposibles de confundir con el definitivo.
+
+Cuando exista CRM, este puerto es también el punto natural de la **lista roja** (`RN-CRM-06`, `DEC-042`): una clienta en lista roja no deja de existir, pero su reserva exige anticipo. Por eso el método se llama `existe` y no `puedeAgendar` — esa distinción es de Fase 3.
+
+#### Tensión de negocio que esta entrega introduce, sin resolver
+
+**Un servicio dado de baja deja sus citas existentes sin poder moverse.** La orden pedía validar `activo` en reprogramar y así se implementó, pero la consecuencia es que una cita ya vendida de un servicio que el salón descontinuó **solo se puede cancelar, no reagendar**. Puede ser lo correcto (si ya no se ofrece, no se reagenda) o puede dejar tirada a una clienta que pagó. **Es una pregunta para la Dueña**, no una decisión técnica. Si la respuesta es "déjame moverla", el cambio es una línea: validar `activo` solo al agendar.
+
+#### Pruebas: **+42** (741 → **783**, 59 suites)
+
+- 14 unitarias de `ResolutorDeServicio` (404/409/derivación/snapshot/`DEC-033`).
+- 16 E2E HTTP nuevas en `citas.e2e.spec.ts`: servicio inexistente, servicio de baja, derivación del fin, duración que no coincide, snapshot congelado, `400` al enviar `cotizacionSnapshot`, cotización manual, reprogramar sin recotizar, y la tanda de acotación/paginación.
+- 6 de integración en `registrar-excepcion-personal.use-case.spec.ts`: déficit por franja, excepción demasiado larga, destino cerrado en domingo y en el corte, cobertura que cruza el corte (aceptada) y ausencia en domingo (aceptada).
+- 4 de `principal-de-sistema.spec.ts`.
+- Los E2E ahora siembran un **`Servicio` real** del catálogo: `servicioId` ya no puede ser un uuid cualquiera, y eso es precisamente lo que se arregló.
+
+#### Validación
+
+`tsc --noEmit` 0 · `tsc -p tsconfig.eslint.json` 0 · `lint` 0 errores 0 avisos · `build` OK · `drizzle-kit check` OK · `madge --circular` 0 ciclos · **783/783 pruebas** en 59 suites.
+
+---
+
+### Lista de Espera — diseño para el siguiente turno (único punto restante de Fase 2)
+
+Las reglas de la orden (`DEC-039`, reglas 2.2/2.3) están claras. Lo que hay que decidir antes de escribir código son **dos dependencias de infraestructura que el proyecto no tiene todavía**, y por eso esto no se improvisó.
+
+#### 🔴 Dependencia 1 — hace falta un planificador (no existe ninguno)
+
+La mecánica FIFO escalonada exige **que algo pase cuando no pasa nada**: se avisa a una clienta, y si no contesta en una hora hay que pasar a la siguiente. Si la expiración se evaluara solo de forma perezosa (al abrirse otro hueco o al consultar), una oferta caducada **se quedaría caducada para siempre** y la fila no avanzaría hasta que alguien cancelara otra cita por casualidad.
+
+Blanc **no tiene hoy** ni cron, ni worker, ni scheduler. `02-architecture-principles.md` prevé *event-driven en proceso + outbox*, que es la base natural, pero el disparador temporal no está construido. **Lista de Espera es la primera funcionalidad que lo necesita**, así que ese es el verdadero primer paso: decidir el mecanismo (`@nestjs/schedule` en proceso frente a un worker aparte en Railway) y si el outbox entra ya. Es una decisión de arquitectura con ADR propia, no un detalle.
+
+#### 🔴 Dependencia 2 — no se puede avisar a nadie hasta Fase 4
+
+El aviso viaja por WhatsApp, y el canal es de Fase 4 (`DEC-043`, Cloud API, pendiente del trámite con Meta). Hasta entonces la lógica de dominio se puede construir y probar **completa**, pero el mensaje no sale: la oferta quedaría registrada y la Encargada tendría que avisar a mano.
+
+**Consecuencia para planificar:** Lista de Espera se puede entregar en dos tramos — dominio + persistencia + FIFO ahora, emisión real en Fase 4 — pero **no se puede dar por terminada** antes de Fase 4. Conviene decidir si se construye ahora con aviso manual o se agrupa con el canal.
+
+#### Modelo propuesto
+
+Pertenece al Bounded Context **Agenda**: habla de huecos y de citas, y necesita leer la agenda en cada liberación.
+
+`agenda.solicitudes_lista_espera`:
+
+| Columna | Notas |
+|---|---|
+| `id` | uuid, PK |
+| `sucursal_id` | uuid sin FK (`ADR-005`) |
+| `clienta_id` | uuid sin FK |
+| `servicio_id` | uuid sin FK — la duración se resuelve por `ContextoCatalogoPort`, **no se copia** |
+| `fecha` | `date`. **Fecha de pared en `America/Mexico_City`**, no un instante: la clienta quiere "el jueves", no un rango UTC |
+| `estado` | `text` + `CHECK`, igual que `citas` (ver abajo) |
+| `creado_en` | `timestamptz` — **es la posición en la fila**; no hace falta columna `posicion` |
+| `ofrecida_en`, `oferta_expira_en` | `timestamptz` nullable, solo mientras el estado es `ofrecida` |
+
+Estados: `en_espera` → `ofrecida` → `aceptada` \| `rechazada` \| `oferta_expirada` (vuelve a `en_espera` o pasa a `descartada`), más `cancelada` y `caducada` (pasó la fecha). Mismo patrón que `Cita`: `text` + `CHECK`, máquina de transiciones explícita en la entidad, y **el detector de deriva se extiende a esta tabla**.
+
+#### Reglas, con las trampas que esconden
+
+1. **El servicio tiene que caber en el hueco.** Se compara la duración del catálogo contra la del hueco liberado. *Trampa:* el hueco liberado **no es** el rango de la cita cancelada. Si se cancela una cita de 10:00–11:00 y la de 11:00–12:00 sigue en pie, un servicio de dos horas no cabe aunque "se liberó una hora a las 10". El hueco real hay que calcularlo contra la agenda, y `MotorDisponibilidad` ya sabe hacerlo — **conviene reutilizarlo, no recalcular**.
+2. **Cancelación a ≤30 minutos del inicio: hueco perdido, solo bandera.** `MINUTOS_MINIMOS_PARA_AVISO = 30`. *Ojo:* ya existe `MINUTOS_DE_INCIDENTE_TARDIO = 60` en `CancelarCitaUseCase`, y **son dos umbrales distintos de cosas distintas** — 60 es "esto sugiere lista roja" (`RN-CRM-06`), 30 es "este hueco ya no se puede aprovechar". Deben seguir separados; unificarlos por parecer redundantes sería un error.
+3. **Una sola clienta a la vez, FIFO, ventana configurable (1 h por defecto).** La ventana es **configuración de cliente**, no una constante: por el modelo de 4 capas va en *Client Specification*, no en *Core Platform*.
+4. **Reprogramar también libera un hueco**, no solo cancelar. Es fácil de olvidar porque la regla habla de cancelaciones: en `ReprogramarCitaUseCase` la cita original pasa a `reprogramada` y **libera su horario**. Ese hueco es igual de ofrecible.
+
+#### Pregunta de negocio abierta, para la Dueña
+
+**¿Qué pasa si la clienta avisada acepta y, mientras contestaba, otra persona ya tomó el hueco?** `RN-ANT-03` resolvió la carrera equivalente en anticipos con "el primero en pagar se queda con el cupo" y sin retención real. Aplicar el mismo criterio sería coherente —la oferta no congela el hueco— pero significa que una clienta puede recibir un aviso y encontrarse con que ya no hay lugar. La alternativa (retener el hueco durante la ventana) **resta capacidad vendible una hora por cada aviso**. No es una decisión técnica.
+
+---
 
 ### 2026-10-14 (d) — Fase 2 (parte 5): API HTTP de Agenda, excepciones operables y RBAC de iPad. **Bloqueos 2 y 6 CERRADOS**
 

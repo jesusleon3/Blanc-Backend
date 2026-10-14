@@ -10,7 +10,7 @@ import { ContextoPersonalAdapter } from '../../../integracion/contexto-personal.
 import { DrizzleCitaRepository } from '../../../agenda/infrastructure/persistence/drizzle-cita.repository';
 import { DrizzleSillaRepository } from '../../../agenda/infrastructure/persistence/drizzle-silla.repository';
 import { MotorDisponibilidad } from '../../../agenda/domain/services/motor-disponibilidad';
-import { horarioAbiertoSiempre } from '../../../agenda/test-utils/contexto-personal-falso';
+import { horarioAbiertoSiempre, horarioRealDeBlanc } from '../../../agenda/test-utils/contexto-personal-falso';
 import { Silla } from '../../../agenda/domain/entities/silla.entity';
 import { Cita } from '../../../agenda/domain/entities/cita.entity';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
@@ -64,21 +64,21 @@ async function preparar(opciones: { manicuristas?: number; sillas?: number } = {
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, contextoPersonal);
   const consultaAgenda = new ConsultaAgendaAdapter(citaRepo, manicuristaRepo, motor);
 
-  const agendar = async (sillaIndex: number, manicuristaId: string | null) => {
+  const agendar = async (sillaIndex: number, manicuristaId: string | null, rangoHorario = DIEZ_A_ONCE) => {
     const cita = Cita.crear({
       sucursalId: sucursal.id,
       sillaId: sillas[sillaIndex].id,
       manicuristaId,
       clientaId: CLIENTA,
       servicioId: SERVICIO,
-      rangoHorario: DIEZ_A_ONCE,
+      rangoHorario,
     });
     await citaRepo.guardar(cita);
     return cita;
   };
 
-  const crearOtraSucursal = async () => {
-    const otra = Sucursal.crear({ nombre: 'Juriquilla', horarioSemanal: horarioAbiertoSiempre() });
+  const crearOtraSucursal = async (horarioSemanal = horarioAbiertoSiempre()) => {
+    const otra = Sucursal.crear({ nombre: 'Juriquilla', horarioSemanal });
     await sucursalRepo.guardar(otra);
     return otra;
   };
@@ -186,6 +186,27 @@ describe('RegistrarExcepcionPersonalUseCase — DEC-036 (integración, PostgreSQ
       expect(citasAfectadas.every((c) => c.motivo === 'sobrecupo_en_sucursal')).toBe(true);
     });
 
+    it('EL DÉFICIT SE MIDE POR FRANJA, no sobre el día entero de la ausencia', async () => {
+      // Dos citas sin asignar a las 10:00 (sobrecupo real con una sola manicurista) y una a las
+      // 16:00, sola y perfectamente atendible. La ausencia cubre todo el día.
+      //
+      // Midiendo sobre el rango completo de la excepción, las TRES salían afectadas: se agregaban
+      // las citas del día y se comparaban contra el personal del día. La de las 16:00 era ruido
+      // puro — nadie se iba a quedar sin atender a esa hora.
+      const { useCase, manicuristas, agendar } = await preparar({ manicuristas: 2, sillas: 3 });
+      const diez = await agendar(0, null);
+      const diezBis = await agendar(1, null);
+      const tarde = await agendar(2, null, rango('2026-12-07T16:00:00Z', '2026-12-07T17:00:00Z'));
+
+      const { citasAfectadas } = await useCase.registrarAusencia(
+        { manicuristaId: manicuristas[0].id, rango: TODO_EL_DIA },
+        ACTOR,
+      );
+
+      expect(citasAfectadas.map((c) => c.id).sort()).toEqual([diez.id, diezBis.id].sort());
+      expect(citasAfectadas.map((c) => c.id)).not.toContain(tarde.id);
+    });
+
     it('no inventa sobrecupo: con 1 cita y 2 manicuristas, quitar a una no afecta a nadie', async () => {
       const { useCase, manicuristas, agendar } = await preparar({ manicuristas: 2, sillas: 2 });
       await agendar(0, null);
@@ -221,6 +242,88 @@ describe('RegistrarExcepcionPersonalUseCase — DEC-036 (integración, PostgreSQ
       expect(detalle).toMatchObject({ accion: 'registrar_ausencia', citasAfectadas: 1 });
       // `RN-AUD-01`: la auditoría registra el hecho, no el expediente de la clienta.
       expect(JSON.stringify(detalle)).not.toContain(CLIENTA);
+    });
+  });
+
+  describe('validación del rango (deuda 4 de §16)', () => {
+    it('400 EXCEPCION_DEMASIADO_LARGA: un año mal teclado no puede matar la capacidad para siempre', async () => {
+      // El fallo real que esto evita: `2027` por `2026` creaba una ausencia de siglos que el motor
+      // respetaba en silencio. La sucursal empezaba a rechazar citas y el registro culpable estaba
+      // en una fecha que nadie iba a mirar.
+      const { useCase, manicuristas } = await preparar();
+
+      await expect(
+        useCase.registrarAusencia(
+          { manicuristaId: manicuristas[0].id, rango: rango('2026-12-07T00:00:00Z', '2027-12-07T00:00:00Z') },
+          ACTOR,
+        ),
+      ).rejects.toMatchObject({ code: 'EXCEPCION_DEMASIADO_LARGA', httpStatus: 400 });
+    });
+
+    it('acepta una ausencia larga pero plausible (60 días)', async () => {
+      const { useCase, manicuristas } = await preparar();
+
+      await expect(
+        useCase.registrarAusencia(
+          { manicuristaId: manicuristas[0].id, rango: rango('2026-12-07T00:00:00Z', '2027-02-05T00:00:00Z'), motivo: 'Incapacidad' },
+          ACTOR,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('409 SI EL DESTINO DE LA COBERTURA ESTÁ CERRADO TODO EL RANGO (domingo)', async () => {
+      // La cobertura es un movimiento: la resta en la sucursal base ocurriría igual, y la suma no
+      // serviría de nada porque el destino está cerrado.
+      const { useCase, manicuristas, crearOtraSucursal } = await preparar();
+      const destino = await crearOtraSucursal(horarioRealDeBlanc());
+
+      await expect(
+        useCase.registrarCobertura(
+          // 2026-12-13 es domingo, y `horarioRealDeBlanc` cierra en domingo.
+          { manicuristaId: manicuristas[0].id, sucursalId: destino.id, rango: rango('2026-12-13T09:00:00Z', '2026-12-13T18:00:00Z') },
+          ACTOR,
+        ),
+      ).rejects.toMatchObject({ code: 'SUCURSAL_DESTINO_CERRADA_EN_EL_RANGO', httpStatus: 409 });
+    });
+
+    it('409 si la cobertura cae enteramente dentro del corte de mediodía', async () => {
+      const { useCase, manicuristas, crearOtraSucursal } = await preparar();
+      const destino = await crearOtraSucursal(horarioRealDeBlanc());
+
+      await expect(
+        useCase.registrarCobertura(
+          // 2026-12-07 es lunes; 12:30–14:30 hora de Querétaro cae entre los bloques 9–12 y 15–18.
+          { manicuristaId: manicuristas[0].id, sucursalId: destino.id, rango: rango('2026-12-07T18:30:00Z', '2026-12-07T20:30:00Z') },
+          ACTOR,
+        ),
+      ).rejects.toMatchObject({ code: 'SUCURSAL_DESTINO_CERRADA_EN_EL_RANGO' });
+    });
+
+    it('ACEPTA una cobertura que cruza el corte: cubrir el lunes entero es legítimo', async () => {
+      // No se exige que quepa en UN bloque, solo que toque alguno: una cobertura de todo el día
+      // cruza el corte de las 12:00 por definición.
+      const { useCase, manicuristas, crearOtraSucursal } = await preparar();
+      const destino = await crearOtraSucursal(horarioRealDeBlanc());
+
+      await expect(
+        useCase.registrarCobertura(
+          { manicuristaId: manicuristas[0].id, sucursalId: destino.id, rango: rango('2026-12-07T15:00:00Z', '2026-12-08T00:00:00Z') },
+          ACTOR,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('una ausencia NO se valida contra ningún horario: faltar no depende de que el local abra', async () => {
+      // Deliberado: la ausencia no tiene sucursal. Avisar que no vienes el domingo es información
+      // válida aunque el salón esté cerrado — y rechazarla sería inventar una regla.
+      const { useCase, manicuristas } = await preparar();
+
+      await expect(
+        useCase.registrarAusencia(
+          { manicuristaId: manicuristas[0].id, rango: rango('2026-12-13T09:00:00Z', '2026-12-13T18:00:00Z') },
+          ACTOR,
+        ),
+      ).resolves.toBeDefined();
     });
   });
 

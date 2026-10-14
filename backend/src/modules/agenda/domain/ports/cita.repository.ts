@@ -27,4 +27,24 @@ export interface CitaRepository {
   listarQueOcupanDeManicuristaEnRango(manicuristaId: string, rango: RangoHorario): Promise<Cita[]>;
   /** Alimenta `VerificarCitasFuturasPort` (`DEC-032`). */
   tieneCitasFuturasQueOcupan(manicuristaId: string, desde: Date): Promise<boolean>;
+
+  /**
+   * Lectura paginada para la consulta de agenda.
+   *
+   * **`manicuristaId` se filtra en SQL y no en memoria, y eso no es una optimización.** Con un
+   * `LIMIT`, filtrar después de traer la página daría resultados falsos: una manicurista con sus
+   * citas en la página 2 vería la página 1 vacía y concluiría que no tiene trabajo. El filtro
+   * tiene que entrar en la consulta.
+   *
+   * Quién decide ese `manicuristaId` sigue siendo el caso de uso, a partir de los permisos
+   * resueltos (`P9`) — nunca la petición.
+   *
+   * Orden estable por inicio y luego por id: sin `ORDER BY`, PostgreSQL no garantiza el mismo
+   * orden entre páginas y una cita podría salir dos veces o ninguna.
+   */
+  listarParaConsulta(
+    sucursalId: string,
+    rango: RangoHorario,
+    opciones: { manicuristaId?: string; limite: number; desplazamiento: number },
+  ): Promise<Cita[]>;
 }

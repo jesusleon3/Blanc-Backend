@@ -15,6 +15,8 @@ import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
+import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
+import { crearContextoCatalogoFalso, crearVerificarClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -34,6 +36,7 @@ async function preparar(numeroDeSillas = 2) {
   // Horario abierto y personal de sobra: estas pruebas no van sobre disponibilidad.
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso());
   const uow = crearUnitOfWorkFalso();
+  const resolutor = new ResolutorDeServicio(crearContextoCatalogoFalso([servicioDePrueba({ id: SERVICIO })]));
 
   for (let i = 1; i <= numeroDeSillas; i += 1) {
     await sillaRepo.guardar(Silla.crear({ sucursalId: SUCURSAL, nombre: `Lomas ${i}` }));
@@ -43,17 +46,24 @@ async function preparar(numeroDeSillas = 2) {
     citaRepo,
     sillaRepo,
     auditoria,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearVerificarClientaFalso(), auditoria, uow),
     solicitar: new SolicitarConfirmacionCitaUseCase(citaRepo, auditoria, uow),
     confirmar: new ConfirmarCitaUseCase(citaRepo, auditoria, uow),
     cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow),
-    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, uow),
+    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow),
     noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow),
     completar: new CompletarCitaUseCase(citaRepo, auditoria, uow),
   };
 }
 
-const reserva = (extra = {}) => ({ sucursalId: SUCURSAL, servicioId: SERVICIO, clientaId: CLIENTA, rangoHorario: DIEZ_A_ONCE, ...extra });
+/** El fin lo deriva el catálogo (60 min, igual que todos los rangos de este archivo). */
+const reserva = ({ rangoHorario = DIEZ_A_ONCE, ...extra }: { rangoHorario?: typeof DIEZ_A_ONCE } & Record<string, unknown> = {}) => ({
+  sucursalId: SUCURSAL,
+  servicioId: SERVICIO,
+  clientaId: CLIENTA,
+  inicio: rangoHorario.inicio,
+  ...extra,
+});
 
 describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre de P3', () => {
   it('recorre el flujo normal completo: agendada → pendiente_confirmacion → confirmada → completada', async () => {
@@ -147,7 +157,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
       const { agendar, reprogramar, citaRepo } = await preparar();
       const original = await agendar.ejecutar(reserva(), ACTOR);
 
-      const { nueva } = await reprogramar.ejecutar({ citaId: original.id, nuevoRangoHorario: DOCE_A_UNA }, ACTOR);
+      const { nueva } = await reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio }, ACTOR);
 
       expect((await citaRepo.buscarPorId(original.id))?.estado).toBe('reprogramada');
       expect(nueva.citaOrigenId).toBe(original.id);
@@ -159,7 +169,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
       const { agendar, reprogramar } = await preparar(1);
       const original = await agendar.ejecutar(reserva(), ACTOR);
 
-      await reprogramar.ejecutar({ citaId: original.id, nuevoRangoHorario: DOCE_A_UNA }, ACTOR);
+      await reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio }, ACTOR);
 
       // Una sola silla: el horario de las 10 solo queda libre si `reprogramada` liberó.
       await expect(agendar.ejecutar(reserva(), ACTOR)).resolves.toBeDefined();
@@ -171,7 +181,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
 
       // La original está a punto de liberar: no debe chocar consigo misma, ni con 1 sola silla.
       const { nueva } = await reprogramar.ejecutar(
-        { citaId: original.id, nuevoRangoHorario: DIEZ_A_ONCE, manicuristaId: ANA },
+        { citaId: original.id, nuevoInicio: DIEZ_A_ONCE.inicio, manicuristaId: ANA },
         ACTOR,
       );
       expect(nueva.manicuristaId).toBe(ANA);
@@ -183,15 +193,12 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
 
       for (let i = 1; i <= MAXIMO_DE_REPROGRAMACIONES; i += 1) {
         // Un día más por iteración, con aritmética real: concatenar el número daba "2027-03-010".
-        const horario = {
-          inicio: new Date(DIEZ_A_ONCE.inicio.getTime() + i * 86400000),
-          fin: new Date(DIEZ_A_ONCE.fin.getTime() + i * 86400000),
-        };
-        actual = (await reprogramar.ejecutar({ citaId: actual.id, nuevoRangoHorario: horario }, ACTOR)).nueva;
+        const nuevoInicio = new Date(DIEZ_A_ONCE.inicio.getTime() + i * 86400000);
+        actual = (await reprogramar.ejecutar({ citaId: actual.id, nuevoInicio }, ACTOR)).nueva;
         expect(actual.numeroDeReprogramaciones).toBe(i);
       }
 
-      await expect(reprogramar.ejecutar({ citaId: actual.id, nuevoRangoHorario: DOCE_A_UNA }, ACTOR)).rejects.toMatchObject({
+      await expect(reprogramar.ejecutar({ citaId: actual.id, nuevoInicio: DOCE_A_UNA.inicio }, ACTOR)).rejects.toMatchObject({
         code: 'MAXIMO_DE_REPROGRAMACIONES_ALCANZADO',
       });
     });
@@ -203,7 +210,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
 
         const unDiaAntes = new Date(DIEZ_A_ONCE.inicio.getTime() - 24 * 3600000);
         await expect(
-          reprogramar.ejecutar({ citaId: original.id, nuevoRangoHorario: DOCE_A_UNA, anticipoPagado: true }, ACTOR, unDiaAntes),
+          reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio, anticipoPagado: true }, ACTOR, unDiaAntes),
         ).rejects.toMatchObject({ code: 'REPROGRAMACION_FUERA_DE_PLAZO' });
       });
 
@@ -213,7 +220,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
 
         const tresDiasAntes = new Date(DIEZ_A_ONCE.inicio.getTime() - 72 * 3600000);
         await expect(
-          reprogramar.ejecutar({ citaId: original.id, nuevoRangoHorario: DOCE_A_UNA, anticipoPagado: true }, ACTOR, tresDiasAntes),
+          reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio, anticipoPagado: true }, ACTOR, tresDiasAntes),
         ).resolves.toBeDefined();
       });
 
@@ -223,7 +230,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
 
         const unaHoraAntes = new Date(DIEZ_A_ONCE.inicio.getTime() - 3600000);
         await expect(
-          reprogramar.ejecutar({ citaId: original.id, nuevoRangoHorario: DOCE_A_UNA }, ACTOR, unaHoraAntes),
+          reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio }, ACTOR, unaHoraAntes),
         ).resolves.toBeDefined();
       });
     });
@@ -234,7 +241,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
       // Ocupamos el destino con otra clienta en la única silla.
       await agendar.ejecutar(reserva({ rangoHorario: DOCE_A_UNA }), ACTOR);
 
-      await expect(reprogramar.ejecutar({ citaId: original.id, nuevoRangoHorario: DOCE_A_UNA }, ACTOR)).rejects.toMatchObject({
+      await expect(reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio }, ACTOR)).rejects.toMatchObject({
         code: 'HORARIO_NO_DISPONIBLE',
       });
 
@@ -248,7 +255,7 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
       const { citaRepo, agendar } = await preparar(1);
       const sillaId = (await agendar.ejecutar(reserva({ rangoHorario: DOCE_A_UNA }), ACTOR)).sillaId;
 
-      const enEspera = Cita.crear({ ...reserva(), sillaId, estado: 'en_espera_pago' });
+      const enEspera = Cita.crear({ ...reserva(), rangoHorario: DIEZ_A_ONCE, sillaId, estado: 'en_espera_pago' });
       await citaRepo.guardar(enEspera);
 
       // El hueco de las 10 sigue disponible pese a la cita pendiente de pago.
@@ -259,8 +266,8 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
       const { citaRepo, sillaRepo, confirmar } = await preparar(1);
       const sillaId = (await sillaRepo.listarPorSucursal(SUCURSAL))[0].id;
 
-      const primera = Cita.crear({ ...reserva(), sillaId, estado: 'en_espera_pago' });
-      const segunda = Cita.crear({ ...reserva(), sillaId, estado: 'en_espera_pago' });
+      const primera = Cita.crear({ ...reserva(), rangoHorario: DIEZ_A_ONCE, sillaId, estado: 'en_espera_pago' });
+      const segunda = Cita.crear({ ...reserva(), rangoHorario: DIEZ_A_ONCE, sillaId, estado: 'en_espera_pago' });
       await citaRepo.guardar(primera);
       await citaRepo.guardar(segunda);
 

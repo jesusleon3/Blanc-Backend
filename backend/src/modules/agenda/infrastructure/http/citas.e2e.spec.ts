@@ -25,6 +25,9 @@ import { Manicurista } from '../../../sucursales-y-personal/domain/entities/mani
 import { DrizzleSucursalRepository } from '../../../sucursales-y-personal/infrastructure/persistence/drizzle-sucursal.repository';
 import { DrizzleManicuristaRepository } from '../../../sucursales-y-personal/infrastructure/persistence/drizzle-manicurista.repository';
 import { horarioAbiertoSiempre } from '../../test-utils/contexto-personal-falso';
+import { Servicio } from '../../../catalogo-y-cotizacion/domain/entities/servicio.entity';
+import { DrizzleServicioRepository } from '../../../catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
+import { CatalogoYCotizacionModule } from '../../../catalogo-y-cotizacion/catalogo-y-cotizacion.module';
 
 const SECRETO = 'secreto-e2e-agenda';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -47,8 +50,8 @@ const RUTA = '/v1/agenda/citas';
 // en [89ab]), así que un `2222-...` escrito a ojo se rechaza con 400 y la prueba mediría el
 // validador en vez del caso de uso.
 const CLIENTA = randomUUID();
-const SERVICIO = randomUUID();
 const INICIO = '2026-12-07T10:00:00.000Z';
+/** Derivado del catálogo (60 min), no elegido por el cliente. */
 const FIN = '2026-12-07T11:00:00.000Z';
 const INEXISTENTE = randomUUID();
 
@@ -70,6 +73,8 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
   let sucursalId: string;
   let ana: Manicurista;
   let bea: Manicurista;
+  /** Servicio REAL del catálogo: desde esta parte, `servicioId` ya no es un uuid cualquiera. */
+  let servicio: Servicio;
 
   /** Token con cada rol. `manicuristaAna` lleva su vínculo de `P9`. */
   let dueña: string;
@@ -85,7 +90,7 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       // `IntegracionModule` es parte del montaje real: sin él no hay `CONTEXTO_PERSONAL_PORT` y el
       // motor de disponibilidad no arranca. Que este E2E lo exija es la prueba de que el cableado
       // entre Bounded Contexts funciona de verdad.
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, IntegracionModule],
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, IntegracionModule],
       providers: [
         {
           provide: APP_GUARD,
@@ -126,6 +131,11 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
     encargada = token(Rol.GERENTE, 'encargada');
     recepcionista = token(Rol.RECEPCIONISTA, 'recepcionista');
 
+    // Servicio de 60 minutos: es la duración que define el `FIN` de todas las pruebas de este
+    // archivo, porque el fin ya no lo elige el cliente.
+    servicio = Servicio.crear({ nombre: 'Gelish', categoria: 'aplicacion', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
+    await new DrizzleServicioRepository(dbDePrueba).guardar(servicio);
+
     const sucursal = Sucursal.crear({ nombre: 'Lomas', horarioSemanal: horarioAbiertoSiempre() });
     await sucursalRepo.guardar(sucursal);
     sucursalId = sucursal.id;
@@ -154,7 +164,8 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
     request(app.getHttpServer())
       .post(RUTA)
       .set('Authorization', `Bearer ${autorizacion}`)
-      .send({ sucursalId, servicioId: SERVICIO, clientaId: CLIENTA, inicio: INICIO, fin: FIN, ...extra });
+      // Sin `fin`: lo deriva el backend de la duración del catálogo.
+      .send({ sucursalId, servicioId: servicio.id, clientaId: CLIENTA, inicio: INICIO, ...extra });
 
   describe('alta de citas', () => {
     it('201 y elige silla sola: la clienta nunca eligió silla', async () => {
@@ -168,7 +179,7 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       await request(app.getHttpServer())
         .post(RUTA)
         .set('Authorization', `Bearer ${encargada}`)
-        .send({ sucursalId, servicioId: SERVICIO, inicio: INICIO, fin: FIN })
+        .send({ sucursalId, servicioId: servicio.id, inicio: INICIO })
         .expect(400);
     });
 
@@ -190,6 +201,186 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
 
     it('403 si la pide una RECEPCIONISTA: agendar no es su rol en esta API', async () => {
       await agendar({}, recepcionista).expect(403);
+    });
+  });
+
+  describe('integridad del catálogo (`ADR-005` no permite FK entre esquemas)', () => {
+    it('404 CON UN `servicioId` QUE NO EXISTE: antes se agendaba igual', async () => {
+      // Este era el hueco más grande de la API de Agenda: el único filtro sobre `servicioId` era
+      // el formato del uuid, así que se podía vender una cita de un servicio inventado.
+      const respuesta = await agendar({ servicioId: randomUUID() }).expect(404);
+      expect(respuesta.body.error.code).toBe('RECURSO_NO_ENCONTRADO');
+    });
+
+    it('409 SERVICIO_INACTIVO con un servicio dado de baja del catálogo', async () => {
+      const repo = new DrizzleServicioRepository(dbDePrueba);
+      const deBaja = Servicio.crear({ nombre: 'Uñas de porcelana', categoria: 'aplicacion', duracionBaseMinutos: 60, precioBaseCentavos: 60000 });
+      deBaja.desactivar();
+      await repo.guardar(deBaja);
+
+      const respuesta = await agendar({ servicioId: deBaja.id }).expect(409);
+      expect(respuesta.body.error.code).toBe('SERVICIO_INACTIVO');
+    });
+
+    it('DERIVA EL FIN de la duración del catálogo cuando el cliente no lo manda', async () => {
+      const respuesta = await agendar().expect(201);
+
+      expect(respuesta.body.inicio).toBe(INICIO);
+      expect(respuesta.body.fin).toBe(FIN);
+    });
+
+    it('409 SI EL CLIENTE PIDE UNA DURACIÓN DISTINTA A LA DEL SERVICIO', async () => {
+      // Pedir media hora para un servicio de una hora dejaría la silla libre a mitad del trabajo.
+      const respuesta = await agendar({ fin: '2026-12-07T10:30:00.000Z' }).expect(409);
+
+      expect(respuesta.body.error.code).toBe('DURACION_NO_COINCIDE_CON_SERVICIO');
+      expect(respuesta.body.error.message).toContain('60 minutos');
+    });
+
+    it('acepta un `fin` que coincide: el cliente antiguo que lo manda sigue funcionando', async () => {
+      await agendar({ fin: FIN }).expect(201);
+    });
+
+    it('CONGELA LA COTIZACIÓN DESDE EL CATÁLOGO, no desde el payload', async () => {
+      const respuesta = await agendar().expect(201);
+
+      expect(respuesta.body.cotizacionSnapshot).toMatchObject({
+        version: 1,
+        totalCentavos: 45000,
+        requiereCotizacionManual: false,
+        incluyeModificadores: false,
+        servicio: { id: servicio.id, nombre: 'Gelish', duracionMinutos: 60, precioCentavos: 45000 },
+      });
+    });
+
+    it('400 si el cliente intenta enviar `cotizacionSnapshot`: los precios no vienen de fuera', async () => {
+      // El DTO no declara el campo, así que `forbidNonWhitelisted` lo rechaza. Es el mismo
+      // principio que rige para OpenAI: el backend es la única autoridad sobre precios.
+      await agendar({ cotizacionSnapshot: { totalCentavos: 1 } }).expect(400);
+    });
+
+    it('`DEC-033`: con cotización manual el total viaja como `null`, no como un precio inventado', async () => {
+      const repo = new DrizzleServicioRepository(dbDePrueba);
+      const manual = Servicio.crear({
+        nombre: 'Diseño personalizado',
+        categoria: 'aplicacion',
+        duracionBaseMinutos: 60,
+        precioBaseCentavos: 90000,
+        requiereCotizacionManual: true,
+      });
+      await repo.guardar(manual);
+
+      const respuesta = await agendar({ servicioId: manual.id }).expect(201);
+
+      expect(respuesta.body.cotizacionSnapshot.totalCentavos).toBeNull();
+      expect(respuesta.body.cotizacionSnapshot.requiereCotizacionManual).toBe(true);
+    });
+
+    it('al reprogramar se revalida el catálogo y NO se recotiza (`RN-AGE-08`)', async () => {
+      const { body: cita } = await agendar().expect(201);
+
+      // Sube el precio del catálogo después de agendar.
+      const repo = new DrizzleServicioRepository(dbDePrueba);
+      const guardado = (await repo.buscarPorId(servicio.id))!;
+      guardado.actualizarDatos({ precioBaseCentavos: 99900 });
+      await repo.guardar(guardado);
+
+      const respuesta = await request(app.getHttpServer())
+        .post(`${RUTA}/${cita.id}/reprogramar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ inicio: '2026-12-08T10:00:00.000Z' })
+        .expect(201);
+
+      // La clienta conserva el precio que se le dijo: mover la hora no es una venta nueva.
+      expect(respuesta.body.nueva.cotizacionSnapshot.totalCentavos).toBe(45000);
+      expect(respuesta.body.nueva.fin).toBe('2026-12-08T11:00:00.000Z');
+    });
+
+    it('409 al reprogramar con una duración que no corresponde al servicio', async () => {
+      const { body: cita } = await agendar().expect(201);
+
+      const respuesta = await request(app.getHttpServer())
+        .post(`${RUTA}/${cita.id}/reprogramar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ inicio: '2026-12-08T10:00:00.000Z', fin: '2026-12-08T12:00:00.000Z' })
+        .expect(409);
+
+      expect(respuesta.body.error.code).toBe('DURACION_NO_COINCIDE_CON_SERVICIO');
+    });
+  });
+
+  describe('acotación y paginación del `GET` (deuda 5 de §16)', () => {
+    it('400 si el rango abarca más de 31 días: un año devolvería la sucursal entera', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: '2026-01-01T00:00:00.000Z', fin: '2026-12-31T00:00:00.000Z' })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+
+      expect(respuesta.body.error.code).toBe('RANGO_DE_CONSULTA_DEMASIADO_AMPLIO');
+    });
+
+    it('400 si el fin no es posterior al inicio', async () => {
+      await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: FIN, fin: INICIO })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+    });
+
+    it('400 si `sucursalId` no es un uuid: antes llegaba sin validar hasta la consulta', async () => {
+      await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId: 'la-de-lomas', inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+    });
+
+    it('400 si `limite` excede el tope duro', async () => {
+      await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN, limite: 5000 })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+    });
+
+    it('pagina de verdad: con 2 citas y `limite=1` hay dos páginas distintas', async () => {
+      const { body: primera } = await agendar().expect(201);
+      const { body: segunda } = await agendar().expect(201);
+
+      const pagina = (desplazamiento: number) =>
+        request(app.getHttpServer())
+          .get(RUTA)
+          .query({ sucursalId, inicio: INICIO, fin: FIN, limite: 1, desplazamiento })
+          .set('Authorization', `Bearer ${encargada}`)
+          .expect(200);
+
+      const uno = await pagina(0);
+      const dos = await pagina(1);
+
+      expect(uno.body.citas).toHaveLength(1);
+      expect(uno.body.hayMas).toBe(true);
+      expect(dos.body.citas).toHaveLength(1);
+      // `hayMas` es `false` en la última: se pide una fila extra, no se cuenta el total.
+      expect(dos.body.hayMas).toBe(false);
+      // Sin solaparse ni repetirse, gracias al orden estable de la consulta.
+      expect([uno.body.citas[0].id, dos.body.citas[0].id].sort()).toEqual([primera.id, segunda.id].sort());
+    });
+
+    it('LA MANICURISTA NO PIERDE SUS CITAS POR PAGINACIÓN: el filtro va en SQL, no en memoria', async () => {
+      // El caso que esto atrapa: si el filtro se aplicara DESPUÉS del `LIMIT`, Ana vería su
+      // página 1 vacía —porque la ocuparían las citas de Bea— y concluiría que no tiene trabajo.
+      await agendar({ manicuristaId: bea.id }).expect(201);
+      const { body: suya } = await agendar({ manicuristaId: ana.id }).expect(201);
+
+      const respuesta = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN, limite: 1 })
+        .set('Authorization', `Bearer ${manicuristaAna}`)
+        .expect(200);
+
+      expect(respuesta.body.citas).toHaveLength(1);
+      expect(respuesta.body.citas[0].id).toBe(suya.id);
     });
   });
 
@@ -271,13 +462,25 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       expect(respuesta.body.citas[0].id).toBe(suya.id);
     });
 
-    it('el filtro NO se toma de la query: pedir la agenda de otra no la devuelve', async () => {
+    it('400 AL INTENTAR PASAR `manicuristaId` EN LA QUERY: el parámetro no existe', async () => {
+      await agendar({ manicuristaId: bea.id }).expect(201);
+
+      // Desde que el `GET` tiene DTO, un parámetro no declarado se rechaza en vez de ignorarse.
+      // Es más fuerte que ignorarlo: quien lo intenta se entera de que ese filtro no se acepta,
+      // en lugar de creer que se aplicó. El filtro sale de los permisos, nunca de la petición.
+      await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN, manicuristaId: bea.id })
+        .set('Authorization', `Bearer ${manicuristaAna}`)
+        .expect(400);
+    });
+
+    it('y sin ese parámetro tampoco ve la agenda de Bea: el filtro es el de sus permisos', async () => {
       await agendar({ manicuristaId: bea.id }).expect(201);
 
       const respuesta = await request(app.getHttpServer())
         .get(RUTA)
-        // Intento explícito de leer la agenda ajena pasando el id de Bea.
-        .query({ sucursalId, inicio: INICIO, fin: FIN, manicuristaId: bea.id })
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
         .set('Authorization', `Bearer ${manicuristaAna}`)
         .expect(200);
 

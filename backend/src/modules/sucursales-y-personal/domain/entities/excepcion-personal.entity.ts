@@ -85,11 +85,36 @@ export class ExcepcionPersonal {
   }
 }
 
+/**
+ * Tope de duración de una excepción (`DEC-036`).
+ *
+ * POR QUÉ EXISTE. Una ausencia **resta capacidad mientras dure**, y nada en el flujo obliga a
+ * revisarla después. Un año mal teclado —`2027` por `2026`— creaba una ausencia de siglos que el
+ * motor de disponibilidad respetaba en silencio: la sucursal empezaba a rechazar citas sin que
+ * nadie entendiera por qué, y el registro culpable estaba en una fecha que nadie iba a mirar.
+ *
+ * Noventa días es holgado para cualquier ausencia real (una incapacidad larga, una maternidad) y
+ * sigue siendo corto frente a un error de año. Una ausencia más larga que esto no es un dato
+ * operativo: es una baja, y para eso está `DesactivarManicuristaUseCase`.
+ */
+export const MAXIMO_DIAS_DE_EXCEPCION = 90;
+
 function validarRango(rango: RangoHorario): void {
   if (Number.isNaN(rango.inicio.getTime()) || Number.isNaN(rango.fin.getTime())) {
     throw new DomainError('EXCEPCION_RANGO_INVALIDO', 'El rango contiene una fecha inválida.', 400);
   }
   if (rango.fin.getTime() <= rango.inicio.getTime()) {
     throw new DomainError('EXCEPCION_RANGO_INVALIDO', 'El fin de la excepción debe ser posterior a su inicio.', 400);
+  }
+
+  const dias = (rango.fin.getTime() - rango.inicio.getTime()) / 86_400_000;
+  if (dias > MAXIMO_DIAS_DE_EXCEPCION) {
+    throw new DomainError(
+      'EXCEPCION_DEMASIADO_LARGA',
+      `Una excepción no puede durar más de ${MAXIMO_DIAS_DE_EXCEPCION} días; se pidieron ${Math.ceil(dias)}. ` +
+        'Para una ausencia permanente, da de baja a la manicurista.',
+      400,
+      { maximoDias: MAXIMO_DIAS_DE_EXCEPCION, diasSolicitados: Math.ceil(dias) },
+    );
   }
 }

@@ -9,7 +9,10 @@ import { MANICURISTA_REPOSITORY, ManicuristaRepository } from '../../domain/port
 import { SUCURSAL_REPOSITORY, SucursalRepository } from '../../domain/ports/sucursal.repository';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
-import { RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
+import { ConflictoDeNegocioError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
+import { aMinutos, diaDeLaSemana, minutosLocales } from '../../../../shared/tiempo/zona-horaria-negocio';
+import { BloqueHorario } from '../../domain/value-objects/horario-semanal.vo';
+import { Sucursal } from '../../domain/entities/sucursal.entity';
 import { ClaimsUsuario } from '../../../../shared/auth/rol';
 import { UNIT_OF_WORK, UnitOfWork } from '../../../../shared/persistence/unit-of-work.port';
 
@@ -60,9 +63,12 @@ export class RegistrarExcepcionPersonalUseCase {
     // El destino se valida aquí y no se deja a la clave foránea: sin esto, un `sucursalId` mal
     // escrito aborta la transacción con un error de PostgreSQL y el cliente recibe un 500 opaco
     // en lugar de un 404 que dice qué no existe.
-    if (!(await this.sucursales.buscarPorId(input.sucursalId))) {
+    const destino = await this.sucursales.buscarPorId(input.sucursalId);
+    if (!destino) {
       throw new RecursoNoEncontradoError('Sucursal', input.sucursalId);
     }
+    this.exigirDestinoAbiertoEnElRango(destino, input.rango);
+
     const excepcion = ExcepcionPersonal.cobertura(input);
     return this.persistir(excepcion, 'registrar_cobertura', actor);
   }
@@ -120,6 +126,44 @@ export class RegistrarExcepcionPersonalUseCase {
     });
 
     return { excepcion, citasAfectadas };
+  }
+
+  /**
+   * El destino tiene que estar **abierto en algún momento del rango** de la cobertura.
+   *
+   * POR QUÉ IMPORTA Y NO ES COSMÉTICO. Una cobertura es un **movimiento**: resta capacidad en la
+   * sucursal base y la suma en el destino. Si el destino está cerrado en todo el rango, la resta
+   * sí ocurre y la suma no sirve de nada — la manicurista desaparece de su sucursal para ir a un
+   * local cerrado. El caso típico no es exótico: capturar la cobertura en domingo, o dentro del
+   * corte de mediodía.
+   *
+   * Se exige solape con **algún** bloque, no que quepa entera en uno: una cobertura de todo el
+   * lunes es legítima y cruza el corte de las 12:00 por definición. Lo que se rechaza es que no
+   * toque ningún bloque en ningún día del rango.
+   */
+  private exigirDestinoAbiertoEnElRango(destino: Sucursal, rango: RangoHorario): void {
+    const horario = destino.horarioSemanal.toJSON();
+
+    // Se recorre día a día desde el inicio. El tope de 90 días de `ExcepcionPersonal` acota el
+    // bucle: sin él, un rango mal teclado haría iterar siglos.
+    for (let dia = new Date(rango.inicio); dia < rango.fin; dia = new Date(dia.getTime() + 86_400_000)) {
+      const bloques: BloqueHorario[] = horario[diaDeLaSemana(dia)] ?? [];
+      if (bloques.length === 0) continue;
+
+      // Minutos de pared que el rango cubre DENTRO de este día concreto.
+      const inicioDelDia = Math.max(0, dia.getTime() === rango.inicio.getTime() ? minutosLocales(rango.inicio) : 0);
+      const siguienteDia = new Date(dia.getTime() + 86_400_000);
+      const finDelDia = rango.fin < siguienteDia ? minutosLocales(rango.fin) : 24 * 60;
+
+      const solapa = bloques.some((bloque) => inicioDelDia < aMinutos(bloque.horaFin) && finDelDia > aMinutos(bloque.horaInicio));
+      if (solapa) return;
+    }
+
+    throw new ConflictoDeNegocioError(
+      'SUCURSAL_DESTINO_CERRADA_EN_EL_RANGO',
+      `La sucursal "${destino.nombre}" está cerrada durante todo el rango de la cobertura, así que nadie se beneficiaría del movimiento.`,
+      { sucursalId: destino.id, inicio: rango.inicio.toISOString(), fin: rango.fin.toISOString() },
+    );
   }
 
   private async exigirManicurista(manicuristaId: string): Promise<void> {

@@ -3,6 +3,7 @@ import { Cita, validarRangoHorario } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
 import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
@@ -16,7 +17,10 @@ export const HORAS_MINIMAS_CON_ANTICIPO = 48;
 
 export interface ReprogramarCitaInput {
   citaId: string;
-  nuevoRangoHorario: RangoHorario;
+  /** Nuevo inicio. El fin lo deriva la duración del servicio en el catálogo. */
+  nuevoInicio: Date;
+  /** Opcional. Si llega, tiene que coincidir con `nuevoInicio + duración del catálogo`. */
+  nuevoFin?: Date;
   /** Mantener a la misma manicurista, o `null`/omitir para dejarla sin asignar otra vez. */
   manicuristaId?: string | null;
   /**
@@ -46,33 +50,44 @@ export class ReprogramarCitaUseCase {
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
     @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
     private readonly motorDisponibilidad: MotorDisponibilidad,
+    private readonly resolutorDeServicio: ResolutorDeServicio,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
 
   async ejecutar(input: ReprogramarCitaInput, actor: ClaimsUsuario, ahora = new Date()): Promise<{ original: Cita; nueva: Cita }> {
-    validarRangoHorario(input.nuevoRangoHorario);
-
     const original = await this.citaRepository.buscarPorId(input.citaId);
     if (!original) throw new RecursoNoEncontradoError('Cita', input.citaId);
 
     this.validarReglas(original, input, ahora);
 
+    // El catálogo se revalida al reprogramar, no solo al agendar. Antes no se hacía, así que una
+    // cita de un servicio dado de baja se podía mover indefinidamente, y el nuevo rango podía
+    // tener un tamaño distinto al del servicio.
+    const servicio = await this.resolutorDeServicio.resolver(original.servicioId);
+    const nuevoRangoHorario = this.resolutorDeServicio.derivarRango(input.nuevoInicio, input.nuevoFin, servicio);
+    validarRangoHorario(nuevoRangoHorario);
+
     // La cita original se excluye del cálculo: está a punto de liberar su hueco, así que mover una
     // cita dentro del mismo horario no debe chocar consigo misma.
-    await this.motorDisponibilidad.exigirDisponibilidad(original.sucursalId, input.nuevoRangoHorario, { excluirCitaId: original.id });
+    await this.motorDisponibilidad.exigirDisponibilidad(original.sucursalId, nuevoRangoHorario, { excluirCitaId: original.id });
 
-    const sillaId = await this.elegirSillaLibre(original.sucursalId, input.nuevoRangoHorario, original.id);
+    const sillaId = await this.elegirSillaLibre(original.sucursalId, nuevoRangoHorario, original.id);
 
     const nueva = Cita.crear({
       sucursalId: original.sucursalId,
       sillaId,
       clientaId: original.clientaId,
       servicioId: original.servicioId,
-      rangoHorario: input.nuevoRangoHorario,
+      rangoHorario: nuevoRangoHorario,
       manicuristaId: input.manicuristaId ?? null,
       citaOrigenId: original.id,
       numeroDeReprogramaciones: original.numeroDeReprogramaciones + 1,
+      // **La cotización NO se recalcula.** `RN-AGE-08` la declara inmutable y `DEC-042` separa
+      // reprogramar de cancelar: mover la hora no es una venta nueva. Si el catálogo subió de
+      // precio entretanto, la clienta conserva el que se le dijo. Recotizar aquí sería subirle el
+      // precio por haber movido su cita.
+      cotizacionSnapshot: original.cotizacionSnapshot,
     });
 
     original.cambiarEstado('reprogramada');

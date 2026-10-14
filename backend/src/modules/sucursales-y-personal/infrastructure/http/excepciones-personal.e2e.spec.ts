@@ -25,6 +25,9 @@ import { Manicurista } from '../../domain/entities/manicurista.entity';
 import { DrizzleSucursalRepository } from '../persistence/drizzle-sucursal.repository';
 import { DrizzleManicuristaRepository } from '../persistence/drizzle-manicurista.repository';
 import { horarioAbiertoSiempre } from '../../../agenda/test-utils/contexto-personal-falso';
+import { Servicio } from '../../../catalogo-y-cotizacion/domain/entities/servicio.entity';
+import { DrizzleServicioRepository } from '../../../catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
+import { CatalogoYCotizacionModule } from '../../../catalogo-y-cotizacion/catalogo-y-cotizacion.module';
 
 const SECRETO = 'secreto-e2e-excepciones';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -67,6 +70,7 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
   let otraSucursalId: string;
   let ana: Manicurista;
   let bea: Manicurista;
+  let servicio: Servicio;
   let dueña: string;
   let encargada: string;
   let manicurista: string;
@@ -76,7 +80,7 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
     dbDePrueba = await crearBaseDeDatosDePrueba();
 
     const moduleRef = await Test.createTestingModule({
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, IntegracionModule],
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, IntegracionModule],
       providers: [
         {
           provide: APP_GUARD,
@@ -110,6 +114,9 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
     manicurista = token(Rol.MANICURISTA, 'ana-usuaria');
     recepcionista = token(Rol.RECEPCIONISTA, 'recepcionista');
 
+    servicio = Servicio.crear({ nombre: 'Gelish', categoria: 'aplicacion', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
+    await new DrizzleServicioRepository(dbDePrueba).guardar(servicio);
+
     const sucursalRepo = new DrizzleSucursalRepository(dbDePrueba);
     const manicuristaRepo = new DrizzleManicuristaRepository(dbDePrueba);
 
@@ -142,10 +149,9 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
       .set('Authorization', `Bearer ${encargada}`)
       .send({
         sucursalId,
-        servicioId: randomUUID(),
+        servicioId: servicio.id,
         clientaId: randomUUID(),
         inicio: CITA_INICIO,
-        fin: CITA_FIN,
         ...(manicuristaId ? { manicuristaId } : {}),
       });
 
@@ -296,7 +302,7 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
     await request(app.getHttpServer())
       .post('/v1/agenda/citas')
       .set('Authorization', `Bearer ${encargada}`)
-      .send({ sucursalId, servicioId: randomUUID(), clientaId, inicio: CITA_INICIO, fin: CITA_FIN, manicuristaId: ana.id })
+      .send({ sucursalId, servicioId: servicio.id, clientaId, inicio: CITA_INICIO, manicuristaId: ana.id })
       .expect(201);
 
     await registrarAusencia().expect(201);

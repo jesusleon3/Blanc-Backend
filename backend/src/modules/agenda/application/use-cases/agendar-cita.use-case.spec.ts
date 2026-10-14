@@ -9,6 +9,8 @@ import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
+import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
+import { crearContextoCatalogoFalso, crearVerificarClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -39,16 +41,30 @@ async function preparar(numeroDeSillas = 2) {
     citaRepo,
     sillaRepo,
     auditoria,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, auditoria, crearUnitOfWorkFalso()),
+    agendar: new AgendarCitaUseCase(
+      citaRepo,
+      sillaRepo,
+      motor,
+      // El servicio del catálogo dura 60 minutos, que es el tamaño de todos los rangos de este
+      // archivo: así el fin derivado coincide con lo que estas pruebas ya daban por supuesto.
+      new ResolutorDeServicio(crearContextoCatalogoFalso([servicioDePrueba({ id: SERVICIO })])),
+      crearVerificarClientaFalso(),
+      auditoria,
+      crearUnitOfWorkFalso(),
+    ),
     asignar: new AsignarManicuristaEnSucursalUseCase(citaRepo, auditoria, crearUnitOfWorkFalso()),
   };
 }
 
-const reserva = (extra: Partial<{ manicuristaId: string | null; rangoHorario: typeof DIEZ_A_ONCE }> = {}) => ({
+/**
+ * `rangoHorario` sigue aceptándose por comodidad de estas pruebas, pero se traduce a `inicio`:
+ * **el fin ya no lo decide quien llama**, lo deriva la duración del catálogo.
+ */
+const reserva = ({ rangoHorario = DIEZ_A_ONCE, ...extra }: Partial<{ manicuristaId: string | null; rangoHorario: typeof DIEZ_A_ONCE }> = {}) => ({
   sucursalId: SUCURSAL,
   servicioId: SERVICIO,
   clientaId: CLIENTA,
-  rangoHorario: DIEZ_A_ONCE,
+  inicio: rangoHorario.inicio,
   ...extra,
 });
 
@@ -163,11 +179,15 @@ describe('AgendarCitaUseCase (integración, PostgreSQL real)', () => {
       await expect(agendar.ejecutar(reserva(), ACTOR)).resolves.toBeDefined();
     });
 
-    it('un rango invertido se rechaza antes de tocar la base', async () => {
+    it('un inicio inválido se rechaza antes de tocar la base', async () => {
+      // Ya no se puede pedir un rango invertido: el fin lo deriva el catálogo a partir de una
+      // duración que el resolutor garantiza positiva. Lo único que puede venir mal es el inicio.
       const { agendar } = await preparar();
-      const invertido = rango('2026-12-07T11:00:00Z', '2026-12-07T10:00:00Z');
 
-      await expect(agendar.ejecutar(reserva({ rangoHorario: invertido }), ACTOR)).rejects.toMatchObject({ code: 'CITA_RANGO_INVALIDO' });
+      await expect(agendar.ejecutar({ ...reserva(), inicio: new Date('no es fecha') }, ACTOR)).rejects.toMatchObject({
+        code: 'CITA_RANGO_INVALIDO',
+        httpStatus: 400,
+      });
     });
   });
 });

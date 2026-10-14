@@ -3,9 +3,11 @@ import { Cita, validarRangoHorario } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
 import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
+import { VERIFICAR_CLIENTA_PORT, VerificarClientaPort } from '../../domain/ports/verificar-clienta.port';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
-import { ConflictoDeNegocioError, DomainError } from '../../../../shared/errors/domain-error';
+import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
 import { ClaimsUsuario } from '../../../../shared/auth/rol';
 import { UNIT_OF_WORK, UnitOfWork } from '../../../../shared/persistence/unit-of-work.port';
 
@@ -13,7 +15,13 @@ export interface AgendarCitaInput {
   sucursalId: string;
   servicioId: string;
   clientaId: string;
-  rangoHorario: RangoHorario;
+  /**
+   * Instante de inicio. **El fin ya no lo decide quien llama**: se deriva de la duración del
+   * servicio en el catálogo. `fin` solo se acepta para poder rechazarlo si no coincide.
+   */
+  inicio: Date;
+  /** Opcional. Si llega, tiene que coincidir con `inicio + duración del catálogo`. */
+  fin?: Date;
   /** Opcional: `undefined`/`null` = la clienta no eligió. La Encargada asignará al llegar. */
   manicuristaId?: string | null;
 }
@@ -36,8 +44,13 @@ export interface AgendarCitaInput {
  * de mediodía (`RN-AGE-10`), domingo cerrado (`RN-AGE-12`) y capacidad efectiva cruzando sillas
  * contra personal operativo.
  *
- * **Lo que sigue sin validarse, y no por olvido:** que el servicio exista y esté activo (exige un
- * puerto hacia Catálogo) y que la duración corresponda a la del servicio (`FL-COT-02`, pospuesto).
+ * **Integridad referencial que la base de datos no puede dar** (`ADR-005` prohíbe las FK entre
+ * esquemas): el servicio se valida contra Catálogo por puerto, y la clienta contra CRM — este
+ * último con un adaptador provisional que **todavía no valida nada**, ver `VerificarClientaPort`.
+ *
+ * **La duración la manda el catálogo.** Quien llama ya no elige cuánto dura la cita; solo cuándo
+ * empieza. Antes se podía reservar una hora para un servicio de dos y la silla quedaba libre a
+ * mitad del trabajo, lista para venderse otra vez.
  */
 @Injectable()
 export class AgendarCitaUseCase {
@@ -45,24 +58,45 @@ export class AgendarCitaUseCase {
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
     @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
     private readonly motorDisponibilidad: MotorDisponibilidad,
+    private readonly resolutorDeServicio: ResolutorDeServicio,
+    @Inject(VERIFICAR_CLIENTA_PORT) private readonly clientas: VerificarClientaPort,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
 
   async ejecutar(input: AgendarCitaInput, actor: ClaimsUsuario): Promise<Cita> {
+    // El catálogo primero: si el servicio no existe o está de baja, nada de lo demás importa, y
+    // además su duración es la que define el rango que se va a consultar.
+    const servicio = await this.resolutorDeServicio.resolver(input.servicioId);
+    const rangoHorario = this.resolutorDeServicio.derivarRango(input.inicio, input.fin, servicio);
+
+    if (!(await this.clientas.existe(input.clientaId))) {
+      throw new RecursoNoEncontradoError('Clienta', input.clientaId);
+    }
+
     // ANTES de consultar la base: un rango invertido haría que PostgreSQL lanzara un error crudo
     // al construir el `tstzrange` de la consulta, en vez del error de dominio que corresponde.
-    validarRangoHorario(input.rangoHorario);
+    validarRangoHorario(rangoHorario);
 
     // Horario de la sucursal (`RN-AGE-10`/`RN-AGE-12`) y capacidad efectiva
     // `MIN(sillas, manicuristas)` (`DEC-035`). Antes de esto, el caso de uso repartía sillas sin
     // saber si había manos para atenderlas.
-    await this.motorDisponibilidad.exigirDisponibilidad(input.sucursalId, input.rangoHorario);
+    await this.motorDisponibilidad.exigirDisponibilidad(input.sucursalId, rangoHorario);
 
-    const candidatas = await this.sillasCandidatas(input);
+    const candidatas = await this.sillasCandidatas(input.sucursalId, rangoHorario);
+    // Se congela una sola vez, fuera del bucle: reintentar en otra silla no recotiza nada.
+    const cotizacionSnapshot = this.resolutorDeServicio.construirSnapshot(servicio);
 
     for (const sillaId of candidatas) {
-      const cita = Cita.crear({ ...input, sillaId, manicuristaId: input.manicuristaId ?? null });
+      const cita = Cita.crear({
+        sucursalId: input.sucursalId,
+        servicioId: input.servicioId,
+        clientaId: input.clientaId,
+        rangoHorario,
+        sillaId,
+        manicuristaId: input.manicuristaId ?? null,
+        cotizacionSnapshot,
+      });
 
       try {
         await this.unitOfWork.ejecutar(async () => {
@@ -96,22 +130,22 @@ export class AgendarCitaUseCase {
       'HORARIO_NO_DISPONIBLE',
       'No queda lugar en la sucursal para ese horario.',
       409,
-      { sucursalId: input.sucursalId, inicio: input.rangoHorario.inicio.toISOString(), sillasIntentadas: candidatas.length },
+      { sucursalId: input.sucursalId, inicio: rangoHorario.inicio.toISOString(), sillasIntentadas: candidatas.length },
     );
   }
 
   /** Sillas activas de la sucursal que, según la foto actual, no tienen cita solapada. */
-  private async sillasCandidatas(input: AgendarCitaInput): Promise<string[]> {
-    const sillas = (await this.sillaRepository.listarPorSucursal(input.sucursalId)).filter((silla) => silla.activa);
+  private async sillasCandidatas(sucursalId: string, rangoHorario: RangoHorario): Promise<string[]> {
+    const sillas = (await this.sillaRepository.listarPorSucursal(sucursalId)).filter((silla) => silla.activa);
 
     if (sillas.length === 0) {
       throw new DomainError('SUCURSAL_SIN_SILLAS', 'La sucursal no tiene ninguna silla activa configurada.', 409, {
-        sucursalId: input.sucursalId,
+        sucursalId,
       });
     }
 
     const ocupadas = new Set(
-      (await this.citaRepository.listarQueOcupanEnRango(input.sucursalId, input.rangoHorario)).map((cita) => cita.sillaId),
+      (await this.citaRepository.listarQueOcupanEnRango(sucursalId, rangoHorario)).map((cita) => cita.sillaId),
     );
 
     return sillas.map((silla) => silla.id).filter((id) => !ocupadas.has(id));

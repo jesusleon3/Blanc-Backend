@@ -11,7 +11,7 @@ import { ReprogramarCitaUseCase } from '../../application/use-cases/reprogramar-
 import { MarcarNoShowUseCase } from '../../application/use-cases/marcar-no-show.use-case';
 import { CompletarCitaUseCase } from '../../application/use-cases/completar-cita.use-case';
 import { ConsultarAgendaUseCase } from '../../application/use-cases/consultar-agenda.use-case';
-import { AgendarCitaDto, AsignarManicuristaDto, CancelarCitaDto, ReprogramarCitaDto } from './dto/agendar-cita.dto';
+import { AgendarCitaDto, AsignarManicuristaDto, CancelarCitaDto, ConsultarAgendaDto, ReprogramarCitaDto } from './dto/agendar-cita.dto';
 import { citaAJson } from './cita.presenter';
 
 /**
@@ -52,17 +52,23 @@ export class CitasController {
    */
   @Get()
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE, Rol.MANICURISTA)
-  async listar(
-    @Query('sucursalId') sucursalId: string,
-    @Query('inicio') inicio: string,
-    @Query('fin') fin: string,
-    @CurrentUser() usuario: ClaimsUsuario,
-  ) {
-    const citas = await this.consultarAgenda.ejecutar(
-      { sucursalId, rangoHorario: { inicio: new Date(inicio), fin: new Date(fin) } },
+  async listar(@Query() query: ConsultarAgendaDto, @CurrentUser() usuario: ClaimsUsuario) {
+    const pagina = await this.consultarAgenda.ejecutar(
+      {
+        sucursalId: query.sucursalId,
+        rangoHorario: { inicio: new Date(query.inicio), fin: new Date(query.fin) },
+        limite: query.limite,
+        desplazamiento: query.desplazamiento,
+      },
       usuario,
     );
-    return { citas: citas.map((cita) => citaAJson(cita, usuario)) };
+
+    return {
+      citas: pagina.citas.map((cita) => citaAJson(cita, usuario)),
+      limite: pagina.limite,
+      desplazamiento: pagina.desplazamiento,
+      hayMas: pagina.hayMas,
+    };
   }
 
   /** Alta normal y **walk-in**: un walk-in es una cita creada en el momento (`DEC-037`). */
@@ -74,7 +80,9 @@ export class CitasController {
         sucursalId: dto.sucursalId,
         servicioId: dto.servicioId,
         clientaId: dto.clientaId,
-        rangoHorario: { inicio: new Date(dto.inicio), fin: new Date(dto.fin) },
+        inicio: new Date(dto.inicio),
+        // Si no llega, el backend lo deriva de la duración del catálogo.
+        fin: dto.fin === undefined ? undefined : new Date(dto.fin),
         manicuristaId: dto.manicuristaId ?? null,
       },
       usuario,
@@ -119,7 +127,8 @@ export class CitasController {
     const { original, nueva } = await this.reprogramarCita.ejecutar(
       {
         citaId: id,
-        nuevoRangoHorario: { inicio: new Date(dto.inicio), fin: new Date(dto.fin) },
+        nuevoInicio: new Date(dto.inicio),
+        nuevoFin: dto.fin === undefined ? undefined : new Date(dto.fin),
         manicuristaId: dto.manicuristaId ?? null,
       },
       usuario,
