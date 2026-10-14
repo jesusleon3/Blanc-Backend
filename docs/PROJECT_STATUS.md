@@ -421,7 +421,13 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 **Historial:**
 - **2026-09-30:** la Dueña confirma que si un anticipo expira, el espacio **no se considera agendado y se libera**, priorizando a otras clientas. Esto cierra lo que `DOMAIN_MODEL_REVIEW.md` había señalado como *"no solo una incógnita de negocio, sino una transición de estado sin definir"*.
 
-  **Habilita la restricción de exclusión.** `04-data-model.md` §346 dejó constancia de que, sin saber qué estados ocupan el horario, la restricción *"no puede implementarse literalmente"*. Con `DEC-030` y esta decisión ya hay base para proponer la lista: **liberan `cancelada`, `expirada` y `reprogramada`; todo lo demás ocupa** (`pendiente_confirmacion`, `en_espera_pago`, `confirmada`, `completada`, `no_show`). Se formula por la negativa a propósito: un estado nuevo que alguien añada en el futuro ocupará por defecto, que es el lado seguro del error.
+  **Habilita la restricción de exclusión.** `04-data-model.md` §346 dejó constancia de que, sin saber qué estados ocupan el horario, la restricción *"no puede implementarse literalmente"*. Con `DEC-030` y esta decisión ya hay base para proponer la lista: **liberan `cancelada`, `expirada` y `reprogramada`; todo lo demás ocupa** (`pendiente_confirmacion`, `en_espera_pago`, `confirmada`, `completada`, `no_show`).
+
+  > ⚠️ **CORRECCIÓN (2026-10-14, migración `0007`): `en_espera_pago` NO ocupa.** Esta entrada lo había listado entre los ocupantes con la justificación *"mientras el anticipo no expire, el espacio es suyo"*, lo que **contradice frontalmente a `RN-ANT-03`**, que está `Aprobada` y dice: *"no existe una retención temporal real del horario. Mientras el anticipo esté pendiente, el horario permanece disponible para cualquier otra clienta — el primero en pagar se queda con el cupo, protegido por el invariante de exclusión ya existente"*.
+  >
+  > Ganó la regla de negocio: era una decisión del negocio y `DEC-034` la contradijo por error al proponer la lista. El propio `RN-ANT-03` describe el mecanismo que esto habilita — la carrera entre dos clientas de lista roja **no se resuelve reteniendo el hueco**, sino al confirmar el pago, cuando la cita pasa a un estado que sí ocupa y la restricción decide quién se queda. Con `en_espera_pago` ocupando, esa carrera no podía ni existir.
+  >
+  > **Lista definitiva:** liberan `cancelada`, `expirada`, `reprogramada` y `en_espera_pago`. Se formula por la negativa a propósito: un estado nuevo que alguien añada en el futuro ocupará por defecto, que es el lado seguro del error.
 
   **No cierra `P3`.** Siguen faltando: el estado `pendiente_confirmacion`, que **todavía no existe** en `01-domain-discovery.md` §113 y que la confirmación interactiva ya confirmada (1.23) exige; a qué estado vuelve una cita tras reprogramarse; si `DEC-033` necesita un `pendiente_cotizacion`; y las máquinas de `Conversación` y `TicketEscalamiento` enteras — la segunda ni siquiera tiene valores propuestos. `P3` pasa de `Abierto` a **`Abierto — parcialmente desbloqueado`**.
 
@@ -1129,6 +1135,76 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 ## 16. Handoff / Trabajo Asíncrono
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
+
+### 2026-10-14 (b) — Fase 2 (parte 3): máquina de estados y ciclo de vida. **`P3` CERRADO**
+
+#### 🔴 Hallazgo de fondo: `DEC-034` contradecía a `RN-ANT-03`
+
+`DEC-034` listaba `en_espera_pago` entre los estados que **ocupan** horario (*"mientras el anticipo no expire, el espacio es suyo"*). `RN-ANT-03`, que está **`Aprobada`**, dice exactamente lo contrario:
+
+> *"no existe una retención temporal real del horario. Mientras el anticipo esté pendiente, el horario permanece disponible para cualquier otra clienta — el primero en pagar se queda con el cupo, protegido por el invariante de exclusión ya existente."*
+
+**Ganó la regla de negocio.** `DEC-034` era una propuesta mía al redactar la lista y contradijo una decisión del negocio. La migración `0007` reescribe **ambos** predicados `EXCLUDE` para que `en_espera_pago` libere.
+
+Lo interesante: `RN-ANT-03` ya describía el mecanismo que esto habilita. La carrera entre dos clientas de lista roja **no se resuelve reteniendo el hueco**, sino al confirmar el pago — ahí la cita pasa a ocupar y la restricción decide. Con `en_espera_pago` ocupando, esa carrera **no podía ni existir**. Hay dos pruebas que la recorren de principio a fin.
+
+#### Archivos creados
+
+| Archivo | Qué es |
+|---|---|
+| `src/database/migrations/0007_maquina_estados_cita.sql` | Columnas de reprogramación + FK a sí misma + **corrección de ambos predicados `EXCLUDE`** |
+| `…/use-cases/transicion-cita.base.ts` | Mecánica compartida (buscar, mover, persistir, auditar) |
+| `…/use-cases/solicitar-confirmacion-cita.use-case.ts` | `agendada → pendiente_confirmacion` |
+| `…/use-cases/confirmar-cita.use-case.ts` | `→ confirmada`. **Aquí se resuelve la carrera de `RN-ANT-03`** |
+| `…/use-cases/cancelar-cita.use-case.ts` | `→ cancelada` + indicador de incidente tardío (`RN-CRM-06`) |
+| `…/use-cases/reprogramar-cita.use-case.ts` | Original `reprogramada` + cita nueva enlazada, en una transacción |
+| `…/use-cases/marcar-no-show.use-case.ts` | `→ no_show` (manual) |
+| `…/use-cases/completar-cita.use-case.ts` | `→ completada` (`DEC-030`) |
+| `…/use-cases/ciclo-de-vida-cita.spec.ts` | 24 pruebas de integración |
+
+#### Archivos modificados
+
+- `src/database/schema/agenda.schema.ts` — `en_espera_pago` movido a los que liberan; columnas `citaOrigenId` y `numeroDeReprogramaciones`.
+- `…/domain/entities/cita.entity.ts` — **`TRANSICIONES_LEGALES`, `ESTADOS_INICIALES`, `esTerminal`**; `cambiarEstado` valida la transición.
+- `…/infrastructure/persistence/drizzle-cita.repository.ts` — persiste las columnas nuevas.
+- `…/agenda.module.ts` — los 6 casos de uso.
+- Tres specs ajustados a la nueva realidad (ver abajo).
+
+#### Pruebas: **133 nuevas** (514 → **647**, 50 suites)
+
+- **Matriz completa de transiciones: 81 pruebas** (9 estados × 9 destinos). Cada par se verifica contra la tabla, y en los ilegales se comprueba además que **el estado no se movió a medias**.
+- **24 de integración del ciclo de vida**, incluidas las que la orden pedía explícitamente: **`cancelada` y `reprogramada` liberan la silla** para una reserva nueva en el mismo horario, demostrado con **una sola silla** para que no pueda pasar por casualidad.
+- **2 sobre la carrera de `RN-ANT-03`**: dos citas en `en_espera_pago` conviven sobre el mismo hueco, y la segunda recibe `SILLA_OCUPADA` al confirmar el pago.
+- **`no_show` OCUPA**, verificado a nivel SQL y de caso de uso: es la diferencia con cancelar — cancelar avisa y libera; no presentarse no libera nada porque nadie pudo aprovechar el hueco.
+
+#### 🐛 Dos defectos cazados por TDD
+
+1. **`ReprogramarCitaUseCase` chocaba consigo mismo.** La cita original aún ocupa su silla cuando se elige candidata, así que reprogramar al mismo horario —para cambiar de manicurista— fallaba, y en una sucursal de **una sola silla** era imposible reprogramar nada. Corregido excluyendo la cita original del cálculo.
+2. **Un bug en mi propia prueba:** `2027-03-0${8+i}` generaba `2027-03-010`. Corregido con aritmética de fechas.
+
+#### ✅ Bloqueos resueltos
+
+| # | Estado |
+|---|---|
+| **3** Entidades sin transiciones legales | **RESUELTO** — `P3` cerrado |
+
+#### ⏳ Bloqueos que siguen abiertos
+
+| # | Sigue pendiente |
+|---|---|
+| **2** | Las `EXCLUDE` y el `CHECK` **no están en el snapshot de Drizzle**. `0007` lo volvió a confirmar: hubo que reescribir ambos predicados a mano |
+| **4** | **`MotorDisponibilidad` no existe** — falta el submódulo de Horarios y Ausencias (`DEC-036`). **Es el siguiente turno** |
+| **6** | Sin `cotizacion_snapshot` |
+| **7** | Ninguna migración aplicada a base real |
+
+#### Deuda nueva de este turno
+
+- **`N-02` ahora tiene consecuencia concreta.** `completada` es terminal y `no_show` es manual: si el job marca `completada` y la Encargada descubre el no-show al día siguiente, **ya no puede corregir**. Hasta decidir entre ventana de gracia o permitir la sobrescritura, **el job de `CompletarCitaUseCase` no debería ejecutarse de forma agresiva**. Está anotado en el propio caso de uso.
+- **`RN-ANT-04` (48h) se valida con un parámetro de entrada**, no consultando el estado del anticipo: el Bounded Context de Anticipos es Fase 3. Cuando exista, debe pasar por un puerto y ese parámetro desaparecer.
+- **`AgendarCitaUseCase` sigue sin validar** horario de sucursal, corte de mediodía (`RN-AGE-10`) ni duración según catálogo.
+- **`agendada → confirmada` no es legal** por diseño. Si el negocio confirma sin recordatorio previo, hay que añadir esa transición conscientemente.
+
+---
 
 ### 2026-10-14 — Fase 2 (parte 2): estados alineados, puerto real y primeros casos de uso
 

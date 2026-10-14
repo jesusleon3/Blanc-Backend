@@ -35,8 +35,11 @@ async function preparar() {
   const adaptador = new AgendaVerificarCitasFuturasAdapter(citaRepo);
   const useCase = new DesactivarManicuristaUseCase(manicuristaRepo, adaptador, { registrar: jest.fn() }, crearUnitOfWorkFalso());
 
-  const agendarPara = async (rango: typeof EN_UNA_SEMANA, estado?: EstadoCita) => {
-    const cita = Cita.crear({
+  // Se usa `reconstruir` y no `cambiarEstado` porque estas pruebas necesitan una cita YA en un
+  // estado concreto, no recorrer el camino legal hasta él. `reconstruir` es la puerta de la
+  // persistencia y, por diseño, no valida transiciones: es exactamente lo que hace falta aquí.
+  const agendarPara = async (rango: typeof EN_UNA_SEMANA, estado: EstadoCita = 'agendada') => {
+    const base = Cita.crear({
       sucursalId: SUCURSAL,
       sillaId: silla.id,
       clientaId: CLIENTA,
@@ -44,7 +47,18 @@ async function preparar() {
       rangoHorario: rango,
       manicuristaId: karla.id,
     });
-    if (estado) cita.cambiarEstado(estado);
+    const cita = Cita.reconstruir({
+      id: base.id,
+      sucursalId: base.sucursalId,
+      sillaId: base.sillaId,
+      manicuristaId: base.manicuristaId,
+      clientaId: base.clientaId,
+      servicioId: base.servicioId,
+      rangoHorario: base.rangoHorario,
+      estado,
+      citaOrigenId: null,
+      numeroDeReprogramaciones: 0,
+    });
     await citaRepo.guardar(cita);
     return cita;
   };
@@ -94,7 +108,7 @@ describe('Bloqueo de baja de manicurista con citas futuras reales (DEC-032, cier
   });
 
   describe('N-04 resuelto: "cita futura" reutiliza la lista de estados que OCUPAN horario', () => {
-    it.each(['agendada', 'pendiente_confirmacion', 'confirmada', 'en_espera_pago', 'no_show'] as const)(
+    it.each(['agendada', 'pendiente_confirmacion', 'confirmada', 'no_show'] as const)(
       'una cita futura en estado `%s` BLOQUEA la baja',
       async (estado) => {
         const { useCase, karla, agendarPara } = await preparar();
@@ -104,10 +118,21 @@ describe('Bloqueo de baja de manicurista con citas futuras reales (DEC-032, cier
       },
     );
 
-    it.each(['cancelada', 'expirada', 'reprogramada'] as const)('una cita futura en estado `%s` NO bloquea la baja', async (estado) => {
-      const { useCase, karla, agendarPara } = await preparar();
-      await agendarPara(EN_UNA_SEMANA, estado);
+    it.each(['cancelada', 'expirada', 'reprogramada', 'en_espera_pago'] as const)(
+      'una cita futura en estado `%s` NO bloquea la baja',
+      async (estado) => {
+        const { useCase, karla, agendarPara } = await preparar();
+        await agendarPara(EN_UNA_SEMANA, estado);
 
+        await expect(useCase.ejecutar({ id: karla.id }, ACTOR)).resolves.toBeUndefined();
+      },
+    );
+
+    it('`en_espera_pago` NO bloquea porque NO ocupa el horario (RN-ANT-03): no hay nada que reasignar', async () => {
+      const { useCase, karla, agendarPara } = await preparar();
+      await agendarPara(EN_UNA_SEMANA, 'en_espera_pago');
+
+      // El hueco nunca fue suyo mientras el anticipo estuviera pendiente.
       await expect(useCase.ejecutar({ id: karla.id }, ACTOR)).resolves.toBeUndefined();
     });
   });

@@ -286,7 +286,7 @@ Esto rellena un hueco concreto que `DOMAIN_MODEL_REVIEW.md` había señalado: *"
 | Estado | ¿Ocupa el horario? | Nota |
 |---|---|---|
 | `pendiente_confirmacion` | **Sí** | La clienta aún no responde (confirmación interactiva, `RN-CONV-11`), pero el hueco está apartado |
-| `en_espera_pago` | **Sí** | Mientras el anticipo no expire, el espacio es suyo |
+| `en_espera_pago` | **No** ⚠️ | **Corregido 2026-10-14.** Este documento decía "Sí", contradiciendo a `RN-ANT-03` (Aprobada): *"no existe una retención temporal real del horario… el horario permanece disponible para cualquier otra clienta"*. Ganó la regla de negocio; migración `0007` |
 | `confirmada` | **Sí** | — |
 | `completada` | **Sí** | Terminal; mantenerla ocupando preserva la integridad histórica |
 | `no_show` | **Sí** | Terminal; la clienta no llegó, pero el hueco se consumió igual |
@@ -294,9 +294,31 @@ Esto rellena un hueco concreto que `DOMAIN_MODEL_REVIEW.md` había señalado: *"
 | `expirada` | **No** | Libera — **es el estado destino de la regla 5** |
 | `reprogramada` | **No** | Libera el hueco viejo; la cita conserva su identidad en el nuevo |
 
-Formulado al revés, que es como se escribe en SQL y es más robusto: **liberan `cancelada`, `expirada` y `reprogramada`; todo lo demás ocupa.** Un estado nuevo que alguien añada en el futuro ocupará por defecto, que es el lado seguro del error.
+Formulado al revés, que es como se escribe en SQL y es más robusto: **liberan `cancelada`, `expirada`, `reprogramada` y `en_espera_pago`; todo lo demás ocupa.** Un estado nuevo que alguien añada en el futuro ocupará por defecto, que es el lado seguro del error.
 
-### 6.2 Lo que sigue faltando para cerrar `P3`
+### 6.2 `P3` — **CERRADO el 2026-10-14**
+
+La máquina de estados formal de `Cita` vive en `TRANSICIONES_LEGALES`, dentro de la entidad, y es la **única** autoridad: los casos de uso la invocan, no la repiten.
+
+| Desde | Puede pasar a |
+|---|---|
+| `agendada` | `pendiente_confirmacion`, `completada`, `no_show`, `cancelada`, `reprogramada` |
+| `pendiente_confirmacion` | `confirmada`, `completada`, `no_show`, `cancelada`, `reprogramada` |
+| `confirmada` | `completada`, `no_show`, `cancelada`, `reprogramada` |
+| `en_espera_pago` | `agendada`, `confirmada`, `expirada`, `cancelada`, `reprogramada` |
+| `completada`, `no_show`, `cancelada`, `expirada`, `reprogramada` | **nada — terminales** |
+
+Estados iniciales válidos: `agendada` (normal) y `en_espera_pago` (lista roja, `RN-ANT-01`).
+
+**Tres decisiones que conviene conocer:**
+
+- `agendada`/`pendiente_confirmacion` pueden cerrar **directo** a `completada`/`no_show`: llegó la hora y la clienta vino o no, sin haber contestado el recordatorio. Es el caso corriente; exigir pasar por `confirmada` dejaría citas atrapadas.
+- **`agendada → confirmada` no es legal**: la confirmación es interactiva y responde a un recordatorio (`RN-CONV-11`). Si el negocio necesita confirmar sin recordatorio previo, es una transición a añadir conscientemente.
+- **`agendada → en_espera_pago` no es legal**: el anticipo se exige al agendar, y `RN-CRM-07` dice que la lista roja no aplica retroactivamente.
+
+**Sigue faltando (fuera de `P3`):** las máquinas de **`Conversación`** y **`TicketEscalamiento`** — la segunda ni siquiera tiene valores de estado propuestos.
+
+### 6.3 ~~Lo que sigue faltando para cerrar `P3`~~ (histórico)
 
 Con esto, la máquina de estados de `Cita` tiene **la mayor parte** de sus piezas. Sigue sin cerrarse del todo:
 

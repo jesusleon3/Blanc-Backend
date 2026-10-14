@@ -1,4 +1,5 @@
-import { Cita } from './cita.entity';
+import { Cita, TRANSICIONES_LEGALES } from './cita.entity';
+import { ESTADOS_CITA, EstadoCita } from '../../../../database/schema';
 import { Silla } from './silla.entity';
 import { DomainError } from '../../../../shared/errors/domain-error';
 
@@ -10,7 +11,28 @@ const BASE = {
   rangoHorario: { inicio: new Date('2026-11-02T10:00:00Z'), fin: new Date('2026-11-02T11:00:00Z') },
 };
 
-describe('Cita — aggregate raíz de Agenda (Fase 2, alcance de datos)', () => {
+/**
+ * Construye una cita YA en el estado pedido, sin recorrer el camino legal. Usa `reconstruir`
+ * —la puerta de la persistencia, que por diseño no valida transiciones— precisamente porque estas
+ * pruebas necesitan partir de cualquier estado para probar la matriz completa.
+ */
+function enEstado(estado: EstadoCita): Cita {
+  const base = Cita.crear(BASE);
+  return Cita.reconstruir({
+    id: base.id,
+    sucursalId: base.sucursalId,
+    sillaId: base.sillaId,
+    manicuristaId: base.manicuristaId,
+    clientaId: base.clientaId,
+    servicioId: base.servicioId,
+    rangoHorario: base.rangoHorario,
+    estado,
+    citaOrigenId: null,
+    numeroDeReprogramaciones: 0,
+  });
+}
+
+describe('Cita — aggregate raíz de Agenda', () => {
   it('nace `agendada` y sin manicurista: "sin preferencia" es el caso normal, no un dato faltante', () => {
     const cita = Cita.crear(BASE);
 
@@ -36,23 +58,124 @@ describe('Cita — aggregate raíz de Agenda (Fase 2, alcance de datos)', () => 
     });
   });
 
-  describe('`ocupaHorario` — la lista de DEC-034', () => {
-    it.each(['agendada', 'en_espera_pago', 'completada'] as const)('`%s` OCUPA el horario', (estado) => {
-      const cita = Cita.crear(BASE);
-      cita.cambiarEstado(estado);
-      expect(cita.ocupaHorario).toBe(true);
+  describe('`ocupaHorario` — la lista de DEC-034, corregida por RN-ANT-03', () => {
+    it.each(['agendada', 'pendiente_confirmacion', 'confirmada', 'completada', 'no_show'] as const)('`%s` OCUPA el horario', (estado) => {
+      expect(enEstado(estado).ocupaHorario).toBe(true);
     });
 
     it.each(['cancelada', 'expirada', 'reprogramada'] as const)('`%s` LIBERA el horario', (estado) => {
-      const cita = Cita.crear(BASE);
-      cita.cambiarEstado(estado);
-      expect(cita.ocupaHorario).toBe(false);
+      expect(enEstado(estado).ocupaHorario).toBe(false);
+    });
+
+    it('`en_espera_pago` LIBERA — corregido: `DEC-034` lo daba por ocupante y contradecía a `RN-ANT-03`', () => {
+      // "no existe una retención temporal real del horario… el primero en pagar se queda con el
+      // cupo". Si ocupara, esa carrera no podría existir.
+      expect(enEstado('en_espera_pago').ocupaHorario).toBe(false);
     });
   });
 
-  it('rechaza un estado que no existe', () => {
-    const cita = Cita.crear(BASE);
-    expect(() => cita.cambiarEstado('inventado' as never)).toThrow(expect.objectContaining({ code: 'CITA_ESTADO_INVALIDO' }));
+  describe('Máquina de estados formal — cierre de P3', () => {
+    it('rechaza un estado que no existe', () => {
+      expect(() => Cita.crear(BASE).cambiarEstado('inventado' as never)).toThrow(
+        expect.objectContaining({ code: 'CITA_ESTADO_INVALIDO' }),
+      );
+    });
+
+    describe('matriz completa: cada par (desde, hacia) se comporta según la tabla', () => {
+      const TODOS = ESTADOS_CITA;
+
+      it.each(TODOS.flatMap((desde) => TODOS.map((hacia) => [desde, hacia] as const)))(
+        '%s -> %s',
+        (desde, hacia) => {
+          const cita = enEstado(desde);
+          const esLegal = (TRANSICIONES_LEGALES[desde] as readonly string[]).includes(hacia);
+
+          if (esLegal) {
+            cita.cambiarEstado(hacia);
+            expect(cita.estado).toBe(hacia);
+          } else {
+            expect(() => cita.cambiarEstado(hacia)).toThrow(expect.objectContaining({ code: 'TRANSICION_ESTADO_INVALIDA' }));
+            // Y el estado no se movió a medias.
+            expect(cita.estado).toBe(desde);
+          }
+        },
+      );
+    });
+
+    describe('flujo normal', () => {
+      it('agendada -> pendiente_confirmacion -> confirmada -> completada', () => {
+        const cita = Cita.crear(BASE);
+        for (const estado of ['pendiente_confirmacion', 'confirmada', 'completada'] as const) {
+          cita.cambiarEstado(estado);
+        }
+        expect(cita.estado).toBe('completada');
+      });
+
+      it.each(['agendada', 'pendiente_confirmacion'] as const)(
+        'desde `%s` se puede cerrar DIRECTO a completada o no_show: llegó la hora sin confirmar',
+        (desde) => {
+          expect(() => enEstado(desde).cambiarEstado('completada')).not.toThrow();
+          expect(() => enEstado(desde).cambiarEstado('no_show')).not.toThrow();
+        },
+      );
+
+      it('`agendada -> confirmada` NO es legal: la confirmación responde a un recordatorio (RN-CONV-11)', () => {
+        expect(() => Cita.crear(BASE).cambiarEstado('confirmada')).toThrow(
+          expect.objectContaining({ code: 'TRANSICION_ESTADO_INVALIDA' }),
+        );
+      });
+    });
+
+    describe('flujo de anticipo (lista roja)', () => {
+      it('en_espera_pago -> agendada / confirmada al confirmar el pago, o -> expirada', () => {
+        for (const destino of ['agendada', 'confirmada', 'expirada'] as const) {
+          expect(() => enEstado('en_espera_pago').cambiarEstado(destino)).not.toThrow();
+        }
+      });
+
+      it('`agendada -> en_espera_pago` NO es legal: la lista roja no aplica retroactivamente (RN-CRM-07)', () => {
+        expect(() => Cita.crear(BASE).cambiarEstado('en_espera_pago')).toThrow(
+          expect.objectContaining({ code: 'TRANSICION_ESTADO_INVALIDA' }),
+        );
+      });
+    });
+
+    describe('salida y terminales', () => {
+      it.each(['agendada', 'pendiente_confirmacion', 'confirmada', 'en_espera_pago'] as const)(
+        'desde `%s` se puede cancelar y reprogramar',
+        (desde) => {
+          expect(() => enEstado(desde).cambiarEstado('cancelada')).not.toThrow();
+          expect(() => enEstado(desde).cambiarEstado('reprogramada')).not.toThrow();
+        },
+      );
+
+      it.each(['completada', 'no_show', 'cancelada', 'expirada', 'reprogramada'] as const)('`%s` es terminal', (estado) => {
+        const cita = enEstado(estado);
+        expect(cita.esTerminal).toBe(true);
+
+        for (const destino of ESTADOS_CITA) {
+          expect(() => cita.cambiarEstado(destino)).toThrow(expect.objectContaining({ code: 'TRANSICION_ESTADO_INVALIDA' }));
+        }
+      });
+
+      it('el mensaje de un terminal explica que ya no se mueve, en vez de listar destinos vacíos', () => {
+        expect(() => enEstado('cancelada').cambiarEstado('confirmada')).toThrow(/terminal/i);
+      });
+    });
+  });
+
+  describe('estado inicial', () => {
+    it('por defecto nace `agendada`', () => {
+      expect(Cita.crear(BASE).estado).toBe('agendada');
+    });
+
+    it('puede nacer `en_espera_pago` — es el camino de lista roja (RN-ANT-01)', () => {
+      expect(Cita.crear({ ...BASE, estado: 'en_espera_pago' }).estado).toBe('en_espera_pago');
+    });
+
+    it.each(['confirmada', 'completada', 'cancelada', 'reprogramada'] as const)('NO puede nacer `%s`', (estado) => {
+      expect(() => Cita.crear({ ...BASE, estado })).toThrow(expect.objectContaining({ code: 'CITA_ESTADO_INICIAL_INVALIDO' }));
+    });
   });
 
   it('asignarManicurista fija el id — la validación de solape la hace la base de datos, no esta clase', () => {

@@ -11,7 +11,54 @@ export interface CitaProps {
   servicioId: string;
   rangoHorario: RangoHorario;
   estado: EstadoCita;
+  citaOrigenId: string | null;
+  numeroDeReprogramaciones: number;
 }
+
+/**
+ * Máquina de estados formal de `Cita` — **cierre de `P3`** (2026-10-14).
+ *
+ * `04-data-model.md` dejó constancia de que sin esta tabla "cualquier lógica de transición no
+ * puede implementarse". Aquí está, y es la **única** autoridad sobre qué movimiento es legal:
+ * los casos de uso no repiten estas reglas, las invocan.
+ *
+ * ```
+ *   [en_espera_pago] ──pago confirmado──► agendada ──► pendiente_confirmacion ──► confirmada
+ *          │                                 │                  │                     │
+ *          └──expira──► expirada             └──────────────┬───┴─────────────────────┘
+ *                                                           ▼
+ *                                              completada  │  no_show
+ *
+ *   Desde cualquier estado activo pre-ejecución ──► cancelada | reprogramada
+ * ```
+ *
+ * DECISIONES QUE CONVIENE CONOCER:
+ *
+ * - **`agendada`/`pendiente_confirmacion` pueden ir DIRECTO a `completada`/`no_show`.** Llegó la
+ *   hora y la clienta vino (o no) sin haber contestado el recordatorio. Es el caso corriente, no
+ *   la excepción: exigir pasar por `confirmada` dejaría citas atrapadas.
+ * - **`agendada → confirmada` NO es legal.** La confirmación es interactiva (`RN-CONV-11`) y
+ *   responde a un recordatorio; sin haberlo pedido no hay nada que confirmar. Si el negocio
+ *   necesita confirmar sin recordatorio previo, es una transición a añadir conscientemente.
+ * - **`agendada → en_espera_pago` NO es legal.** El anticipo se exige al agendar, no después:
+ *   `RN-CRM-07` dice que la lista roja no aplica retroactivamente a citas ya confirmadas.
+ * - **Los cinco estados terminales no tienen salida.** Incluido `reprogramada`: la cita nueva es
+ *   otra fila, enlazada por `citaOrigenId`.
+ */
+export const TRANSICIONES_LEGALES: Readonly<Record<EstadoCita, readonly EstadoCita[]>> = {
+  agendada: ['pendiente_confirmacion', 'completada', 'no_show', 'cancelada', 'reprogramada'],
+  pendiente_confirmacion: ['confirmada', 'completada', 'no_show', 'cancelada', 'reprogramada'],
+  confirmada: ['completada', 'no_show', 'cancelada', 'reprogramada'],
+  en_espera_pago: ['agendada', 'confirmada', 'expirada', 'cancelada', 'reprogramada'],
+  completada: [],
+  no_show: [],
+  cancelada: [],
+  expirada: [],
+  reprogramada: [],
+};
+
+/** Estados con los que una cita puede NACER: el normal y el de lista roja (`RN-ANT-01`). */
+export const ESTADOS_INICIALES = ['agendada', 'en_espera_pago'] as const satisfies readonly EstadoCita[];
 
 /**
  * `Cita` — aggregate raíz de la Agenda.
@@ -37,8 +84,20 @@ export class Cita {
     rangoHorario: RangoHorario;
     manicuristaId?: string | null;
     estado?: EstadoCita;
+    citaOrigenId?: string | null;
+    numeroDeReprogramaciones?: number;
   }): Cita {
     validarRangoHorario(input.rangoHorario);
+
+    const estado = input.estado ?? 'agendada';
+    if (!(ESTADOS_INICIALES as readonly string[]).includes(estado)) {
+      throw new DomainError(
+        'CITA_ESTADO_INICIAL_INVALIDO',
+        `Una cita no puede nacer en estado "${estado}". Solo ${ESTADOS_INICIALES.join(' o ')}.`,
+        400,
+        { estado },
+      );
+    }
 
     return new Cita({
       id: randomUUID(),
@@ -50,7 +109,9 @@ export class Cita {
       clientaId: input.clientaId,
       servicioId: input.servicioId,
       rangoHorario: input.rangoHorario,
-      estado: input.estado ?? 'agendada',
+      estado,
+      citaOrigenId: input.citaOrigenId ?? null,
+      numeroDeReprogramaciones: input.numeroDeReprogramaciones ?? 0,
     });
   }
 
@@ -69,13 +130,33 @@ export class Cita {
     this.props.manicuristaId = manicuristaId;
   }
 
+  /**
+   * Única puerta para mover el estado. Valida contra `TRANSICIONES_LEGALES`; **los casos de uso no
+   * repiten estas reglas**, las invocan — si estuvieran en dos sitios acabarían divergiendo.
+   */
   cambiarEstado(estado: EstadoCita): void {
     if (!ESTADOS_CITA.includes(estado)) {
       throw new DomainError('CITA_ESTADO_INVALIDO', `"${estado}" no es un estado de cita válido.`, 400, { estado });
     }
-    // Las transiciones LEGALES entre estados (qué puede pasar a qué) son la máquina de estados
-    // de `P3`, todavía sin cerrar. Aquí solo se valida que el valor exista.
+
+    const permitidos = TRANSICIONES_LEGALES[this.props.estado];
+    if (!permitidos.includes(estado)) {
+      throw new DomainError(
+        'TRANSICION_ESTADO_INVALIDA',
+        permitidos.length === 0
+          ? `"${this.props.estado}" es un estado terminal: una cita ahí ya no se mueve.`
+          : `No se puede pasar de "${this.props.estado}" a "${estado}". Desde ahí solo: ${permitidos.join(', ')}.`,
+        409,
+        { desde: this.props.estado, hacia: estado, permitidos },
+      );
+    }
+
     this.props.estado = estado;
+  }
+
+  /** ¿Es terminal? Útil para que un caso de uso falle pronto con un mensaje mejor. */
+  get esTerminal(): boolean {
+    return TRANSICIONES_LEGALES[this.props.estado].length === 0;
   }
 
   /** ¿Esta cita ocupa su horario? (`DEC-034`) — liberan `cancelada`, `expirada` y `reprogramada`. */
@@ -106,6 +187,12 @@ export class Cita {
   }
   get estado(): EstadoCita {
     return this.props.estado;
+  }
+  get citaOrigenId(): string | null {
+    return this.props.citaOrigenId;
+  }
+  get numeroDeReprogramaciones(): number {
+    return this.props.numeroDeReprogramaciones;
   }
 }
 

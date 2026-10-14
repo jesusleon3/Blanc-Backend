@@ -35,6 +35,8 @@ export class DrizzleCitaRepository implements CitaRepository {
           servicioId: cita.servicioId,
           rangoHorario: cita.rangoHorario,
           estado: cita.estado,
+          citaOrigenId: cita.citaOrigenId,
+          numeroDeReprogramaciones: cita.numeroDeReprogramaciones,
         })
         .onConflictDoUpdate({
           target: citas.id,
@@ -43,6 +45,8 @@ export class DrizzleCitaRepository implements CitaRepository {
             manicuristaId: cita.manicuristaId,
             rangoHorario: cita.rangoHorario,
             estado: cita.estado,
+            citaOrigenId: cita.citaOrigenId,
+            numeroDeReprogramaciones: cita.numeroDeReprogramaciones,
             actualizadoEn: new Date(),
           },
         });
@@ -114,6 +118,8 @@ export class DrizzleCitaRepository implements CitaRepository {
       servicioId: fila.servicioId,
       rangoHorario: fila.rangoHorario,
       estado: fila.estado as EstadoCita,
+      citaOrigenId: fila.citaOrigenId,
+      numeroDeReprogramaciones: fila.numeroDeReprogramaciones,
     });
   }
 }

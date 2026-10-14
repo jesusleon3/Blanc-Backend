@@ -1,4 +1,4 @@
-import { boolean, customType, index, pgSchema, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, customType, index, integer, pgSchema, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 export const agendaSchema = pgSchema('agenda');
 
@@ -109,7 +109,19 @@ export type EstadoCita = (typeof ESTADOS_CITA)[number];
  * `VerificarCitasFuturasPort` (`DEC-032`) reutiliza esta misma lista en vez de escribir una
  * segunda definición que pueda divergir — así se resolvió el pendiente `N-04`.
  */
-export const ESTADOS_QUE_LIBERAN_HORARIO = ['cancelada', 'expirada', 'reprogramada'] as const satisfies readonly EstadoCita[];
+export const ESTADOS_QUE_LIBERAN_HORARIO = [
+  'cancelada',
+  'expirada',
+  'reprogramada',
+  // `en_espera_pago` LIBERA — corregido en la migración `0007` (2026-10-14). `DEC-034` lo había
+  // listado como ocupante ("mientras el anticipo no expire, el espacio es suyo"), lo que
+  // CONTRADECÍA a `RN-ANT-03`, aprobada: "no existe una retención temporal real del horario…
+  // el horario permanece disponible para cualquier otra clienta — el primero en pagar se queda
+  // con el cupo". Ganó la regla de negocio. Consecuencia buscada: dos clientas de lista roja
+  // pueden tener una cita pendiente de pago sobre el MISMO hueco, y la carrera se resuelve al
+  // confirmar el pago, cuando la cita pasa a un estado que sí ocupa y la restricción decide.
+  'en_espera_pago',
+] as const satisfies readonly EstadoCita[];
 
 /**
  * `agenda.citas` — el aggregate central de la Fase 2.
@@ -142,6 +154,17 @@ export const citas = agendaSchema.table(
     servicioId: uuid('servicio_id').notNull(),
     rangoHorario: tstzrange('rango_horario').notNull(),
     estado: text('estado').notNull(),
+    /**
+     * Cita de la que esta procede al reprogramar. FK **al mismo esquema**, así que es legítima
+     * (`ADR-005` solo prohíbe las cruzadas). Da la trazabilidad de la cadena completa.
+     */
+    citaOrigenId: uuid('cita_origen_id'),
+    /**
+     * Cuántas veces se ha reprogramado esta cadena. Se guarda en vez de recorrer la cadena en
+     * cada comprobación: el tope son **3** (`DEC-042`) y recorrer N citas por cada intento sería
+     * una consulta por eslabón para responder una pregunta que cabe en un entero.
+     */
+    numeroDeReprogramaciones: integer('numero_de_reprogramaciones').notNull().default(0),
     creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
     actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
   },

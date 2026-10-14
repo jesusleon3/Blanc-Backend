@@ -177,7 +177,7 @@ describe('Restricciones de exclusión de `agenda.citas` (migración 0005)', () =
   });
 
   describe('Estados que liberan el horario (`DEC-034`)', () => {
-    it.each(['cancelada', 'expirada', 'reprogramada'])('un estado `%s` LIBERA la silla para otra cita', async (estado) => {
+    it.each(['cancelada', 'expirada', 'reprogramada', 'en_espera_pago'])('un estado `%s` LIBERA la silla para otra cita', async (estado) => {
       const db = await crearBaseDeDatosDePrueba();
       const silla = await crearSilla(db, 'Lomas 1');
 
@@ -185,7 +185,7 @@ describe('Restricciones de exclusión de `agenda.citas` (migración 0005)', () =
       await expect(insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE })).resolves.toBeDefined();
     });
 
-    it.each(['agendada', 'pendiente_confirmacion', 'confirmada', 'en_espera_pago', 'completada', 'no_show'])(
+    it.each(['agendada', 'pendiente_confirmacion', 'confirmada', 'completada', 'no_show'])(
       'un estado `%s` SIGUE OCUPANDO la silla',
       async (estado) => {
         const db = await crearBaseDeDatosDePrueba();
@@ -216,7 +216,7 @@ describe('Restricciones de exclusión de `agenda.citas` (migración 0005)', () =
       }
     });
 
-    it('AMPLIAR LA LISTA NO TOCÓ LAS RESTRICCIONES: el WHERE por la negativa hizo que los nuevos ocupen solos', async () => {
+    it('el WHERE por la negativa sigue enumerando SOLO los estados que liberan, ahora cuatro', async () => {
       const db = await crearBaseDeDatosDePrueba();
       const definiciones = await db.execute<{ definicion: string }>(sql`
         SELECT pg_get_constraintdef(oid) AS definicion
@@ -227,10 +227,42 @@ describe('Restricciones de exclusión de `agenda.citas` (migración 0005)', () =
       // Las dos siguen enumerando SOLO los tres estados que liberan. Ningún estado nuevo aparece.
       for (const { definicion } of definiciones) {
         expect(definicion).toContain("'cancelada'");
+        expect(definicion).toContain("'en_espera_pago'");
         expect(definicion).not.toContain("'no_show'");
         expect(definicion).not.toContain("'confirmada'");
       }
       expect(definiciones).toHaveLength(2);
+    });
+
+    it('RN-ANT-03: DOS citas en `en_espera_pago` conviven sobre el mismo hueco — no hay retención', async () => {
+      const db = await crearBaseDeDatosDePrueba();
+      const silla = await crearSilla(db, 'Lomas 1');
+
+      // "el horario permanece disponible para cualquier otra clienta — el primero en pagar se
+      // queda con el cupo". Si `en_espera_pago` ocupara, esta carrera no podría ni existir.
+      await insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado: 'en_espera_pago' });
+      await expect(insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado: 'en_espera_pago' })).resolves.toBeDefined();
+    });
+
+    it('RN-ANT-03: la carrera se resuelve AL CONFIRMAR EL PAGO, no al reservar', async () => {
+      const db = await crearBaseDeDatosDePrueba();
+      const silla = await crearSilla(db, 'Lomas 1');
+
+      await insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado: 'en_espera_pago' });
+      await insertarCita(db, { sillaId: silla, rango: DIEZ_A_ONCE, estado: 'en_espera_pago' });
+
+      // La primera que paga pasa a ocupar y se queda con el cupo...
+      await db.execute(sql`
+        UPDATE agenda.citas SET estado = 'agendada'
+         WHERE id = (SELECT id FROM agenda.citas WHERE silla_id = ${silla}::uuid ORDER BY creado_en LIMIT 1)
+      `);
+
+      // ...y la segunda ya no puede, aunque también haya transferido.
+      const segunda = db.execute(sql`
+        UPDATE agenda.citas SET estado = 'agendada'
+         WHERE silla_id = ${silla}::uuid AND estado = 'en_espera_pago'
+      `);
+      await expect(segunda).rejects.toThrow(/exclusion constraint|sin_solapamiento/i);
     });
 
     it('cancelar una cita libera el hueco de inmediato (el UPDATE desactiva la restricción para esa fila)', async () => {
