@@ -39,6 +39,34 @@ const ESQUEMAS_NO_VACIABLES = ['drizzle', 'public', 'information_schema'];
 
 let conexionDelWorker: { db: Database; cliente: postgres.Sql; tablas: string[] } | null = null;
 
+/**
+ * Marca de que la base de este worker **ya existe y ya está migrada**.
+ *
+ * ## POR QUÉ ESTO VIVE EN `process.env` Y NO EN UNA VARIABLE DE MÓDULO
+ *
+ * `conexionDelWorker` es estado de módulo, y **Jest reinicia el registro de módulos en cada
+ * archivo de spec**: un worker que procesa 30 archivos lo veía `null` 30 veces y volvía a
+ * provisionar la base 30 veces. Provisionar hacía
+ * `DROP DATABASE ... WITH (FORCE)` — que **termina a la fuerza todas las conexiones abiertas a
+ * esa base**, no solo las propias.
+ *
+ * Ahí estaba la raíz de la intermitencia: cada cambio de archivo abría una ventana en la que una
+ * conexión que el archivo anterior aún no había drenado —una petición en vuelo de supertest, el
+ * pool de un `app.close()` todavía en curso— era cortada de raíz por PostgreSQL. El resultado era
+ * un intercambio HTTP abortado a mitad, y el síntoma, un `401` imposible: la petición llegaba al
+ * guard **sin su cabecera `Authorization`**, porque nunca se terminó de recibir.
+ *
+ * `process.env` es lo único que sobrevive al reinicio del registro de módulos dentro del mismo
+ * proceso de worker (`globalThis` no: `testEnvironment: 'node'` crea un contexto nuevo por
+ * archivo). Con la marca puesta, los archivos siguientes **se conectan y vacían tablas, sin
+ * volver a borrar nada**.
+ *
+ * Efecto secundario: la suite es bastante más rápida, porque las migraciones se aplican **una vez
+ * por worker** en lugar de una por archivo. Y no se pierde la verificación de que las migraciones
+ * aplican sobre una base limpia: sigue ocurriendo, una vez por worker y por corrida.
+ */
+const MARCA_DE_BASE_PROVISIONADA = 'BLANC_TEST_BASE_PROVISIONADA';
+
 function urlAdministrativa(): string {
   const url = process.env.TEST_DATABASE_URL;
   if (!url) {
@@ -58,15 +86,20 @@ function nombreBaseDelWorker(): string {
 async function provisionarBaseDelWorker(): Promise<{ db: Database; cliente: postgres.Sql; tablas: string[] }> {
   const urlAdmin = urlAdministrativa();
   const nombreBase = nombreBaseDelWorker();
+  // Si otro archivo de spec de ESTE MISMO worker ya la creó y migró, no se vuelve a tocar.
+  const yaProvisionada = process.env[MARCA_DE_BASE_PROVISIONADA] === nombreBase;
 
-  // Conexión administrativa efímera: `CREATE DATABASE` no puede ejecutarse desde la propia base
-  // que se está creando, ni dentro de una transacción.
-  const admin = postgres(urlAdmin, { max: 1 });
-  try {
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${nombreBase}" WITH (FORCE)`);
-    await admin.unsafe(`CREATE DATABASE "${nombreBase}"`);
-  } finally {
-    await admin.end();
+  if (!yaProvisionada) {
+    // Conexión administrativa efímera: `CREATE DATABASE` no puede ejecutarse desde la propia base
+    // que se está creando, ni dentro de una transacción.
+    const admin = postgres(urlAdmin, { max: 1 });
+    try {
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${nombreBase}" WITH (FORCE)`);
+      await admin.unsafe(`CREATE DATABASE "${nombreBase}"`);
+    } finally {
+      await admin.end();
+    }
+    process.env[MARCA_DE_BASE_PROVISIONADA] = nombreBase;
   }
 
   const urlDelWorker = new URL(urlAdmin);
@@ -84,7 +117,11 @@ async function provisionarBaseDelWorker(): Promise<{ db: Database; cliente: post
   // prerrequisito del invariante de no-doble-booking de la Fase 2.
   await cliente.unsafe('CREATE EXTENSION IF NOT EXISTS btree_gist');
 
-  await migrate(db, { migrationsFolder: join(__dirname, '..', 'migrations') });
+  // Solo la primera vez en este worker. Volver a migrar una base ya migrada no haría daño
+  // (Drizzle lleva su registro en el esquema `drizzle`), pero cuesta y no aporta nada.
+  if (!yaProvisionada) {
+    await migrate(db, { migrationsFolder: join(__dirname, '..', 'migrations') });
+  }
 
   const filas = await cliente.unsafe<{ tabla: string }[]>(
     `SELECT format('%I.%I', schemaname, tablename) AS tabla
@@ -100,21 +137,30 @@ async function provisionarBaseDelWorker(): Promise<{ db: Database; cliente: post
 /**
  * Devuelve una base de datos **vacía** lista para usar.
  *
- * La primera invocación de cada worker crea y migra su base; las siguientes solo vacían las
- * tablas (`TRUNCATE`, mucho más rápido que recrear el esquema) y reutilizan la MISMA conexión —
- * abrir un pool por llamada agotaría `max_connections` de PostgreSQL con ~53 llamadas por corrida.
+ * La primera invocación **de cada worker** (no de cada archivo) crea y migra su base; todas las
+ * demás solo vacían las tablas (`TRUNCATE`, mucho más rápido que recrear el esquema) y reutilizan
+ * la MISMA conexión — abrir un pool por llamada agotaría `max_connections` de PostgreSQL.
+ *
+ * **Nunca borra la base más de una vez por worker**: ver `MARCA_DE_BASE_PROVISIONADA`, donde está
+ * explicada la intermitencia que ese borrado repetido causaba.
  */
 export async function crearBaseDeDatosDePrueba(): Promise<Database> {
   if (!conexionDelWorker) {
     conexionDelWorker = await provisionarBaseDelWorker();
-    return conexionDelWorker.db;
+    // Se vacía también en el primer uso de cada archivo: la base puede traer filas del archivo
+    // anterior del mismo worker, ahora que ya no se recrea.
+    return vaciarYDevolver();
   }
 
-  const { cliente, tablas } = conexionDelWorker;
+  return vaciarYDevolver();
+}
+
+async function vaciarYDevolver(): Promise<Database> {
+  const { cliente, tablas, db } = conexionDelWorker!;
   if (tablas.length > 0) {
     await cliente.unsafe(`TRUNCATE ${tablas.join(', ')} RESTART IDENTITY CASCADE`);
   }
-  return conexionDelWorker.db;
+  return db;
 }
 
 /**

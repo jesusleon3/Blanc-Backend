@@ -64,6 +64,28 @@ describe('HealthController — E2E (sonda de Railway)', () => {
     app = moduleRef.createNestApplication();
     app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
+    /**
+     * EL SERVIDOR ESCUCHA UNA SOLA VEZ, Y ESTO ES LA CORRECCIÓN DE UNA INTERMITENCIA REAL.
+     *
+     * Con `app.init()` a secas el servidor HTTP queda creado pero **sin escuchar**, y entonces
+     * `request(app.getHttpServer())` de supertest hace `listen(0)` y `close()` **en cada
+     * petición**. Eso abre una carrera: si una petición encuentra el servidor ya escuchando
+     * —porque la anterior lo abrió y su `close()` aún no ha terminado de completarse— no crea el
+     * suyo, y el `close()` pendiente de la anterior le mata el socket a mitad.
+     *
+     * Los dos síntomas que producía, ambos observados: `read ECONNRESET`, y un `401` imposible en
+     * el que la petición llegaba al guard **sin su cabecera `Authorization`** porque nunca se
+     * terminó de recibir. Aparecía ~1 de cada 8 corridas completas, cambiando de prueba, y no
+     * dependía del número de workers (fallaba igual con `--runInBand`): la carrera es **dentro**
+     * de la secuencia de peticiones de un mismo archivo, y por eso casi nunca se reproducía al
+     * ejecutar ese archivo aislado, con la máquina descargada.
+     *
+     * Con el servidor escuchando desde `beforeAll`, `address()` nunca es `null` y supertest **no
+     * toca su ciclo de vida**: usa el que ya hay. El puerto `0` deja que el sistema elija uno
+     * libre, así que no hay colisiones entre archivos ni workers. `app.close()` del `afterAll` lo
+     * cierra al terminar.
+     */
+    await app.listen(0);
   });
 
   afterAll(async () => {
@@ -76,13 +98,28 @@ describe('HealthController — E2E (sonda de Railway)', () => {
     expect(respuesta.body).toEqual({ status: 'ok', timestamp: expect.any(String) });
   });
 
-  it('el timestamp es una fecha ISO-8601 válida y reciente', async () => {
+  it('el timestamp es una fecha ISO-8601 válida y se genera DURANTE la petición', async () => {
+    /**
+     * Se acota con los instantes de antes y después de la petición, no con una ventana fija.
+     *
+     * La versión anterior comparaba contra `Date.now()` con 10 segundos de margen, y eso hacía la
+     * prueba dependiente de **lo rápido que vaya la máquina**: en una corrida completa con la
+     * suite cargada, el intervalo entre que el servidor genera el timestamp y que la aserción
+     * corre puede pasar de 10 segundos, y la prueba fallaba sin que nada estuviera roto.
+     *
+     * Acotar por el intervalo real de la petición afirma lo que de verdad importa —que el
+     * timestamp se genera al atender, no es un valor fijo ni cacheado— y es determinista a
+     * cualquier velocidad. El segundo de holgura absorbe el redondeo a milisegundos del reloj.
+     */
+    const antes = Date.now() - 1_000;
     const respuesta = await request(app.getHttpServer()).get('/health').expect(200);
+    const despues = Date.now() + 1_000;
 
     const instante = new Date(respuesta.body.timestamp);
     expect(Number.isNaN(instante.getTime())).toBe(false);
     expect(respuesta.body.timestamp).toBe(instante.toISOString());
-    expect(Math.abs(Date.now() - instante.getTime())).toBeLessThan(10_000);
+    expect(instante.getTime()).toBeGreaterThanOrEqual(antes);
+    expect(instante.getTime()).toBeLessThanOrEqual(despues);
   });
 
   it('un token inválido tampoco la bloquea: es pública, no "autenticable"', async () => {

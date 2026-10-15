@@ -27,8 +27,18 @@ module.exports = {
   coveragePathIgnorePatterns: ['main.ts', '.module.ts', '/database/schema/', '/database/migrate.ts'],
   coverageDirectory: '../coverage',
   testEnvironment: 'node',
-  // La conexión pg-mem usada en pruebas de integración/E2E deja un handle TCP abierto que
-  // Jest no puede cerrar por sí solo (pg-mem no expone un `.end()` real) — no es un fallo de
-  // los módulos probados, ver reporte de cierre del módulo Sucursales y Personal.
-  forceExit: true,
+  /**
+   * **`forceExit` ELIMINADO (2026-10-15).** Su única justificación era un handle TCP que `pg-mem`
+   * dejaba abierto, y `pg-mem` se eliminó del proyecto hace varias fases: el comentario que lo
+   * sostenía describía una dependencia que ya no existe.
+   *
+   * Mantenerlo era activamente malo: `forceExit` mata el proceso en cuanto terminan las pruebas,
+   * así que **oculta cualquier fuga de handles futura** — exactamente la clase de señal que hacía
+   * falta para diagnosticar la intermitencia del arnés. Verificado que la suite completa sale
+   * sola, con código 0 y sin avisos de "did not exit", y que `--detectOpenHandles` no reporta
+   * ninguno.
+   *
+   * Si vuelve a aparecer un handle colgado, lo correcto es cerrarlo donde se abre, no volver a
+   * poner esto.
+   */
 };
