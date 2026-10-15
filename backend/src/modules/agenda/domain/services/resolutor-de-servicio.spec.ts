@@ -40,6 +40,41 @@ describe('ResolutorDeServicio — integridad del catálogo en Agenda', () => {
     });
   });
 
+  describe('resolverParaMoverCita — vender no es lo mismo que mover algo ya vendido', () => {
+    it('PERMITE MOVER una cita de un servicio descontinuado despues de la venta', async () => {
+      // El fallo que esto corrige: la clienta de un servicio retirado solo podía CANCELAR. Y la
+      // que había pagado anticipo quedaba atrapada entre un horario que ya no le servía y una
+      // cancelación que puede costarle el anticipo, por una decisión tomada tras su compra.
+      const servicio = servicioDePrueba({ activo: false });
+
+      await expect(resolutorCon(servicio).resolverParaMoverCita(servicio.id)).resolves.toMatchObject({
+        id: servicio.id,
+        activo: false,
+        duracionMinutos: 60,
+      });
+    });
+
+    it('pero SIGUE exigiendo que exista: sin duración no se puede reservar nada', async () => {
+      await expect(resolutorCon().resolverParaMoverCita('44444444-4444-4444-4444-444444444444')).rejects.toMatchObject({
+        httpStatus: 404,
+      });
+    });
+
+    it('y sigue exigiendo duración agendable aunque esté de baja', async () => {
+      const servicio = servicioDePrueba({ activo: false, duracionMinutos: 0 });
+      await expect(resolutorCon(servicio).resolverParaMoverCita(servicio.id)).rejects.toMatchObject({
+        code: 'SERVICIO_SIN_DURACION',
+      });
+    });
+
+    it('la asimetría es deliberada: `resolver` sí rechaza el servicio de baja', async () => {
+      // Vender un servicio retirado no se abre; moverlo sí. Si esta prueba y la primera llegaran a
+      // coincidir, la distinción se habría perdido.
+      const servicio = servicioDePrueba({ activo: false });
+      await expect(resolutorCon(servicio).resolver(servicio.id)).rejects.toMatchObject({ code: 'SERVICIO_INACTIVO' });
+    });
+  });
+
   describe('derivarRango — la duración la manda el catálogo', () => {
     it('deriva el fin a partir del inicio y la duración del catálogo', () => {
       const servicio = servicioDePrueba({ duracionMinutos: 90 });

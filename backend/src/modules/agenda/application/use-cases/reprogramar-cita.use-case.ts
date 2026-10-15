@@ -4,6 +4,8 @@ import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.reposit
 import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
+import { ProcesarListaEsperaUseCase, ResultadoHuecoLiberado } from './lista-espera.use-cases';
+import { Logger } from '@nestjs/common';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
@@ -53,18 +55,25 @@ export class ReprogramarCitaUseCase {
     private readonly resolutorDeServicio: ResolutorDeServicio,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
+    private readonly procesarListaEspera: ProcesarListaEsperaUseCase,
   ) {}
 
-  async ejecutar(input: ReprogramarCitaInput, actor: ClaimsUsuario, ahora = new Date()): Promise<{ original: Cita; nueva: Cita }> {
+  private readonly logger = new Logger(ReprogramarCitaUseCase.name);
+
+  async ejecutar(
+    input: ReprogramarCitaInput,
+    actor: ClaimsUsuario,
+    ahora = new Date(),
+  ): Promise<{ original: Cita; nueva: Cita; listaEspera: ResultadoHuecoLiberado | null }> {
     const original = await this.citaRepository.buscarPorId(input.citaId);
     if (!original) throw new RecursoNoEncontradoError('Cita', input.citaId);
 
     this.validarReglas(original, input, ahora);
 
-    // El catálogo se revalida al reprogramar, no solo al agendar. Antes no se hacía, así que una
-    // cita de un servicio dado de baja se podía mover indefinidamente, y el nuevo rango podía
-    // tener un tamaño distinto al del servicio.
-    const servicio = await this.resolutorDeServicio.resolver(original.servicioId);
+    // El catálogo se revalida al reprogramar, pero **sin exigir que el servicio siga activo**:
+    // dar de baja un servicio detiene las ventas nuevas, no anula las citas ya vendidas. Lo que sí
+    // se valida es que exista y cuánto dura, porque de ahí sale el tamaño del nuevo hueco.
+    const servicio = await this.resolutorDeServicio.resolverParaMoverCita(original.servicioId);
     const nuevoRangoHorario = this.resolutorDeServicio.derivarRango(input.nuevoInicio, input.nuevoFin, servicio);
     validarRangoHorario(nuevoRangoHorario);
 
@@ -114,7 +123,32 @@ export class ReprogramarCitaUseCase {
       });
     });
 
-    return { original, nueva };
+    // REPROGRAMAR TAMBIÉN LIBERA UN HUECO, y es fácil de olvidar porque `DEC-039` habla de
+    // cancelaciones: la cita original pasa a `reprogramada`, que **no ocupa horario** (`DEC-034`),
+    // así que su hueco queda igual de disponible que el de una cancelada. Si solo se procesara al
+    // cancelar, media de las liberaciones reales no avisaría a nadie.
+    //
+    // Se evalúa el hueco de la cita ORIGINAL, no el de la nueva: la nueva está ocupada.
+    const listaEspera = await this.procesarFila(original, actor, ahora);
+
+    return { original, nueva, listaEspera };
+  }
+
+  /** Nunca propaga: la reprogramación ya está confirmada. Mismo criterio que al cancelar. */
+  private async procesarFila(original: Cita, actor: ClaimsUsuario, ahora: Date): Promise<ResultadoHuecoLiberado | null> {
+    try {
+      return await this.procesarListaEspera.procesarHuecoLiberado(
+        { sucursalId: original.sucursalId, inicioLiberado: original.rangoHorario.inicio },
+        actor,
+        ahora,
+      );
+    } catch (error) {
+      this.logger.error(
+        `La cita ${original.id} se reprogramó correctamente, pero no se pudo procesar la lista de espera.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return null;
+    }
   }
 
   private validarReglas(original: Cita, input: ReprogramarCitaInput, ahora: Date): void {

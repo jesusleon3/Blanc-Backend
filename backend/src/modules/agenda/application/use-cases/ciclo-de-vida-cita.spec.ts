@@ -17,6 +17,7 @@ import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad'
 import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { crearContextoCatalogoFalso, crearVerificarClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
+import { crearProcesarListaEsperaInerte } from '../../test-utils/lista-espera-inerte';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -49,8 +50,8 @@ async function preparar(numeroDeSillas = 2) {
     agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearVerificarClientaFalso(), auditoria, uow),
     solicitar: new SolicitarConfirmacionCitaUseCase(citaRepo, auditoria, uow),
     confirmar: new ConfirmarCitaUseCase(citaRepo, auditoria, uow),
-    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow),
-    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow),
+    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte()),
+    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, crearProcesarListaEsperaInerte()),
     noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow),
     completar: new CompletarCitaUseCase(citaRepo, auditoria, uow),
   };

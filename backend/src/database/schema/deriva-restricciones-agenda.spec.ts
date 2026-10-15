@@ -1,5 +1,5 @@
 import { crearBaseDeDatosDePrueba } from '../test-utils/postgres-de-prueba';
-import { ESTADOS_CITA, ESTADOS_QUE_LIBERAN_HORARIO } from './agenda.schema';
+import { ESTADOS_CITA, ESTADOS_LISTA_ESPERA, ESTADOS_QUE_LIBERAN_HORARIO } from './agenda.schema';
 
 /**
  * DETECTOR DE DERIVA entre los arrays de TypeScript y las restricciones escritas a mano en las
@@ -87,5 +87,54 @@ describe('Deriva de restricciones de `agenda.citas` (bloqueo 2)', () => {
     // `ADR-005` prohíbe FKs CRUZADAS entre esquemas; esta es interna y por tanto legítima. Se
     // verifica para que la distinción quede ejercida y no solo comentada.
     expect(definiciones.get('citas_cita_origen_id_fk')).toBe('FOREIGN KEY (cita_origen_id) REFERENCES agenda.citas(id)');
+  });
+
+  describe('`agenda.lista_espera` — mismas restricciones a mano, mismo riesgo', () => {
+    let definicionesListaEspera: Map<string, string>;
+
+    beforeAll(async () => {
+      const db = await crearBaseDeDatosDePrueba();
+      const filas = (await db.execute(
+        `SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
+         WHERE conrelid = 'agenda.lista_espera'::regclass`,
+      )) as unknown as { conname: string; def: string }[];
+
+      definicionesListaEspera = new Map(filas.map((fila) => [fila.conname, fila.def]));
+    });
+
+    it('el `CHECK` de estados coincide EXACTAMENTE con `ESTADOS_LISTA_ESPERA`', () => {
+      const enLaBase = literales(definicionesListaEspera.get('lista_espera_estado_valido')!);
+      expect([...enLaBase].sort()).toEqual([...ESTADOS_LISTA_ESPERA].sort());
+    });
+
+    it('UNA SOLA OFERTA ABIERTA POR FILA: el índice único parcial existe', async () => {
+      // Es el invariante central de `DEC-039` ("se avisa a una sola clienta a la vez"), y vive en
+      // PostgreSQL por el mismo motivo que el no-doble-booking: dos liberaciones simultáneas
+      // pasarían las dos la comprobación en memoria.
+      const db = await crearBaseDeDatosDePrueba();
+      const indices = (await db.execute(
+        `SELECT indexdef FROM pg_indexes WHERE schemaname = 'agenda' AND tablename = 'lista_espera'`,
+      )) as unknown as { indexdef: string }[];
+
+      const unaOferta = indices.find((i) => i.indexdef.includes('lista_espera_una_notificada_por_fila'));
+      expect(unaOferta).toBeDefined();
+      expect(unaOferta!.indexdef).toContain('UNIQUE');
+      // PARCIAL, no total: si perdiera el `WHERE`, impediría tener dos solicitudes cualesquiera
+      // de la misma fila — rompería la lista de espera entera en vez de limitar las ofertas.
+      expect(unaOferta!.indexdef).toContain("WHERE (estado = 'notificada'::text)");
+    });
+
+    it('una oferta `notificada` NO PUEDE existir sin ventana ni sin hueco ofrecido', () => {
+      // Sin `expira_en` sería una oferta que nunca caduca y bloquearía la fila para siempre.
+      // Sin `hueco_inicio` no se sabría qué pasar a la siguiente, y el FIFO quedaría roto.
+      const definicion = definicionesListaEspera.get('lista_espera_ventana_coherente')!;
+      expect(definicion).toContain('expira_en');
+      expect(definicion).toContain('hueco_inicio');
+      expect(definicion).toContain('notificada_en');
+    });
+
+    it('`aceptada` y tener cita son lo mismo, en los dos sentidos', () => {
+      expect(definicionesListaEspera.get('lista_espera_cita_solo_si_aceptada')).toBeDefined();
+    });
   });
 });

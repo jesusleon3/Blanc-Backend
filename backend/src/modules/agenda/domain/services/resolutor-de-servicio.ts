@@ -59,12 +59,19 @@ export interface CotizacionSnapshot {
 export class ResolutorDeServicio {
   constructor(@Inject(CONTEXTO_CATALOGO_PORT) private readonly catalogo: ContextoCatalogoPort) {}
 
-  /** Lanza 404 si no existe y 409 si está dado de baja o no tiene duración agendable. */
-  async resolver(servicioId: string): Promise<ServicioAgendable> {
+  /**
+   * Lanza 404 si no existe y 409 si no tiene duración agendable. Con `exigirActivo` (el valor por
+   * defecto), lanza además 409 si está dado de baja del catálogo.
+   *
+   * **`exigirActivo: false` existe para una sola razón de negocio** (ver `resolverParaMoverCita`):
+   * dar de baja un servicio detiene las **ventas nuevas**, no anula las citas ya vendidas.
+   */
+  async resolver(servicioId: string, opciones: { exigirActivo?: boolean } = {}): Promise<ServicioAgendable> {
+    const exigirActivo = opciones.exigirActivo ?? true;
     const servicio = await this.catalogo.buscarServicio(servicioId);
     if (!servicio) throw new RecursoNoEncontradoError('Servicio', servicioId);
 
-    if (!servicio.activo) {
+    if (exigirActivo && !servicio.activo) {
       // 409 y no 404: el servicio existe, y distinguirlo importa — "no existe" manda a revisar el
       // id; "está de baja" manda a hablar con quien lo dio de baja.
       throw new ConflictoDeNegocioError('SERVICIO_INACTIVO', `El servicio "${servicio.nombre}" está dado de baja del catálogo.`, {
@@ -85,6 +92,29 @@ export class ResolutorDeServicio {
     }
 
     return servicio;
+  }
+
+  /**
+   * Resuelve el servicio de una cita **que ya existe**, sin exigir que siga activo.
+   *
+   * POR QUÉ SE SEPARÓ DE `resolver`. Exigir `activo` al reprogramar dejaba a las clientas de un
+   * servicio descontinuado **sin poder mover su cita: solo cancelarla**. Y la que había pagado un
+   * anticipo quedaba atrapada entre un horario que ya no le servía y una cancelación que puede
+   * costarle el anticipo — por una decisión de catálogo tomada *después* de su compra.
+   *
+   * La distinción correcta es entre **vender** y **mover algo ya vendido**:
+   * - `AgendarCitaUseCase` usa `resolver()` y sigue exigiendo `activo`: no se abren ventas nuevas
+   *   de un servicio retirado.
+   * - `ReprogramarCitaUseCase` usa este método: la cita ya se vendió, su `cotizacion_snapshot`
+   *   sigue siendo inmutable (`RN-AGE-08`) y lo único que cambia es la hora.
+   *
+   * **Lo que sí se sigue validando** es que el servicio **exista** y tenga duración: es de donde
+   * sale el tamaño del nuevo hueco. Si alguien borrara la fila del catálogo —hoy nada lo hace, la
+   * baja es lógica— la reprogramación fallaría con 404, y eso es correcto: sin duración no se
+   * puede reservar nada.
+   */
+  resolverParaMoverCita(servicioId: string): Promise<ServicioAgendable> {
+    return this.resolver(servicioId, { exigirActivo: false });
   }
 
   /**

@@ -17,6 +17,19 @@ import { ConsultarDisponibilidadUseCase } from './application/use-cases/consulta
 import { ConsultarAgendaUseCase } from './application/use-cases/consultar-agenda.use-case';
 import { GestionarSillasUseCase } from './application/use-cases/gestionar-sillas.use-case';
 import { CitasController } from './infrastructure/http/citas.controller';
+import { ListaEsperaController } from './infrastructure/http/lista-espera.controller';
+import { LISTA_ESPERA_REPOSITORY } from './domain/ports/lista-espera.repository';
+import { DrizzleListaEsperaRepository } from './infrastructure/persistence/drizzle-lista-espera.repository';
+import { NOTIFICACION_LISTA_ESPERA_PORT } from './domain/ports/notificacion-lista-espera.port';
+import { ListaEsperaSoloLogAdapter } from './infrastructure/notificacion/lista-espera-solo-log.adapter';
+import {
+  AceptarOfertaListaEsperaUseCase,
+  AvanzarTurnoListaEsperaUseCase,
+  CancelarSolicitudListaEsperaUseCase,
+  ConsultarListaEsperaUseCase,
+  InscribirEnListaEsperaUseCase,
+  ProcesarListaEsperaUseCase,
+} from './application/use-cases/lista-espera.use-cases';
 import { SillasController } from './infrastructure/http/sillas.controller';
 
 /**
@@ -30,10 +43,13 @@ import { SillasController } from './infrastructure/http/sillas.controller';
  * primer consumidor previsto.
  */
 @Module({
-  controllers: [CitasController, SillasController],
+  controllers: [CitasController, SillasController, ListaEsperaController],
   providers: [
     { provide: SILLA_REPOSITORY, useClass: DrizzleSillaRepository },
     { provide: CITA_REPOSITORY, useClass: DrizzleCitaRepository },
+    { provide: LISTA_ESPERA_REPOSITORY, useClass: DrizzleListaEsperaRepository },
+    // Provisional y a la vista: NO envía mensajes. Fase 4 sustituye solo este proveedor.
+    { provide: NOTIFICACION_LISTA_ESPERA_PORT, useClass: ListaEsperaSoloLogAdapter },
     AgendarCitaUseCase,
     AsignarManicuristaEnSucursalUseCase,
     SolicitarConfirmacionCitaUseCase,
@@ -47,6 +63,12 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     ConsultarDisponibilidadUseCase,
     ConsultarAgendaUseCase,
     GestionarSillasUseCase,
+    InscribirEnListaEsperaUseCase,
+    ProcesarListaEsperaUseCase,
+    AvanzarTurnoListaEsperaUseCase,
+    AceptarOfertaListaEsperaUseCase,
+    CancelarSolicitudListaEsperaUseCase,
+    ConsultarListaEsperaUseCase,
   ],
   exports: [SILLA_REPOSITORY, CITA_REPOSITORY, MotorDisponibilidad],
 })

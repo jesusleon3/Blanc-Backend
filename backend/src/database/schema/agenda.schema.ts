@@ -1,4 +1,4 @@
-import { boolean, index, integer, jsonb, pgSchema, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, date, index, integer, jsonb, pgSchema, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { RangoHorario, tstzrange } from './tipos-rango';
 
 export { RangoHorario, tstzrange };
@@ -149,5 +149,77 @@ export const citas = agendaSchema.table(
     porSucursal: index('citas_sucursal_idx').on(tabla.sucursalId),
     porManicurista: index('citas_manicurista_idx').on(tabla.manicuristaId),
     porClienta: index('citas_clienta_idx').on(tabla.clientaId),
+  }),
+);
+
+/**
+ * Estados de una solicitud de Lista de Espera (`DEC-039`, reglas 2.2/2.3).
+ *
+ * `en_espera` → `notificada` (con `expira_en`) → `aceptada` | `expirada` | `cancelada`.
+ *
+ * **`expirada` es terminal**: quien deja pasar su turno pierde su lugar en la fila, no vuelve al
+ * final. Es la mecánica que fija la orden de trabajo, y tiene una consecuencia de negocio que
+ * conviene conocer — ver la nota en `SolicitudListaEspera`.
+ */
+export const ESTADOS_LISTA_ESPERA = ['en_espera', 'notificada', 'aceptada', 'expirada', 'cancelada'] as const;
+export type EstadoListaEspera = (typeof ESTADOS_LISTA_ESPERA)[number];
+
+/** Estados en los que la solicitud **sigue viva** en la fila y cuenta para el FIFO. */
+export const ESTADOS_LISTA_ESPERA_ACTIVOS = ['en_espera', 'notificada'] as const satisfies readonly EstadoListaEspera[];
+
+/**
+ * Lista de Espera (`DEC-039`) — demanda que no cupo.
+ *
+ * POR QUÉ VIVE EN `agenda` Y NO EN UN CONTEXTO PROPIO. Habla de huecos y de citas: para decidir
+ * si una solicitud es candidata hay que cruzar el hueco liberado contra la capacidad real de la
+ * sucursal (`MotorDisponibilidad`), y aceptar una oferta **es** agendar una cita. Un contexto
+ * aparte tendría que preguntarle a Agenda en cada paso.
+ *
+ * NO LLEVA COLUMNA `posicion`. El orden FIFO es `creado_en`: una columna de posición habría que
+ * recalcularla en cada alta, baja y expiración, y cualquier fallo a medio camino dejaría la fila
+ * con dos personas en el mismo puesto. El reloj no se desordena.
+ *
+ * NO COPIA LA DURACIÓN DEL SERVICIO. Se resuelve por `ContextoCatalogoPort` al evaluar. Copiarla
+ * crearía un segundo lugar donde vive la verdad del catálogo — el mismo error que esta fase
+ * acabó de corregir en `citas`, donde el cliente podía mandar la duración que quisiera.
+ */
+export const listaEspera = agendaSchema.table(
+  'lista_espera',
+  {
+    id: uuid('id').primaryKey(),
+    /** Sin FK: `sucursales_personal` es otro Bounded Context (`ADR-005`). */
+    sucursalId: uuid('sucursal_id').notNull(),
+    /** Sin FK y sin tabla destino todavía: Clientas (CRM) es Fase 3. */
+    clientaId: uuid('clienta_id').notNull(),
+    servicioId: uuid('servicio_id').notNull(),
+    /**
+     * Día que la clienta quiere, como **fecha de pared** (`date`, no `timestamptz`).
+     *
+     * Pide "el jueves", no un instante. Guardarlo como `timestamptz` obligaría a inventar una
+     * hora y a desplazarla por zona en cada comparación; un hueco que se libera a las 23:30 de
+     * Querétaro acabaría en la fila del viernes.
+     */
+    fecha: date('fecha').notNull(),
+    estado: text('estado').notNull(),
+    /** Cuándo se le ofreció el hueco y cuándo caduca su turno. `NULL` mientras está `en_espera`. */
+    notificadaEn: timestamp('notificada_en', { withTimezone: true }),
+    expiraEn: timestamp('expira_en', { withTimezone: true }),
+    /**
+     * **Hora de inicio del hueco que se le ofreció.**
+     *
+     * Es imprescindible y no redundante con `notificada_en`: esa dice *cuándo se avisó*, no *qué
+     * se ofreció*. Sin esta columna, al expirar un turno no se puede saber qué hueco había que
+     * pasar a la siguiente de la fila, y el avance FIFO —el corazón de `DEC-039`— no funciona.
+     */
+    huecoInicio: timestamp('hueco_inicio', { withTimezone: true }),
+    /** La cita que nació al aceptar. FK **al mismo esquema**, por tanto legítima (`ADR-005`). */
+    citaId: uuid('cita_id').references(() => citas.id),
+    creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+    actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (tabla) => ({
+    // La consulta caliente es "la fila de esta sucursal para esta fecha, en orden de llegada".
+    porFila: index('lista_espera_fila_idx').on(tabla.sucursalId, tabla.fecha, tabla.estado, tabla.creadoEn),
+    porClienta: index('lista_espera_clienta_idx').on(tabla.clientaId),
   }),
 );

@@ -1153,6 +1153,152 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-15 — Fase 2 (parte 7): Lista de Espera y reprogramación de servicio descontinuado. **🏁 FASE 2 CERRADA**
+
+Último entregable del Motor de Agenda. Con esto Fase 2 queda completa y el proyecto puede abrir Fase 3.
+
+#### 1. Reprogramación de servicio descontinuado — la tensión que quedó abierta
+
+`ResolutorDeServicio` distingue ahora **vender** de **mover algo ya vendido**:
+
+- `AgendarCitaUseCase` → `resolver()`, que sigue exigiendo `activo`. No se abren ventas nuevas de un servicio retirado.
+- `ReprogramarCitaUseCase` → `resolverParaMoverCita()`, que **solo exige que exista y tenga duración**.
+
+Lo que esto arregla: la clienta de un servicio descontinuado solo podía **cancelar**. Y la que había pagado anticipo quedaba atrapada entre un horario que ya no le servía y una cancelación que puede costarle el anticipo, por una decisión de catálogo tomada *después* de su compra. La duración sí se sigue validando, porque de ahí sale el tamaño del nuevo hueco. El `cotizacion_snapshot` sigue inmutable (`RN-AGE-08`). Hay una prueba que fija también la **asimetría**: si `resolver` y `resolverParaMoverCita` llegaran a comportarse igual, la distinción se habría perdido sin que nadie lo notara.
+
+#### 2. 🐛 Un bloqueo mutuo latente, encontrado antes de usarlo
+
+`AceptarOfertaListaEsperaUseCase` invoca a `AgendarCitaUseCase`, y cada uno declara su propia unidad de trabajo. `DrizzleUnitOfWork` abría **una segunda transacción sobre otra conexión del pool**. Las consecuencias no eran teóricas: la interna no vería lo escrito por la externa (sin commit todavía), podía quedarse esperando filas que la externa tenía bloqueadas —**un bloqueo mutuo entre dos transacciones de la misma petición**— y si la externa fallaba después, lo que la interna ya había confirmado quedaba escrito. **Un rollback a medias es peor que no tener transacciones.**
+
+`ejecutar()` ahora **se une a la transacción en curso** si hay una. La frontera transaccional pasa a ser la del caso de uso más externo, que es lo que "Unit of Work" significa: una unidad por operación de negocio, no una por capa. Cuatro pruebas de integración lo fijan, incluida la que demuestra que **el rollback externo deshace lo escrito por la interna**.
+
+No era deuda declarada de nadie: estaba esperando al primer caso de uso que llamara a otro.
+
+#### 3. Lista de Espera
+
+**Migración `0010_lista_espera.sql`** — tabla `agenda.lista_espera`, 12 columnas, 2 índices normales, **2 índices únicos parciales** y 3 `CHECK` escritos a mano.
+
+| Decisión de modelo | Por qué |
+|---|---|
+| Vive en el BC **Agenda** | Habla de huecos y de citas: decidir candidatas exige cruzar `MotorDisponibilidad`, y aceptar una oferta **es** agendar. Un contexto aparte preguntaría a Agenda en cada paso |
+| **Sin columna `posicion`** | El FIFO es `creado_en`. Una columna de posición habría que recalcularla en cada alta, baja y expiración, y un fallo a medio camino dejaría dos personas en el mismo puesto. El reloj no se desordena |
+| **No copia la duración** del servicio | Se resuelve por `ContextoCatalogoPort`. Copiarla crearía un segundo lugar donde vive la verdad del catálogo — el error que la parte 6 acabó de corregir en `citas` |
+| `fecha` como `date`, no `timestamptz` | La clienta pide "el jueves". Y un hueco que se libera a las 23:30 de Querétaro es del jueves aunque en UTC ya sea viernes: `fechaLocal()` lo resuelve en la zona del negocio |
+
+**El invariante central vive en PostgreSQL, no en el código.** `lista_espera_una_notificada_por_fila` es un **índice único parcial** `(sucursal_id, fecha) WHERE estado = 'notificada'`. Es la regla *"se avisa a una sola clienta a la vez"*, y vale lo mismo que para el no-doble-booking: si solo la cumpliera la aplicación, dos liberaciones simultáneas —una cancelación y una reprogramación en el mismo segundo— pasarían las dos la comprobación previa y avisarían a dos clientas del mismo horario. Que sea **parcial** importa: sin el `WHERE` impediría tener dos solicitudes cualesquiera en la misma fila, es decir rompería la lista de espera entera. El detector de deriva comprueba las dos cosas.
+
+Otro índice parcial impide que una clienta se apunte dos veces a lo mismo **mientras su solicitud siga viva**, dejando fuera las terminadas a propósito: tiene que poder volver a apuntarse después.
+
+#### Archivos creados
+
+| Archivo | Qué es |
+|---|---|
+| `database/migrations/0010_lista_espera.sql` | Tabla + índices parciales + `CHECK` |
+| `agenda/domain/entities/solicitud-lista-espera.entity.ts` | Entidad y máquina de estados |
+| `agenda/domain/ports/lista-espera.repository.ts` | Puerto de persistencia |
+| `agenda/domain/ports/notificacion-lista-espera.port.ts` | Puerto de salida del aviso |
+| `agenda/infrastructure/persistence/drizzle-lista-espera.repository.ts` | Adaptador Drizzle |
+| `agenda/infrastructure/notificacion/lista-espera-solo-log.adapter.ts` | **Provisional: no envía nada** |
+| `agenda/application/use-cases/lista-espera.use-cases.ts` | 6 casos de uso |
+| `agenda/application/use-cases/lista-espera.spec.ts` | **28 pruebas de integración** |
+| `agenda/infrastructure/http/lista-espera.controller.ts` | 5 endpoints |
+| `agenda/infrastructure/http/dto/lista-espera.dto.ts` | 4 DTOs |
+| `agenda/test-utils/lista-espera-inerte.ts` | Doble para las pruebas del ciclo de vida |
+| `shared/persistence/drizzle-unit-of-work.spec.ts` | 4 pruebas del anidamiento |
+
+#### Casos de uso y endpoints
+
+| Método y ruta | Caso de uso | Roles |
+|---|---|---|
+| `GET /v1/agenda/lista-espera` | `ConsultarListaEsperaUseCase` | Super Admin, Administrador, Gerente |
+| `POST /v1/agenda/lista-espera` | `InscribirEnListaEsperaUseCase` | ídem |
+| `POST /v1/agenda/lista-espera/:id/aceptar` | `AceptarOfertaListaEsperaUseCase` | ídem |
+| `POST /v1/agenda/lista-espera/avanzar-turno` | `AvanzarTurnoListaEsperaUseCase` | ídem |
+| `DELETE /v1/agenda/lista-espera/:id` | `CancelarSolicitudListaEsperaUseCase` | ídem |
+| *(interno)* | `ProcesarListaEsperaUseCase` | lo invocan Cancelar y Reprogramar |
+
+**La `MANICURISTA` queda fuera por completo, incluso de la lectura.** La fila contiene `clientaId` de personas que no son sus clientas, y su vista de iPad no transporta datos de clientas por diseño (`DEC-040`). La `RECEPCIONISTA` también, por coherencia con el resto de la API de Agenda, donde no agenda ni cancela.
+
+#### Las dos decisiones de diseño que la orden fijó, y cómo quedaron en código
+
+**La oferta NO retiene el hueco** (`RN-AGE-13`, coherente con `RN-ANT-03`). Notificar no bloquea ninguna silla: la ventana solo gobierna *a quién se avisa primero*, para no escribir a diez personas del mismo horario. **La carrera se resuelve al agendar**, en `AceptarOfertaListaEsperaUseCase`: si otra clienta tomó el horario mientras la oferta estaba abierta, devuelve `409 HORARIO_NO_DISPONIBLE` y la solicitud **se queda `notificada`** — no se da por aceptada ni se expira, así que la clienta sigue en su turno y puede aceptar otro hueco. Hay una prueba que lo reproduce literalmente.
+
+**Desacoplado del planificador y de WhatsApp.** `AvanzarTurnoListaEsperaUseCase` es un caso de uso invocable por HTTP, no un daemon: Blanc no tiene planificador y montarlo es una decisión de arquitectura con su propia ADR. Hoy lo dispara la Encargada o un job runner externo; cuando exista el planificador, **solo cambia quién llama**. El aviso sale por `NotificacionListaEsperaPort`, cuyo adaptador actual solo escribe en el log.
+
+> ⚠️ **HOY NINGÚN MENSAJE SALE DEL SISTEMA.** El canal es de Fase 4 (`DEC-043`). La oferta queda registrada con su ventana corriendo y **la Encargada avisa a mano** mirando `GET /v1/agenda/lista-espera`. Ese `GET` no es una comodidad: es la única forma de saber a quién llamar. El adaptador se llama `ListaEsperaSoloLogAdapter` a propósito, por la lección de `SinAgendaVerificarCitasFuturasAdapter`.
+
+#### 🐛 Un fallo encontrado por una prueba de la propia orden
+
+La orden exigía probar *"la expiración de la ventana de 1h pasando a la siguiente en FIFO"*. **Esa prueba falló**, y el motivo era de fondo: al expirar un turno hay que reofrecer el hueco a la siguiente, pero la tabla solo guardaba `notificada_en` —*cuándo se avisó*— y no *qué se ofreció*. El código reevaluaba la hora del aviso, que está en el pasado, el umbral de 30 minutos lo descartaba como hueco perdido y **el turno nunca pasaba a la siguiente**. El avance FIFO, que es el corazón de `DEC-039`, estaba roto en silencio.
+
+Mi primer impulso fue documentarlo como limitación conocida para no ampliar el alcance. Era la decisión equivocada: rompía un requisito explícito de la orden. Se añadió la columna **`hueco_inicio`** y el `CHECK` que exige que una oferta `notificada` la tenga — una oferta de la que no se sabe qué se ofreció no sirve para nada. Hay una prueba que fija que `huecoInicio` y `notificadaEn` son datos distintos y que la reoferta es del mismo hueco.
+
+#### Casos borde que la orden pidió, todos verificados
+
+| Caso | Resultado |
+|---|---|
+| **1h liberada, primera de la fila quiere 2h** | Se la salta (`descartadasPorNoCaber: 1`) y ofrece a la de 1h. La de 2h **conserva su lugar**, en `en_espera` sin penalización. Probado por integración **y por HTTP** |
+| **2h liberadas, primera quiere 2h** | Sí es candidata, `descartadasPorNoCaber: 0` |
+| **Nadie cabe** | No se inventa oferta: `ofrecida: null` |
+| **30 min vs 60 min** | A los **45 min** hay `incidenteTardio: true` **y** `huecoPerdidoCortoPlazo: false` a la vez. Son dos umbrales de cosas distintas y la prueba fija ambas constantes |
+| **≤30 min** | `huecoPerdidoCortoPlazo: true`, **nadie es avisado**, la solicitud sigue `en_espera` y queda la bandera auditada para la Dueña. El umbral es inclusivo: a 30 exactos ya se da por perdido |
+| **Expiración de la ventana** | La primera pasa a `expirada`, la segunda recibe `notificada`, y el hueco reofrecido es **el mismo** |
+| **Ventana parametrizable** | Con 10 min: a los 5 no ha vencido, a los 11 sí |
+| **Dos huecos seguidos** | Se avisa **solo a una**: ya hay oferta abierta en esa fila |
+| **Reprogramar libera hueco** | Ofrece el horario de la cita original a la fila |
+
+**El hueco real se calcula cruzando `MotorDisponibilidad`, no el rango de la cita liberada.** `cabeUnServicio()` pregunta si el rango *completo* que ocuparía el servicio tiene capacidad, así que si se cancela la cita de 10:00–11:00 pero la de 11:00–12:00 sigue en pie, un servicio de dos horas no cabe — el solape deja la capacidad en cero. Comparar duraciones contra el rango liberado habría dado la respuesta equivocada.
+
+#### Decisión transaccional en Cancelar y Reprogramar
+
+La fila se procesa **después** de que la cancelación esté confirmada y **en su propia transacción**, por dos motivos: el hueco solo está libre una vez persistido el estado, y **la cancelación no puede depender de la fila** — en una sola transacción, un fallo al buscar candidatas desharía la cancelación y la clienta que llamó para cancelar seguiría con su cita.
+
+Si procesar la fila falla, **no se propaga**: devolvería un 500 sobre una cancelación ya confirmada, y quien lo viera reintentaría para recibir un 409 de transición inválida. Se registra en el log, el resultado viaja como `listaEspera: null` —distinto de `{ofrecida: null}`, que sí significa "no había candidata"— y `avanzar-turno` recoge esa fila más tarde.
+
+#### Pruebas: **+46** (791 → **837**, 61 suites)
+
+28 de integración de Lista de Espera · 14 E2E HTTP · 4 del anidamiento de `UnitOfWork` · 4 de `resolverParaMoverCita` · 4 nuevas en el detector de deriva, ahora extendido a `agenda.lista_espera`.
+
+#### Validación
+
+`tsc --noEmit` 0 · `tsc -p tsconfig.eslint.json` 0 · `lint` 0 errores 0 avisos · `build` OK · `drizzle-kit check` OK · `madge --circular` 0 ciclos · **837/837 pruebas** en 61 suites.
+
+---
+
+### 🏁 Cierre de Fase 2 — Motor de Agenda
+
+Lo que el motor hace hoy, de punta a punta: **sillas virtuales** con el no-doble-booking garantizado por dos `EXCLUDE USING gist` en PostgreSQL · **capacidad efectiva** `MIN(sillas, manicuristas)` · **horario de sucursal** con corte de mediodía y domingo como configuración · **máquina de estados** formal de 9 estados · **ciclo de vida completo** incluida la reprogramación con cadena trazable y tope de 3 · **ausencias y coberturas** con aviso de citas comprometidas por franja · **integración con Catálogo** que valida servicio y deriva duración · **cotización congelada** por el backend · **API HTTP** con RBAC por método y vista de iPad filtrada · **Lista de Espera** con FIFO, encaje por duración y ventana configurable.
+
+| Pendiente de Fase 2 | Estado |
+|---|---|
+| Bloqueos 1–7 de §16 (kick-off) | **Todos cerrados o reclasificados** |
+| Deudas 1–6 de §16 (parte 5) | **5 cerradas**; `clientaId` parcial por diseño (gancho de Fase 3) |
+| Tensión de reprogramación de servicio de baja | **Cerrada** |
+| Lista de Espera | **Cerrada** en dominio, persistencia y API |
+| `P3` (máquina de estados de `Cita`) | **Cerrado**; quedan las dos de Fase 4 |
+| `P9` (`usuarios ↔ manicuristas`) | **Cerrado** |
+
+#### Lo que Fase 2 deja abierto a propósito, y hay que tener presente al planificar
+
+1. **No existe planificador.** `avanzar-turno` se invoca a mano o por un job runner externo. **Si nadie lo llama, las ofertas vencidas no caducan y la fila no avanza.** Es la decisión de arquitectura más inmediata que queda — `02-architecture-principles.md` prevé event-driven + outbox, pero el disparador temporal no está construido.
+2. **Ningún aviso sale del sistema.** Lista de Espera y confirmaciones dependen del canal de Fase 4. Hoy todo aviso es manual.
+3. **`clientaId` no se valida.** El adaptador provisional acepta cualquier uuid. Es lo primero que Fase 3 cierra, sustituyendo un solo proveedor.
+4. **Ninguna migración se ha aplicado a una base real.** Las 11 se ejecutan íntegras contra PostgreSQL en cada corrida de pruebas, así que están verificadas; lo que no existe es el entorno. Es actividad de Fase 7.
+5. **`expirada` es terminal: quien deja pasar su turno pierde su lugar en la fila para esa fecha.** Es la mecánica que fijó la orden de trabajo y está implementada así. **Pregunta para la Dueña:** si la intención era que solo perdiera *ese hueco* y siguiera esperando otro del mismo día, es un cambio de una línea en `TRANSICIONES_LISTA_ESPERA` más decidir dónde la recoloca el FIFO.
+6. **El `no_show` no se marca solo**, y la cita tampoco se completa sola (`DEC-040`): las dos son acciones de una persona. Sin planificador no hay nada que las dispare por tiempo, y eso es deliberado.
+
+#### Listo para Kick-off de Fase 3
+
+El Bounded Context de **CRM / Clientas** tiene su costura ya construida y ejercitada en producción:
+
+- **`VerificarClientaPort`** — `AgendarCitaUseCase`, `ReprogramarCitaUseCase` e `InscribirEnListaEsperaUseCase` ya lo llaman. Fase 3 sustituye `CrmNoConstruidoVerificarClientaAdapter` en `IntegracionModule` y **no toca ningún caso de uso**.
+- **Lista Roja** — el mismo puerto es su punto natural: una clienta en lista roja no deja de existir, pero su reserva exige anticipo. Por eso el método se llama `existe` y no `puedeAgendar`.
+- **Anticipos** — `en_espera_pago` ya existe como estado y **libera horario** (`RN-ANT-03` por encima de `DEC-034`, corregido en la migración `0007`): la carrera se resuelve al confirmar el pago, no reteniendo el hueco. `ReprogramarCitaUseCase` ya tiene el parámetro `anticipoPagado` y la regla de 48 horas de `RN-ANT-04`, hoy aportado por quien llama y **pendiente de pasar a un puerto** cuando exista el contexto.
+- **Incidentes** — `CancelarCitaUseCase` ya devuelve `incidenteTardio` (`RN-CRM-06`) **sin marcar lista roja**: `DEC-042` reserva esa decisión a la Dueña.
+- `P5` (circularidad Agenda↔Anticipos) **sigue abierto** y es el único de los tres bloqueadores originales que falta. No ha estorbado porque Anticipos no se ha construido, pero **bloquea Fase 3**: conviene resolverlo en el kick-off.
+
+---
+
 ### 2026-10-14 (e) — Fase 2 (parte 6): integración Agenda ↔ Catálogo y saneamiento de §16. **4 de 6 deudas cerradas**
 
 **Lista de Espera NO entra en este commit.** La orden autorizaba priorizar explícitamente, y se priorizó: es un submódulo completo (esquema, migración, entidad, repositorio, FIFO con ventana de expiración y su enganche en cancelar/reprogramar) con **dos dependencias de infraestructura que hoy no existen**. Diseño preciso al final de esta entrada.

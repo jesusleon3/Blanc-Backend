@@ -51,3 +51,20 @@ export function aMinutos(hora: string): number {
   const [h, m] = hora.split(':').map(Number);
   return h * 60 + m;
 }
+
+/**
+ * Fecha de pared (`YYYY-MM-DD`) **en la zona del negocio**.
+ *
+ * La Lista de Espera se inscribe por fecha concreta: la clienta quiere "el jueves", no un rango
+ * UTC. Un hueco que se libera a las 23:30 de Querétaro es del jueves, aunque en UTC ya sea
+ * viernes — y usar `toISOString().slice(0, 10)` la habría mandado a la fila del día siguiente.
+ */
+export function fechaLocal(instante: Date): string {
+  // `en-CA` da `YYYY-MM-DD` directamente, sin recomponer partes a mano.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONA_HORARIA_NEGOCIO,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instante);
+}

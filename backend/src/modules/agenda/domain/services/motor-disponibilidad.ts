@@ -126,6 +126,41 @@ export class MotorDisponibilidad {
     };
   }
 
+  /**
+   * **¿Cabe un servicio de `duracionMinutos` empezando en `inicio`?** Responde `true`/`false` en
+   * vez de lanzar.
+   *
+   * Lo usa la Lista de Espera, y existe por una razón concreta: **el hueco que deja una cita
+   * cancelada no es el hueco real disponible**. Si se cancela la de 10:00–11:00 pero la de
+   * 11:00–12:00 sigue en pie, un servicio de dos horas **no cabe**, aunque "se liberó una hora a
+   * las 10". Comparar duraciones contra el rango de la cita liberada daría la respuesta
+   * equivocada; preguntarle al motor por el rango completo que ocuparía el servicio da la
+   * correcta, porque el solape con la cita siguiente deja la capacidad en cero.
+   *
+   * No lanza porque aquí "no cabe" no es un error: es el resultado que hace pasar a la siguiente
+   * candidata de la fila.
+   */
+  async cabeUnServicio(
+    sucursalId: string,
+    inicio: Date,
+    duracionMinutos: number,
+    opciones: { excluirCitaId?: string } = {},
+  ): Promise<boolean> {
+    if (duracionMinutos <= 0) return false;
+
+    const rango = { inicio, fin: new Date(inicio.getTime() + duracionMinutos * 60_000) };
+    try {
+      await this.exigirDisponibilidad(sucursalId, rango, opciones);
+      return true;
+    } catch (error) {
+      // Solo se traga los errores de dominio (sin horario, cerrada, fuera de bloque, sin lugar).
+      // Un fallo de base de datos tiene que seguir propagándose: tratarlo como "no cabe" haría
+      // que la fila avanzara en silencio sobre una avería.
+      if (error instanceof DomainError) return false;
+      throw error;
+    }
+  }
+
   /** `RN-AGE-10` y `RN-AGE-12`: dentro de un bloque del día, sin cruzar el corte, y no en domingo. */
   async exigirHorarioValido(sucursalId: string, rango: RangoHorario): Promise<void> {
     const horario = await this.contextoPersonal.horarioSemanalDe(sucursalId);

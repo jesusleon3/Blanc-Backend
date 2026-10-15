@@ -75,6 +75,7 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
   let bea: Manicurista;
   /** Servicio REAL del catálogo: desde esta parte, `servicioId` ya no es un uuid cualquiera. */
   let servicio: Servicio;
+  let servicioDeDosHoras: Servicio;
 
   /** Token con cada rol. `manicuristaAna` lleva su vínculo de `P9`. */
   let dueña: string;
@@ -134,7 +135,11 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
     // Servicio de 60 minutos: es la duración que define el `FIN` de todas las pruebas de este
     // archivo, porque el fin ya no lo elige el cliente.
     servicio = Servicio.crear({ nombre: 'Gelish', categoria: 'aplicacion', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
-    await new DrizzleServicioRepository(dbDePrueba).guardar(servicio);
+    // Y uno de dos horas, para la regla 2.2 de la lista de espera.
+    servicioDeDosHoras = Servicio.crear({ nombre: 'Acrílico', categoria: 'aplicacion', duracionBaseMinutos: 120, precioBaseCentavos: 78000 });
+    const repoServicios = new DrizzleServicioRepository(dbDePrueba);
+    await repoServicios.guardar(servicio);
+    await repoServicios.guardar(servicioDeDosHoras);
 
     const sucursal = Sucursal.crear({ nombre: 'Lomas', horarioSemanal: horarioAbiertoSiempre() });
     await sucursalRepo.guardar(sucursal);
@@ -560,6 +565,173 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
 
     it('401 sin token', async () => {
       await request(app.getHttpServer()).get(RUTA).query({ sucursalId, inicio: INICIO, fin: FIN }).expect(401);
+    });
+  });
+
+  describe('lista de espera (`DEC-039`)', () => {
+    const LISTA = '/v1/agenda/lista-espera';
+    /** La fecha de pared en Querétaro de `INICIO` (10:00 UTC del 7 de diciembre). */
+    const FECHA = '2026-12-07';
+
+    const inscribir = (cuerpo: Record<string, unknown> = {}, autorizacion = encargada) =>
+      request(app.getHttpServer())
+        .post(LISTA)
+        .set('Authorization', `Bearer ${autorizacion}`)
+        .send({ sucursalId, clientaId: randomUUID(), servicioId: servicio.id, fecha: FECHA, ...cuerpo });
+
+    it('201 al inscribir y 200 al consultar la fila', async () => {
+      const alta = await inscribir().expect(201);
+      expect(alta.body).toMatchObject({ estado: 'en_espera', fecha: FECHA, expiraEn: null });
+
+      const fila = await request(app.getHttpServer())
+        .get(LISTA)
+        .query({ sucursalId, fecha: FECHA })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      expect(fila.body.solicitudes).toHaveLength(1);
+    });
+
+    it('400 si la fecha no es `YYYY-MM-DD`: la clienta pide un día, no un instante', async () => {
+      await inscribir({ fecha: '2026-12-07T10:00:00.000Z' }).expect(400);
+    });
+
+    it('404 con un servicio que no existe', async () => {
+      await inscribir({ servicioId: randomUUID() }).expect(404);
+    });
+
+    it('EL CASO DE LA REGLA 2.2 POR HTTP: hueco de 1h salta a la de 2h y ofrece a la de 1h', async () => {
+      // Dos citas consecutivas sobre las dos sillas existentes a las 11:00, de modo que al
+      // cancelar la de las 10:00 el hueco real sea de una hora.
+      const { body: diezAOnce } = await agendar().expect(201);
+      await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ sucursalId, servicioId: servicio.id, clientaId: CLIENTA, inicio: FIN })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ sucursalId, servicioId: servicio.id, clientaId: CLIENTA, inicio: FIN })
+        .expect(201);
+
+      const { body: deDosHoras } = await inscribir({ servicioId: servicioDeDosHoras.id }).expect(201);
+      const { body: deUnaHora } = await inscribir().expect(201);
+
+      await request(app.getHttpServer())
+        .post(`${RUTA}/${diezAOnce.id}/cancelar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      const fila = await request(app.getHttpServer())
+        .get(LISTA)
+        .query({ sucursalId, fecha: FECHA })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      const porId = new Map(fila.body.solicitudes.map((s: { id: string }) => [s.id, s]));
+      expect(porId.get(deUnaHora.id)).toMatchObject({ estado: 'notificada' });
+      // La de dos horas no cabía y conserva su lugar sin penalización.
+      expect(porId.get(deDosHoras.id)).toMatchObject({ estado: 'en_espera', expiraEn: null });
+    });
+
+    it('201 al aceptar la oferta: agenda la cita de verdad', async () => {
+      const { body: cita } = await agendar().expect(201);
+      const { body: solicitud } = await inscribir().expect(201);
+
+      await request(app.getHttpServer())
+        .post(`${RUTA}/${cita.id}/cancelar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      const aceptada = await request(app.getHttpServer())
+        .post(`${LISTA}/${solicitud.id}/aceptar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ inicio: INICIO })
+        .expect(201);
+
+      expect(aceptada.body.solicitud.estado).toBe('aceptada');
+      expect(aceptada.body.cita.id).toBe(aceptada.body.solicitud.citaId);
+      // Hereda todo de `AgendarCitaUseCase`, incluida la cotización congelada.
+      expect(aceptada.body.cita.cotizacionSnapshot).toMatchObject({ totalCentavos: 45000 });
+    });
+
+    it('409 al aceptar una solicitud que nunca recibió oferta', async () => {
+      const { body: solicitud } = await inscribir().expect(201);
+
+      const respuesta = await request(app.getHttpServer())
+        .post(`${LISTA}/${solicitud.id}/aceptar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ inicio: INICIO })
+        .expect(409);
+
+      expect(respuesta.body.error.code).toBe('LISTA_ESPERA_TRANSICION_INVALIDA');
+    });
+
+    it('404 al aceptar una solicitud inexistente', async () => {
+      await request(app.getHttpServer())
+        .post(`${LISTA}/${randomUUID()}/aceptar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ inicio: INICIO })
+        .expect(404);
+    });
+
+    it('200 en `avanzar-turno`: es el sustituto del planificador que no existe', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .post(`${LISTA}/avanzar-turno`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({})
+        .expect(200);
+
+      expect(respuesta.body).toEqual({ expiradas: [], nuevasOfertas: [] });
+    });
+
+    it('400 si `minutosDeVentana` excede el tope de 24 horas', async () => {
+      await request(app.getHttpServer())
+        .post(`${LISTA}/avanzar-turno`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ minutosDeVentana: 99999 })
+        .expect(400);
+    });
+
+    it('204 al darse de baja de la fila', async () => {
+      const { body: solicitud } = await inscribir().expect(201);
+
+      await request(app.getHttpServer())
+        .delete(`${LISTA}/${solicitud.id}`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(204);
+
+      const fila = await request(app.getHttpServer())
+        .get(LISTA)
+        .query({ sucursalId, fecha: FECHA })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+      expect(fila.body.solicitudes).toEqual([]);
+    });
+
+    describe('RBAC', () => {
+      it('403 PARA LA MANICURISTA, incluso de lectura: la fila lleva datos de clientas', async () => {
+        // Su vista de iPad no transporta `clientaId` por diseño (`DEC-040`), y la fila está llena
+        // de clientas que además no son las suyas.
+        await request(app.getHttpServer())
+          .get(LISTA)
+          .query({ sucursalId, fecha: FECHA })
+          .set('Authorization', `Bearer ${manicuristaAna}`)
+          .expect(403);
+      });
+
+      it('403 para la RECEPCIONISTA, por coherencia con el resto de la API de Agenda', async () => {
+        await inscribir({}, recepcionista).expect(403);
+      });
+
+      it('401 sin token', async () => {
+        await request(app.getHttpServer()).get(LISTA).query({ sucursalId, fecha: FECHA }).expect(401);
+      });
+
+      it('la DUEÑA sí puede operar la fila', async () => {
+        await inscribir({}, dueña).expect(201);
+      });
     });
   });
 
