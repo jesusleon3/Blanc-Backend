@@ -7,6 +7,7 @@ import { Silla } from '../../domain/entities/silla.entity';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { crearAnticipoFalso } from '../../test-utils/anticipo-falso';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
@@ -30,6 +31,7 @@ async function preparar(numeroDeSillas = 2) {
   const citaRepo = new DrizzleCitaRepository(db);
   const sillaRepo = new DrizzleSillaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
+  const anticipos = crearAnticipoFalso();
   // Horario abierto y personal de sobra: estas pruebas no van sobre disponibilidad.
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso());
 
@@ -49,6 +51,7 @@ async function preparar(numeroDeSillas = 2) {
       // archivo: así el fin derivado coincide con lo que estas pruebas ya daban por supuesto.
       new ResolutorDeServicio(crearContextoCatalogoFalso([servicioDePrueba({ id: SERVICIO })])),
       crearContextoClientaFalso(),
+      anticipos,
       auditoria,
       crearUnitOfWorkFalso(),
     ),

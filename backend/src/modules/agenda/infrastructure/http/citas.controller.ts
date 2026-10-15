@@ -114,13 +114,22 @@ export class CitasController {
     return citaAJson(await this.confirmarCita.ejecutar({ citaId: id }, usuario), usuario);
   }
 
-  /** Devuelve `incidenteTardio` (`RN-CRM-06`). **No marca lista roja**: eso es solo de la Dueña. */
+  /**
+   * Devuelve `incidenteTardio` (`RN-CRM-06`) y `anticipoRetenido` (`RN-ANT-04`). **No marca lista
+   * roja**: eso es solo de la Dueña.
+   *
+   * Puede responder `409 CANCELACION_REQUIERE_CONFIRMACION` si la clienta está en lista roja o
+   * hay anticipo pagado — ver `CancelarCitaDto.confirmacionDeEmpleado`.
+   */
   @Post(':id/cancelar')
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
   @HttpCode(200)
   async cancelar(@Param('id') id: string, @Body() dto: CancelarCitaDto, @CurrentUser() usuario: ClaimsUsuario) {
-    const { cita, incidenteTardio } = await this.cancelarCita.ejecutar({ citaId: id, motivo: dto.motivo }, usuario);
-    return { cita: citaAJson(cita, usuario), incidenteTardio };
+    const { cita, incidenteTardio, anticipoRetenido } = await this.cancelarCita.ejecutar(
+      { citaId: id, motivo: dto.motivo, confirmacionDeEmpleado: dto.confirmacionDeEmpleado },
+      usuario,
+    );
+    return { cita: citaAJson(cita, usuario), incidenteTardio, anticipoRetenido };
   }
 
   @Post(':id/reprogramar')
@@ -132,6 +141,7 @@ export class CitasController {
         nuevoInicio: new Date(dto.inicio),
         nuevoFin: dto.fin === undefined ? undefined : new Date(dto.fin),
         manicuristaId: dto.manicuristaId ?? null,
+        confirmacionDeEmpleado: dto.confirmacionDeEmpleado,
       },
       usuario,
     );

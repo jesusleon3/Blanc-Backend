@@ -5,6 +5,7 @@ import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repo
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { CONTEXTO_CLIENTA_PORT, ContextoClientaPort } from '../../domain/ports/contexto-clienta.port';
+import { ANTICIPO_PORT, AnticipoPort } from '../../domain/ports/anticipo.port';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
@@ -63,6 +64,7 @@ export class AgendarCitaUseCase {
     private readonly motorDisponibilidad: MotorDisponibilidad,
     private readonly resolutorDeServicio: ResolutorDeServicio,
     @Inject(CONTEXTO_CLIENTA_PORT) private readonly clientas: ContextoClientaPort,
+    @Inject(ANTICIPO_PORT) private readonly anticipos: AnticipoPort,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
@@ -111,6 +113,8 @@ export class AgendarCitaUseCase {
     const candidatas = await this.sillasCandidatas(input.sucursalId, rangoHorario);
     // Se congela una sola vez, fuera del bucle: reintentar en otra silla no recotiza nada.
     const cotizacionSnapshot = this.resolutorDeServicio.construirSnapshot(servicio);
+    // Base de cálculo del anticipo. `null` con `DEC-033`: el monto lo fija una persona.
+    const totalDelSnapshot = cotizacionSnapshot.totalCentavos;
 
     for (const sillaId of candidatas) {
       const cita = Cita.crear({
@@ -127,6 +131,17 @@ export class AgendarCitaUseCase {
       try {
         await this.unitOfWork.ejecutar(async () => {
           await this.citaRepository.guardar(cita);
+
+          // `RN-ANT-01`: la cita de una clienta en lista roja nace con su anticipo ya generado,
+          // en la MISMA transacción. Una cita `en_espera_pago` sin fila de anticipo sería una
+          // cita que nadie sabe cuánto cobrar.
+          if (estadoInicial === 'en_espera_pago') {
+            await this.anticipos.generarParaCita({
+              citaId: cita.id,
+              clientaId: cita.clientaId,
+              baseCentavos: totalDelSnapshot,
+            });
+          }
 
           await this.auditoria.registrar({
             tipoAccion: 'agendamiento',

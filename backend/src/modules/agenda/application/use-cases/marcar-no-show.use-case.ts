@@ -6,6 +6,7 @@ import { ClaimsUsuario } from '../../../../shared/auth/rol';
 import { UNIT_OF_WORK, UnitOfWork } from '../../../../shared/persistence/unit-of-work.port';
 import { aplicarTransicion } from './transicion-cita.base';
 import { REGISTRO_DE_INCIDENTES_PORT, RegistroDeIncidentesPort } from '../../domain/ports/registro-de-incidentes.port';
+import { ANTICIPO_PORT, AnticipoPort } from '../../domain/ports/anticipo.port';
 
 /**
  * Caso de uso — la clienta no se presentó. **Siempre manual**, lo marca la Encargada o la Dueña
@@ -27,6 +28,7 @@ export class MarcarNoShowUseCase {
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
     @Inject(REGISTRO_DE_INCIDENTES_PORT) private readonly incidentes: RegistroDeIncidentesPort,
+    @Inject(ANTICIPO_PORT) private readonly anticipos: AnticipoPort,
   ) {}
 
   async ejecutar(input: { citaId: string }, actor: ClaimsUsuario, ahora = new Date()): Promise<Cita> {
@@ -47,6 +49,9 @@ export class MarcarNoShowUseCase {
         // Negativo si ya pasó la hora, que es el caso normal de un no-show: se marca después.
         minutosDeAntelacion: Math.round((cita.rangoHorario.inicio.getTime() - ahora.getTime()) / 60_000),
       });
+
+      // `RN-ANT-04`: *"Si la clienta no se presenta habiendo pagado, tampoco se devuelve."*
+      await this.anticipos.retenerPorCitaTerminada(cita.id, 'no_show');
 
       return cita;
     });

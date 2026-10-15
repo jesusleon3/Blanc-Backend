@@ -21,6 +21,7 @@ import { ResolutorDeServicio } from '../agenda/domain/services/resolutor-de-serv
 import { crearContextoPersonalFalso, horarioAbiertoSiempre } from '../agenda/test-utils/contexto-personal-falso';
 import { crearCatalogoPorDuraciones } from '../agenda/test-utils/contexto-catalogo-falso';
 import { crearProcesarListaEsperaInerte } from '../agenda/test-utils/lista-espera-inerte';
+import { crearAnticipoFalso } from '../agenda/test-utils/anticipo-falso';
 import { citaAJson } from '../agenda/infrastructure/http/cita.presenter';
 import { AuditoriaPort } from '../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
@@ -54,6 +55,8 @@ async function preparar({ sillas = 2 }: { sillas?: number } = {}) {
   const clientaRepo = new DrizzleClientaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
   const uow = crearUnitOfWorkFalso();
+  // Este archivo prueba Agenda↔CRM; los anticipos tienen su propio archivo con adaptador real.
+  const anticipos = crearAnticipoFalso();
 
   for (let i = 1; i <= sillas; i += 1) {
     await sillaRepo.guardar(Silla.crear({ sucursalId: SUCURSAL, nombre: `Lomas ${i}` }));
@@ -81,8 +84,8 @@ async function preparar({ sillas = 2 }: { sillas?: number } = {}) {
     clientaRepo,
     crearClienta,
     consultarClienta: new ConsultarClientaUseCase(clientaRepo),
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, contextoClienta, auditoria, uow),
-    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes),
+    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, contextoClienta, anticipos, auditoria, uow),
+    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes, anticipos, contextoClienta),
     reprogramar: new ReprogramarCitaUseCase(
       citaRepo,
       sillaRepo,
@@ -92,8 +95,9 @@ async function preparar({ sillas = 2 }: { sillas?: number } = {}) {
       uow,
       crearProcesarListaEsperaInerte(),
       incidentes,
+      anticipos,
     ),
-    noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow, incidentes),
+    noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow, incidentes, anticipos),
     consultarAgenda: new ConsultarAgendaUseCase(citaRepo, contextoClienta),
   };
 }

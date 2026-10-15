@@ -126,6 +126,27 @@ export class Cita {
     });
   }
 
+  /**
+   * Mueve la cita a otra silla.
+   *
+   * Legítimo porque **la clienta nunca eligió silla** (`DEC-031`): la elige el sistema y para ella
+   * es invisible. Lo usa `ActivarCitaPorAnticipoUseCase` cuando, al confirmarse el pago, la silla
+   * que tenía asignada ya fue tomada por otra cita — mejor moverla que rechazar una transferencia
+   * ya hecha teniendo la silla de al lado vacía.
+   *
+   * No valida que la silla esté libre: eso es del caso de uso, y la autoridad final es la
+   * restricción `EXCLUDE` al persistir.
+   */
+  reasignarSilla(sillaId: string): void {
+    if (this.esTerminal) {
+      throw new DomainError('CITA_TERMINAL_NO_SE_MUEVE', `Una cita en "${this.props.estado}" ya no cambia de silla.`, 409, {
+        citaId: this.props.id,
+        estado: this.props.estado,
+      });
+    }
+    this.props.sillaId = sillaId;
+  }
+
   static reconstruir(props: CitaProps): Cita {
     return new Cita(props);
   }

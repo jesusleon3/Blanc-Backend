@@ -7,6 +7,9 @@ import { UNIT_OF_WORK, UnitOfWork } from '../../../../shared/persistence/unit-of
 import { aplicarTransicion } from './transicion-cita.base';
 import { ProcesarListaEsperaUseCase, ResultadoHuecoLiberado } from './lista-espera.use-cases';
 import { REGISTRO_DE_INCIDENTES_PORT, RegistroDeIncidentesPort } from '../../domain/ports/registro-de-incidentes.port';
+import { ANTICIPO_PORT, AnticipoPort } from '../../domain/ports/anticipo.port';
+import { CONTEXTO_CLIENTA_PORT, ContextoClientaPort } from '../../domain/ports/contexto-clienta.port';
+import { ConflictoDeNegocioError } from '../../../../shared/errors/domain-error';
 import { Logger } from '@nestjs/common';
 
 /** Ventana de `RN-CRM-06`: cancelar dentro de la hora previa es un incidente, no una cancelación normal. */
@@ -21,6 +24,11 @@ export interface ResultadoCancelacion {
    * quitaría a ella una decisión que es suya.
    */
   incidenteTardio: boolean;
+  /**
+   * `true` si había un anticipo pagado que **queda retenido** (`RN-ANT-04`). Se devuelve para que
+   * quien canceló pueda decírselo a la clienta en ese mismo momento.
+   */
+  anticipoRetenido: boolean;
   /**
    * Qué pasó con la Lista de Espera al liberarse el hueco (`DEC-039`).
    *
@@ -52,12 +60,19 @@ export class CancelarCitaUseCase {
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
     private readonly procesarListaEspera: ProcesarListaEsperaUseCase,
     @Inject(REGISTRO_DE_INCIDENTES_PORT) private readonly incidentes: RegistroDeIncidentesPort,
+    @Inject(ANTICIPO_PORT) private readonly anticipos: AnticipoPort,
+    @Inject(CONTEXTO_CLIENTA_PORT) private readonly clientas: ContextoClientaPort,
   ) {}
 
   private readonly logger = new Logger(CancelarCitaUseCase.name);
 
-  async ejecutar(input: { citaId: string; motivo?: string }, actor: ClaimsUsuario, ahora = new Date()): Promise<ResultadoCancelacion> {
+  async ejecutar(
+    input: { citaId: string; motivo?: string; confirmacionDeEmpleado?: boolean },
+    actor: ClaimsUsuario,
+    ahora = new Date(),
+  ): Promise<ResultadoCancelacion> {
     const previa = await this.citaRepository.buscarPorId(input.citaId);
+    if (previa) await this.exigirConfirmacionSiAplica(previa, input.confirmacionDeEmpleado);
     // Se calcula ANTES de mover el estado: después, el dato sigue siendo el mismo, pero leerlo de
     // la cita ya cancelada invita a pensar que depende del estado, y no es así.
     const incidenteTardio = previa ? this.esTardia(previa, ahora) : false;
@@ -77,8 +92,14 @@ export class CancelarCitaUseCase {
       );
 
       await this.anotarEnCrm(cancelada, incidenteTardio, ahora);
+      // `RN-ANT-04`: el dinero se queda. En la misma transacción — perder esta retención dejaría
+      // un anticipo `pagado` apuntando a una cita cancelada, es decir un cobro pendiente de un
+      // servicio que no se va a dar.
+      await this.anticipos.retenerPorCitaTerminada(cancelada.id, 'cancelada');
       return cancelada;
     });
+
+    const anticipoRetenido = (await this.anticipos.estadoDe(cita.id)) === 'retenido';
 
     // DESPUÉS de que la cancelación esté confirmada, y en su propia transacción. Dos motivos:
     //
@@ -90,7 +111,51 @@ export class CancelarCitaUseCase {
     //    abierta esperando a un tercero mantiene bloqueos sobre la agenda.
     const listaEspera = await this.procesarFila(cita, actor, ahora);
 
-    return { cita, incidenteTardio, listaEspera };
+    return { cita, incidenteTardio, anticipoRetenido, listaEspera };
+  }
+
+  /**
+   * `RN-CRM-03` + `RN-ANT-04` — **la confirmación explícita del empleado**.
+   *
+   * ## CÓMO QUEDA CUBIERTA `RN-CRM-03`
+   *
+   * La regla dice que *"cualquier cancelación de una clienta en lista roja requiere aprobación de
+   * un empleado, no se ejecuta directamente"*. Nació pensando en un bot que cancelara solo: el
+   * ejemplo del mockup es una clienta escribiendo *"quiero cancelar"* y el bot escalando.
+   *
+   * En la plataforma construida, **ninguna clienta puede cancelar nada**: no hay interfaz de
+   * clienta (cero links), y `POST /:id/cancelar` exige un JWT con rol `SUPER_ADMIN`,
+   * `ADMINISTRADOR` o `GERENTE` (`DEC-042`). Así que la parte de *"la ejecuta un empleado"* está
+   * cubierta estructuralmente.
+   *
+   * Lo que **faltaba** era la *aprobación consciente*: que el empleado no cancele de corrido sin
+   * saber que esa clienta es de riesgo o que hay dinero que no se devuelve. Eso es lo que añade
+   * este método: la primera llamada sin `confirmacionDeEmpleado` recibe un **409 que describe la
+   * consecuencia**, y hay que reintentar confirmando. No es fricción decorativa — es la
+   * diferencia entre haber aprobado algo y haberlo pulsado.
+   *
+   * Solo se exige cuando hay algo que advertir: clienta en lista roja, o anticipo pagado. Pedirlo
+   * en toda cancelación habría convertido la advertencia en un trámite que nadie lee.
+   */
+  private async exigirConfirmacionSiAplica(cita: Cita, confirmado: boolean | undefined): Promise<void> {
+    if (confirmado) return;
+
+    const [clienta, estadoDelAnticipo] = await Promise.all([
+      this.clientas.obtener(cita.clientaId),
+      this.anticipos.estadoDe(cita.id),
+    ]);
+
+    const enListaRoja = clienta?.estadoDeRiesgo === 'lista_roja';
+    const conAnticipoPagado = estadoDelAnticipo === 'pagado';
+    if (!enListaRoja && !conAnticipoPagado) return;
+
+    throw new ConflictoDeNegocioError(
+      'CANCELACION_REQUIERE_CONFIRMACION',
+      conAnticipoPagado
+        ? 'Esta cita tiene un anticipo pagado que NO se devuelve (RN-ANT-04). Confirma explícitamente para cancelar.'
+        : 'Esta clienta está en lista roja; su cancelación requiere aprobación explícita de un empleado (RN-CRM-03).',
+      { citaId: cita.id, enListaRoja, conAnticipoPagado, requiereConfirmacionDeEmpleado: true },
+    );
   }
 
   /**

@@ -13,6 +13,7 @@ import { Cita } from '../../domain/entities/cita.entity';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { crearAnticipoFalso } from '../../test-utils/anticipo-falso';
 import { crearRegistroDeIncidentesFalso } from '../../test-utils/registro-de-incidentes-falso';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
@@ -30,11 +31,12 @@ const rango = (i: string, f: string) => ({ inicio: new Date(i), fin: new Date(f)
 const DIEZ_A_ONCE = rango('2027-03-08T10:00:00Z', '2027-03-08T11:00:00Z');
 const DOCE_A_UNA = rango('2027-03-08T12:00:00Z', '2027-03-08T13:00:00Z');
 
-async function preparar(numeroDeSillas = 2) {
+async function preparar(numeroDeSillas = 2, estadoDeAnticipo: Parameters<typeof crearAnticipoFalso>[0] = 'ninguno') {
   const db = await crearBaseDeDatosDePrueba();
   const citaRepo = new DrizzleCitaRepository(db);
   const sillaRepo = new DrizzleSillaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
+  const anticipos = crearAnticipoFalso(estadoDeAnticipo);
   // Horario abierto y personal de sobra: estas pruebas no van sobre disponibilidad.
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso());
   const uow = crearUnitOfWorkFalso();
@@ -49,12 +51,12 @@ async function preparar(numeroDeSillas = 2) {
     citaRepo,
     sillaRepo,
     auditoria,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), anticipos, auditoria, uow),
     solicitar: new SolicitarConfirmacionCitaUseCase(citaRepo, auditoria, uow),
     confirmar: new ConfirmarCitaUseCase(citaRepo, auditoria, uow),
-    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes),
-    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes),
-    noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow, incidentes),
+    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes, anticipos, crearContextoClientaFalso()),
+    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes, anticipos),
+    noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow, incidentes, anticipos),
     completar: new CompletarCitaUseCase(citaRepo, auditoria, uow),
   };
 }
@@ -207,23 +209,45 @@ describe('Ciclo de vida de una Cita (integración, PostgreSQL real) — cierre d
     });
 
     describe('RN-ANT-04 — con anticipo pagado exige 48h de antelación', () => {
+      /** El estado del anticipo ya NO llega por parámetro: se consulta por puerto. */
+      const conAnticipoPagado = () => preparar(1, 'pagado');
+
       it('rechaza si faltan menos de 48 horas', async () => {
-        const { agendar, reprogramar } = await preparar();
+        const { agendar, reprogramar } = await conAnticipoPagado();
         const original = await agendar.ejecutar(reserva(), ACTOR);
 
         const unDiaAntes = new Date(DIEZ_A_ONCE.inicio.getTime() - 24 * 3600000);
         await expect(
-          reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio, anticipoPagado: true }, ACTOR, unDiaAntes),
+          reprogramar.ejecutar(
+            { citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio, confirmacionDeEmpleado: true },
+            ACTOR,
+            unDiaAntes,
+          ),
         ).rejects.toMatchObject({ code: 'REPROGRAMACION_FUERA_DE_PLAZO' });
       });
 
-      it('acepta con 48 horas o más', async () => {
-        const { agendar, reprogramar } = await preparar();
+      it('EXIGE CONFIRMACIÓN EXPLÍCITA aunque haya plazo (`RN-ANT-04`, alerta de confirmación)', async () => {
+        // Sin confirmar, 409 que describe la consecuencia: reagendar no devuelve el anticipo.
+        const { agendar, reprogramar } = await conAnticipoPagado();
         const original = await agendar.ejecutar(reserva(), ACTOR);
 
         const tresDiasAntes = new Date(DIEZ_A_ONCE.inicio.getTime() - 72 * 3600000);
         await expect(
-          reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio, anticipoPagado: true }, ACTOR, tresDiasAntes),
+          reprogramar.ejecutar({ citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio }, ACTOR, tresDiasAntes),
+        ).rejects.toMatchObject({ code: 'REPROGRAMACION_REQUIERE_CONFIRMACION', httpStatus: 409 });
+      });
+
+      it('acepta con 48 horas o más y confirmación', async () => {
+        const { agendar, reprogramar } = await conAnticipoPagado();
+        const original = await agendar.ejecutar(reserva(), ACTOR);
+
+        const tresDiasAntes = new Date(DIEZ_A_ONCE.inicio.getTime() - 72 * 3600000);
+        await expect(
+          reprogramar.ejecutar(
+            { citaId: original.id, nuevoInicio: DOCE_A_UNA.inicio, confirmacionDeEmpleado: true },
+            ACTOR,
+            tresDiasAntes,
+          ),
         ).resolves.toBeDefined();
       });
 

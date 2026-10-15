@@ -15,6 +15,11 @@ import { CONTEXTO_CLIENTA_PORT } from '../agenda/domain/ports/contexto-clienta.p
 import { ContextoClientaAdapter } from './contexto-clienta.adapter';
 import { REGISTRO_DE_INCIDENTES_PORT } from '../agenda/domain/ports/registro-de-incidentes.port';
 import { RegistroDeIncidentesAdapter } from './registro-de-incidentes.adapter';
+import { AnticiposModule } from '../anticipos/anticipos.module';
+import { ANTICIPO_PORT } from '../agenda/domain/ports/anticipo.port';
+import { AnticipoAdapter } from './anticipo.adapter';
+import { TRANSICION_DE_CITA_PORT } from '../anticipos/domain/ports/transicion-de-cita.port';
+import { TransicionDeCitaAdapter } from './transicion-de-cita.adapter';
 
 /**
  * Punto único donde se cablean las dependencias **entre Bounded Contexts**.
@@ -29,6 +34,9 @@ import { RegistroDeIncidentesAdapter } from './registro-de-incidentes.adapter';
  *   un hueco del tamaño equivocado ni de un servicio dado de baja. Este sentido es de una sola
  *   dirección (Catálogo no pregunta nada a Agenda), pero el adaptador vive aquí igualmente: la
  *   regla es que ningún BC importe a otro, no que solo se aplique cuando hay ciclo.
+ * - Agenda y **Anticipos** se necesitan **en los dos sentidos**, y este es literalmente el par
+ *   que `P5` señalaba: Anticipos pide activar o expirar la cita cuando el dinero cambia de estado,
+ *   y Agenda pregunta si hay anticipo pagado (`RN-ANT-04`) y manda retenerlo cuando la cita muere.
  * - Agenda y **CRM / Clientas** se necesitan **en los dos sentidos**, igual que Personal:
  *   Agenda pregunta el estado de riesgo de la clienta antes de reservar (`RN-CRM-04`,
  *   `RN-ANT-01`), y le **empuja** los incidentes tardíos y los no-show (`RN-CRM-06`). Es el mismo
@@ -46,7 +54,7 @@ import { RegistroDeIncidentesAdapter } from './registro-de-incidentes.adapter';
  */
 @Global()
 @Module({
-  imports: [AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule],
+  imports: [AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule],
   providers: [
     { provide: CONTEXTO_PERSONAL_PORT, useClass: ContextoPersonalAdapter },
     { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: AgendaVerificarCitasFuturasAdapter },
@@ -56,6 +64,9 @@ import { RegistroDeIncidentesAdapter } from './registro-de-incidentes.adapter';
     // `CrmNoConstruidoVerificarClientaAdapter`, que aceptaba cualquier uuid y no protegía nada.
     { provide: CONTEXTO_CLIENTA_PORT, useClass: ContextoClientaAdapter },
     { provide: REGISTRO_DE_INCIDENTES_PORT, useClass: RegistroDeIncidentesAdapter },
+    // El par que cerraba `P5` en los dos sentidos: Agenda↔Anticipos.
+    { provide: ANTICIPO_PORT, useClass: AnticipoAdapter },
+    { provide: TRANSICION_DE_CITA_PORT, useClass: TransicionDeCitaAdapter },
   ],
   exports: [
     CONTEXTO_PERSONAL_PORT,
@@ -64,6 +75,8 @@ import { RegistroDeIncidentesAdapter } from './registro-de-incidentes.adapter';
     CONTEXTO_CATALOGO_PORT,
     CONTEXTO_CLIENTA_PORT,
     REGISTRO_DE_INCIDENTES_PORT,
+    ANTICIPO_PORT,
+    TRANSICION_DE_CITA_PORT,
   ],
 })
 export class IntegracionModule {}

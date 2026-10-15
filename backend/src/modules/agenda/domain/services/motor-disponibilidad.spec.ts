@@ -11,6 +11,7 @@ import { crearCatalogoPorDuraciones, crearContextoClientaFalso } from '../../tes
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { crearAnticipoFalso } from '../../test-utils/anticipo-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -35,6 +36,7 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
   const citaRepo = new DrizzleCitaRepository(db);
   const sillaRepo = new DrizzleSillaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
+  const anticipos = crearAnticipoFalso();
 
   for (let i = 1; i <= (opciones.sillas ?? 3); i += 1) {
     await sillaRepo.guardar(Silla.crear({ sucursalId: SUCURSAL, nombre: `Zibatá ${i}` }));
@@ -54,6 +56,7 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
       motor,
       new ResolutorDeServicio(CATALOGO.port),
       crearContextoClientaFalso(),
+      anticipos,
       auditoria,
       crearUnitOfWorkFalso(),
     ),

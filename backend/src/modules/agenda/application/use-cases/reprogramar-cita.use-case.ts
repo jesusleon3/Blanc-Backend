@@ -6,6 +6,7 @@ import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad'
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { ProcesarListaEsperaUseCase, ResultadoHuecoLiberado } from './lista-espera.use-cases';
 import { REGISTRO_DE_INCIDENTES_PORT, RegistroDeIncidentesPort } from '../../domain/ports/registro-de-incidentes.port';
+import { ANTICIPO_PORT, AnticipoPort } from '../../domain/ports/anticipo.port';
 import { Logger } from '@nestjs/common';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
@@ -37,11 +38,14 @@ export interface ReprogramarCitaInput {
   /** Mantener a la misma manicurista, o `null`/omitir para dejarla sin asignar otra vez. */
   manicuristaId?: string | null;
   /**
-   * ¿Esta cita tenía un anticipo ya pagado? Lo decide `RN-ANT-04`, pero **el Bounded Context de
-   * Anticipos no existe todavía** (Fase 3), así que de momento lo aporta quien llama. Cuando ese
-   * contexto exista, debe consultarse por un puerto y este parámetro desaparecer.
+   * Confirmación explícita de quien reprograma, **exigida solo cuando hay anticipo pagado**
+   * (`RN-ANT-04`: *"levantando una alerta para confirmar el reagendamiento"*).
+   *
+   * Sustituye al antiguo `anticipoPagado`, que lo aportaba quien llamaba — y que permitía
+   * **saltarse la ventana de 48 horas enviando `false`**. Ahora el estado del anticipo se
+   * consulta por puerto y lo único que aporta el llamante es su confirmación informada.
    */
-  anticipoPagado?: boolean;
+  confirmacionDeEmpleado?: boolean;
 }
 
 /**
@@ -68,6 +72,7 @@ export class ReprogramarCitaUseCase {
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
     private readonly procesarListaEspera: ProcesarListaEsperaUseCase,
     @Inject(REGISTRO_DE_INCIDENTES_PORT) private readonly incidentes: RegistroDeIncidentesPort,
+    @Inject(ANTICIPO_PORT) private readonly anticipos: AnticipoPort,
   ) {}
 
   private readonly logger = new Logger(ReprogramarCitaUseCase.name);
@@ -80,7 +85,9 @@ export class ReprogramarCitaUseCase {
     const original = await this.citaRepository.buscarPorId(input.citaId);
     if (!original) throw new RecursoNoEncontradoError('Cita', input.citaId);
 
-    this.validarReglas(original, input, ahora);
+    // El estado del anticipo se consulta, no se recibe: ver la nota de `confirmacionDeEmpleado`.
+    const anticipoPagado = (await this.anticipos.estadoDe(original.id)) === 'pagado';
+    this.validarReglas(original, input, ahora, anticipoPagado);
 
     // El catálogo se revalida al reprogramar, pero **sin exigir que el servicio siga activo**:
     // dar de baja un servicio detiene las ventas nuevas, no anula las citas ya vendidas. Lo que sí
@@ -185,7 +192,7 @@ export class ReprogramarCitaUseCase {
     }
   }
 
-  private validarReglas(original: Cita, input: ReprogramarCitaInput, ahora: Date): void {
+  private validarReglas(original: Cita, input: ReprogramarCitaInput, ahora: Date, anticipoPagado: boolean): void {
     if (original.numeroDeReprogramaciones >= MAXIMO_DE_REPROGRAMACIONES) {
       throw new ConflictoDeNegocioError(
         'MAXIMO_DE_REPROGRAMACIONES_ALCANZADO',
@@ -194,15 +201,28 @@ export class ReprogramarCitaUseCase {
       );
     }
 
-    if (input.anticipoPagado) {
-      const horasDeAntelacion = (original.rangoHorario.inicio.getTime() - ahora.getTime()) / 3_600_000;
-      if (horasDeAntelacion < HORAS_MINIMAS_CON_ANTICIPO) {
-        throw new ConflictoDeNegocioError(
-          'REPROGRAMACION_FUERA_DE_PLAZO',
-          `Con anticipo pagado, reagendar exige al menos ${HORAS_MINIMAS_CON_ANTICIPO} horas de antelación.`,
-          { citaId: original.id, horasDeAntelacion: Math.round(horasDeAntelacion) },
-        );
-      }
+    if (!anticipoPagado) return;
+
+    const horasDeAntelacion = (original.rangoHorario.inicio.getTime() - ahora.getTime()) / 3_600_000;
+    if (horasDeAntelacion < HORAS_MINIMAS_CON_ANTICIPO) {
+      throw new ConflictoDeNegocioError(
+        'REPROGRAMACION_FUERA_DE_PLAZO',
+        `Con anticipo pagado, reagendar exige al menos ${HORAS_MINIMAS_CON_ANTICIPO} horas de antelación. ` +
+          'Con menos, la cita no se reagenda y el anticipo no se devuelve (RN-ANT-04).',
+        { citaId: original.id, horasDeAntelacion: Math.round(horasDeAntelacion), horasMinimas: HORAS_MINIMAS_CON_ANTICIPO },
+      );
+    }
+
+    // `RN-ANT-04` pide además *"una alerta de confirmación explícita"*. Se implementa como un
+    // 409 que describe la consecuencia: quien reprograma tiene que reintentar confirmando, así
+    // que no puede alegar que no lo sabía.
+    if (!input.confirmacionDeEmpleado) {
+      throw new ConflictoDeNegocioError(
+        'REPROGRAMACION_REQUIERE_CONFIRMACION',
+        'Esta cita tiene un anticipo pagado. Reagendarla no lo devuelve y no habrá reembolso; ' +
+          'confirma explícitamente para continuar.',
+        { citaId: original.id, requiereConfirmacionDeEmpleado: true },
+      );
     }
   }
 

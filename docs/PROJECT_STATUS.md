@@ -1153,6 +1153,164 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-15 (c) — Fase 3 Parte 2: Anticipos por transferencia manual. **🏁 FASE 3 CERRADA**
+
+Cierra Fase 3. El ciclo completo de `RN-ANT-01` a `RN-ANT-04` queda conectado con Agenda y CRM, y el último parámetro temporal de la plataforma desaparece.
+
+#### 1. ⚠️ El porcentaje: la orden decía 50%, pero la Dueña ya había dicho 40%
+
+La orden pedía *"por defecto 50% mientras la Dueña define el número final"*. **Ya lo definió.** `DISCOVERY_CHECKLIST.md` 1.13 (2026-08-04): *"se pide el 40% del servicio como anticipo"*, y las Notas de `RN-ANT-01` lo registran como *"dato crítico que no existía en ningún documento previo"*.
+
+**Implementado al 40%**, parametrizable como pedía la orden (`GenerarAnticipoUseCase` acepta otro porcentaje). Poner 50% habría sustituido en silencio una decisión de negocio ya tomada — exactamente lo que el proyecto prohíbe. Si el 50% viene de una conversación posterior que no está en los documentos, **es un cambio de una constante**, pero debería actualizar `RN-ANT-01`.
+
+El porcentaje aplicado se **congela en cada fila**, igual que `cotizacion_snapshot` (`RN-AGE-08`): si mañana cambia a 50, los anticipos ya calculados siguen siendo lo que se le dijo a la clienta, y un reporte histórico no dividirá montos viejos por el porcentaje nuevo.
+
+#### 2. Cómo se resuelve la carrera de `RN-ANT-03`
+
+La regla fue corregida por la Dueña: *"Hasta que se dé el anticipo se agenda, si no el espacio sigue libre"*. **No hay retención.** Mientras el anticipo está `pendiente`, la cita vive en `en_espera_pago`, que libera silla y manicurista — **dos citas en ese estado coexisten sobre la misma silla**.
+
+El cupo se decide al confirmar el pago, en tres capas:
+
+1. `MotorDisponibilidad` comprueba horario y capacidad (consultivo).
+2. Se busca silla libre **y se reasigna si la suya está ocupada** — la clienta nunca eligió silla (`DEC-031`), así que moverla es invisible, y rechazar una transferencia ya hecha teniendo la silla de al lado vacía sería absurdo.
+3. La restricción `EXCLUDE` de PostgreSQL es la **autoridad final** ante dos confirmaciones simultáneas.
+
+> **Todo en una sola transacción.** Confirmar el pago y activar la cita comparten transacción porque `DrizzleUnitOfWork` se une a la abierta. Si la cita no se puede activar, **la confirmación se deshace entera**. La alternativa —confirmar primero, activar después— dejaría dinero registrado contra una cita que no existe en firme: el "anticipo confirmado huérfano" que había que evitar.
+>
+> **Consecuencia real, señalada en el mensaje de error:** la transferencia ya se hizo en el banco pero el sistema no la deja registrar. No es un agujero, es la secuencia correcta — la Encargada reprograma la cita a un horario libre y vuelve a confirmar. El dinero no se devuelve (`RN-ANT-04`) y sigue válido.
+
+#### 3. 🐛 Mi propia prueba de atomicidad no probaba nada
+
+Escribí la prueba de *"el pago perdedor no queda confirmado"* usando `crearUnitOfWorkFalso()`, que **solo ejecuta el callback y no hace rollback**. La prueba falló —el anticipo quedaba `pagado`— y eso destapó algo peor que un test roto: **con el doble, la prueba habría certificado una atomicidad que no existe.** Habría pasado en verde dando por buena la garantía central de este entregable.
+
+`agenda-anticipos.spec.ts` usa ahora el **`DrizzleUnitOfWork` real**. Es el único archivo que lo necesita, y la nota en el código explica por qué.
+
+**Segundo hallazgo de la misma tanda:** el mensaje de error útil era inalcanzable. `MotorDisponibilidad` lanzaba su `HORARIO_NO_DISPONIBLE` genérico ("no queda lugar") antes de llegar al mío, así que quien confirma un pago recibía un mensaje correcto para alguien que busca horario e inútil para alguien con una transferencia en la mano. Ahora se reescribe con instrucciones: reprogramar y volver a confirmar.
+
+#### 4. `RN-ANT-04` en `ReprogramarCitaUseCase`: el parámetro desaparece
+
+El parámetro `anticipoPagado` lo aportaba quien llamaba, y eso tenía un problema que no era teórico: **cualquier cliente podía saltarse la ventana de 48 horas enviando `anticipoPagado: false`**. Una regla de negocio no puede depender de que el llamante diga la verdad sobre sí mismo.
+
+**Se eliminó, no se complementó.** Mantenerlo habría dejado la puerta abierta. Lo sustituye `AnticipoPort.estadoDe(citaId)`, consultado contra la base. Lo único que aporta ahora el llamante es `confirmacionDeEmpleado`, que es la *"alerta de confirmación explícita"* que `RN-ANT-04` pide: sin ella, `409 REPROGRAMACION_REQUIERE_CONFIRMACION` describiendo que reagendar no devuelve el anticipo.
+
+#### 5. Cómo queda cubierta `RN-CRM-03`
+
+La regla dice que *"cualquier cancelación de una clienta en lista roja requiere aprobación de un empleado, no se ejecuta directamente"*. Nació pensando en un bot que cancelara solo — el ejemplo del mockup es una clienta escribiendo *"quiero cancelar"* y el bot escalando.
+
+**La parte de "la ejecuta un empleado" ya estaba cubierta estructuralmente:** no hay interfaz de clienta (cero links) y `POST /:id/cancelar` exige JWT con rol `SUPER_ADMIN`, `ADMINISTRADOR` o `GERENTE`.
+
+**Lo que faltaba era la aprobación consciente**, y es lo que se añadió: que el empleado no cancele de corrido sin saber que esa clienta es de riesgo o que hay dinero que no se devuelve. La primera llamada sin `confirmacionDeEmpleado` recibe un `409` que describe la consecuencia; hay que reintentar confirmando. **Solo se exige cuando hay algo que advertir** (lista roja o anticipo pagado): pedirlo en toda cancelación habría convertido la advertencia en un trámite que nadie lee.
+
+#### Migración y archivos
+
+**`0012_anticipos.sql`** — esquema `anticipos`, tabla `anticipos`, 4 `CHECK` y 1 índice único a mano.
+
+| Invariante en PostgreSQL | Por qué no basta el código |
+|---|---|
+| `anticipos_cita_unq` (único por cita) | Dos peticiones simultáneas crearían dos anticipos: la clienta podría pagar dos veces, o confirmarse uno y quedar el otro pendiente con la cita atascada en `en_espera_pago` para siempre |
+| `anticipos_confirmacion_coherente` | Un `pagado` sin referencia es un pago que nadie puede verificar — y es el dato que hace falta cuando la clienta afirme que sí pagó. Sin `confirmado_por`, `RN-AUD-01` queda sin respuesta a *"quién lo dio por bueno"* |
+| `anticipos_monto_positivo` | Un anticipo de cero no es un anticipo |
+| `anticipos_porcentaje_valido` | `NULL` = lo fijó una persona (`DEC-033`), distinto de `0` |
+
+| Archivo | Qué es |
+|---|---|
+| `anticipos/domain/entities/anticipo.entity.ts` | Aggregate raíz, máquina de 4 estados, cálculo del 40% |
+| `anticipos/domain/ports/anticipo.repository.ts` | Puerto de persistencia |
+| `anticipos/domain/ports/transicion-de-cita.port.ts` | **Anticipos → Agenda** (el sentido que `P5` señalaba) |
+| `anticipos/application/use-cases/anticipos.use-cases.ts` | **5 casos de uso** |
+| `anticipos/infrastructure/http/anticipos.controller.ts` | 5 endpoints |
+| `agenda/domain/ports/anticipo.port.ts` | **Agenda → Anticipos** |
+| `agenda/application/use-cases/transicionar-cita-por-anticipo.use-case.ts` | `activar` y `expirar`; **aquí se resuelve la carrera** |
+| `integracion/anticipo.adapter.ts` · `integracion/transicion-de-cita.adapter.ts` | El par cruzado |
+| `integracion/agenda-anticipos.spec.ts` | **26 pruebas con adaptadores reales y UoW real** |
+| `database/schema/deriva-restricciones-anticipos.spec.ts` | Detector de deriva |
+
+**`Cita.reasignarSilla()`** es nuevo: legítimo porque la clienta nunca eligió silla.
+
+#### Endpoints y RBAC
+
+| Método y ruta | Roles |
+|---|---|
+| `GET /v1/anticipos?estado=` | Super Admin, Administrador, Gerente |
+| `GET /v1/anticipos/de-cita/:citaId` | ídem |
+| `POST /v1/anticipos` (alta manual, `DEC-033`) | ídem |
+| `POST /v1/anticipos/:id/confirmar-pago` | ídem |
+| `POST /v1/anticipos/:id/expirar` | ídem |
+
+> **La `MANICURISTA` recibe `403` en todas, y el motivo es más fino que "no es asunto suyo": saber que una clienta pagó anticipo es saber que está en lista roja.** Solo las de lista roja pagan (`RN-ANT-01`), así que la existencia de un anticipo **revela el estado de riesgo por inferencia**. Dejarle ver anticipos haría deducible justo el dato que el presenter de la agenda protege (`DEC-040`) — una fuga indirecta. Hay una prueba E2E que recorre las cuatro rutas.
+
+#### Generación automática, y por qué
+
+El alta **no es un endpoint del flujo normal**: `AgendarCitaUseCase` genera el anticipo en el mismo acto de crear la cita, dentro de la misma transacción. Una cita `en_espera_pago` **sin** fila de anticipo sería una cita que nadie sabe cuánto cobrar — aparecería en la agenda como pendiente de pago sin monto y la Encargada tendría que calcular el 40% a mano.
+
+`POST /v1/anticipos` existe solo para `DEC-033`: un servicio cuyo precio lo fija una persona no tiene base sobre la que aplicar el porcentaje, así que la generación automática **devuelve `false` sin fallar** y la Encargada registra el monto explícito. Si lanzara, ningún servicio de precio variable podría venderse a una clienta de lista roja.
+
+#### Pruebas: **+46** (913 → **959**, 67 suites)
+
+26 de integración Agenda↔Anticipos con adaptadores y transacciones reales · 14 E2E HTTP · 6 del detector de deriva.
+
+Casos borde que la orden pidió: **la carrera con una sola silla** (la primera en confirmar gana, la segunda recibe `409` y su pago **no queda confirmado**) · **con dos sillas ganan las dos** por reasignación · **una clienta normal puede ganarle el hueco** · **bloqueo a <48h con anticipo pagado vía puerto real**, más la verificación de que **ya no se puede saltar** porque el parámetro no existe · **`403` para `Manicurista`** en las cuatro rutas.
+
+#### Validación
+
+`tsc --noEmit` 0 · `tsc -p tsconfig.eslint.json` 0 · `lint` 0 errores 0 avisos · `build` OK · `drizzle-kit check` OK · `madge --circular` 0 ciclos con **ocho puertos** cruzados · **959/959 pruebas** en 67 suites.
+
+> ## 🔴 INTERMITENCIA DEL ARNÉS DE PRUEBAS — preexistente, sin resolver
+>
+> **La suite completa falla aproximadamente 1 de cada 8–10 corridas**, con una o dos pruebas. No es un fallo de este entregable, y conviene saberlo antes de confiar en un `959/959` como garantía.
+>
+> **Lo que se midió, no lo que se supone:**
+>
+> | Experimento | Resultado |
+> |---|---|
+> | Suite completa, por defecto (~9 workers) | ~1 de 8 corridas falla |
+> | Suite completa con `--maxWorkers=4` | **Sigue fallando** (1 de 6) |
+> | Suite completa con `--runInBand` (un solo proceso, secuencial) | **Sigue fallando** (1 de 4) |
+> | El spec afectado **aislado** | **20 de 20 limpias** |
+>
+> **Que falle con `--runInBand` descarta el paralelismo**, que era la hipótesis inicial. Y el spec aislado nunca falla, así que tampoco es su lógica.
+>
+> **La prueba que falla cambia de corrida en corrida, y alcanza specs de Fase 1 que esta entrega no tocó** (`servicios.e2e`, `usuarios.e2e`, `excepciones-personal.e2e`, además de `citas.e2e`).
+>
+> **El síntoma más informativo es un `401` donde se esperaba `404`/`201`.** Eso descarta lógica de producto: los tokens de prueba se firman sin `exp` ni `nbf`, con secreto y emisor constantes, y `JwtAuthGuard` no tiene caché ni dependencia del reloj — **ese 401 es imposible de forma determinista**. Apunta al arnés, no al guard.
+>
+> **Hipótesis principal para quien lo retome:** `postgres-de-prueba.ts` mantiene `conexionDelWorker` como estado de módulo y la base por worker se **recrea entre archivos de spec**; si el pool de `postgres-js` del archivo anterior no está completamente cerrado cuando el siguiente provisiona la base, hay una ventana de carrera. El `afterAll` de `setup-after-env.js` cierra la conexión, pero no hay garantía de que el `app.close()` de cada E2E haya drenado sus peticiones en vuelo antes.
+>
+> **Merece una orden de trabajo propia.** No se arregló aquí para no mezclar un cambio de infraestructura de pruebas con el cierre de Fase 3, y porque diagnosticarlo bien exige instrumentar el ciclo de vida de la conexión, no adivinar. **Lo que NO se debe hacer es añadir reintentos a las pruebas**: eso esconde el problema y convierte la suite en un detector de ruido.
+
+---
+
+### 🏁 Cierre de Fase 3 — CRM, Lista Roja y Anticipos
+
+| Pendiente | Estado |
+|---|---|
+| `P5` (circularidad entre contextos) | **Cerrado** — `IntegracionModule`, 8 puertos, `madge` en 0 |
+| Bounded Context de CRM / Clientas | **Cerrado** |
+| Adaptador permisivo de `clientaId` | **Retirado** |
+| Lista Roja (`RN-CRM-02..07`) | **Cerrada**, con la separación sugerir/marcar |
+| Anticipos (`RN-ANT-01..04`) | **Cerrados** |
+| `RN-CRM-03` (aprobación de cancelación) | **Cubierta** — ver §5 arriba |
+| Parámetro temporal `anticipoPagado` | **Eliminado** |
+
+**El flujo de una clienta de riesgo funciona de punta a punta:** se marca lista roja (solo la Dueña) → su siguiente cita nace `en_espera_pago` con anticipo del 40% generado → el hueco sigue libre para otras → una persona confirma la transferencia con referencia → la cita pasa a `agendada` resolviendo la carrera → si no paga, expira y el hueco se libera → si cancela o no se presenta, el dinero queda `retenido` → reagendar exige 48 h y confirmación explícita.
+
+#### Lo que Fase 3 deja abierto a propósito
+
+1. **No hay planificador, y ahora son dos cosas las que lo esperan:** `avanzar-turno` de la Lista de Espera y `expirar` de los anticipos. **Si nadie los invoca, las ofertas no caducan y los anticipos no expiran** — las citas se quedan en `en_espera_pago` indefinidamente. Es la decisión de arquitectura más inmediata que queda.
+2. **`vip` sigue sin modelar.** `RN-CRM-02` lo define; se dejó fuera por ser clasificación de beneficio, ortogonal al riesgo.
+3. **Ningún aviso sale del sistema.** La clienta no se entera por WhatsApp de que se le pide anticipo: hoy se le dice a mano.
+4. **Ninguna migración aplicada a base real.** Las 12 se ejecutan íntegras contra PostgreSQL en cada corrida; falta el entorno (Fase 7).
+5. **Cero conciliación bancaria automática.** La referencia se teclea; nada la verifica contra el banco. Es lo que *"cero pasarela de pagos"* implica, y conviene que la Dueña lo sepa: **un empleado puede marcar como pagado un anticipo que nunca llegó**. El `CHECK` garantiza que quede registrado quién lo hizo, no que sea cierto.
+
+#### Listo para Kick-off de Fase 4
+
+- **Canal de WhatsApp (Cloud API, `DEC-043`):** `ADR-008` `Accepted`; el trámite con Meta es camino crítico y **la Bandeja Compartida es condición de puesta en marcha** — al migrar un número, el celular deja de poder responder. Los puntos de enganche ya existen: `NotificacionListaEsperaPort` (su adaptador solo escribe en el log) y los avisos de anticipo, que hoy no existen.
+- **Scheduler / Jobs:** dos consumidores concretos esperándolo (punto 1 arriba), más los recordatorios de `RN-NOT-02`. `02-architecture-principles.md` prevé event-driven + outbox; falta decidir mecanismo (`@nestjs/schedule` en proceso frente a worker aparte en Railway) y si el outbox entra ya. **Merece ADR propia.**
+- **Agente Bot IA:** `RN-CONV-01` es tajante — *la IA interpreta, nunca decide*. El terreno está preparado: toda regla vive en el dominio y ningún caso de uso acepta decisiones del llamante. Los dos parámetros que sí las aceptaban (`anticipoPagado` y el `fin` de la cita) **se eliminaron en Fase 2 y 3 precisamente por eso**. `DEC-044` ya fijó que el Bot es un *principal de sistema* con lista cerrada de operaciones de solo lectura, y que su credencial se construye en Fase 4.
+- **`P6` y las dos máquinas de estado restantes de `P3`** (`Conversación`, `TicketEscalamiento`) son de Fase 4 y toca resolverlos en su kick-off.
+
+---
+
 ### 2026-10-15 (b) — Kick-off Fase 3 Parte 1: `P5` cerrado y Bounded Context de CRM / Clientas
 
 Arranca Fase 3. Con esto **el adaptador permisivo de `clientaId` desaparece** y `P5` —uno de los tres bloqueadores no negociables del Closure Plan— queda resuelto.

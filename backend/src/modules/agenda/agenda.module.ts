@@ -13,6 +13,7 @@ import { MarcarNoShowUseCase } from './application/use-cases/marcar-no-show.use-
 import { CompletarCitaUseCase } from './application/use-cases/completar-cita.use-case';
 import { MotorDisponibilidad } from './domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from './domain/services/resolutor-de-servicio';
+import { TransicionarCitaPorAnticipoUseCase } from './application/use-cases/transicionar-cita-por-anticipo.use-case';
 import { ConsultarDisponibilidadUseCase } from './application/use-cases/consultar-disponibilidad.use-case';
 import { ConsultarAgendaUseCase } from './application/use-cases/consultar-agenda.use-case';
 import { GestionarSillasUseCase } from './application/use-cases/gestionar-sillas.use-case';
@@ -69,7 +70,8 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     AceptarOfertaListaEsperaUseCase,
     CancelarSolicitudListaEsperaUseCase,
     ConsultarListaEsperaUseCase,
+    TransicionarCitaPorAnticipoUseCase,
   ],
-  exports: [SILLA_REPOSITORY, CITA_REPOSITORY, MotorDisponibilidad],
+  exports: [SILLA_REPOSITORY, CITA_REPOSITORY, MotorDisponibilidad, TransicionarCitaPorAnticipoUseCase],
 })
 export class AgendaModule {}

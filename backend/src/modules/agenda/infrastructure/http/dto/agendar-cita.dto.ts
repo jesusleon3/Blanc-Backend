@@ -1,4 +1,4 @@
-import { IsISO8601, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsISO8601, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AgendarCitaDto {
@@ -41,6 +41,18 @@ export class CancelarCitaDto {
   @IsString()
   @MaxLength(500)
   motivo?: string;
+
+  /**
+   * Aprobación explícita del empleado, **exigida solo cuando hay algo que advertir**: clienta en
+   * lista roja (`RN-CRM-03`) o anticipo pagado que no se devuelve (`RN-ANT-04`).
+   *
+   * El flujo es de dos pasos a propósito: la primera llamada sin esto recibe un `409` que describe
+   * la consecuencia, y hay que reintentar confirmando. Es la diferencia entre haber aprobado algo
+   * y haberlo pulsado.
+   */
+  @IsOptional()
+  @IsBoolean()
+  confirmacionDeEmpleado?: boolean;
 }
 
 export class ReprogramarCitaDto {
@@ -55,6 +67,11 @@ export class ReprogramarCitaDto {
   @IsOptional()
   @IsUUID()
   manicuristaId?: string;
+
+  /** `RN-ANT-04` pide *"una alerta de confirmación explícita"* al reagendar con anticipo pagado. */
+  @IsOptional()
+  @IsBoolean()
+  confirmacionDeEmpleado?: boolean;
 }
 
 export class ConsultarDisponibilidadDto {

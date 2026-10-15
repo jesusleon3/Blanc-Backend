@@ -29,6 +29,7 @@ import { Servicio } from '../../../catalogo-y-cotizacion/domain/entities/servici
 import { DrizzleServicioRepository } from '../../../catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
 import { CatalogoYCotizacionModule } from '../../../catalogo-y-cotizacion/catalogo-y-cotizacion.module';
 import { CrmYClientasModule } from '../../../crm-y-clientas/crm-y-clientas.module';
+import { AnticiposModule } from '../../../anticipos/anticipos.module';
 import { Clienta } from '../../../crm-y-clientas/domain/entities/clienta.entity';
 import { DrizzleClientaRepository } from '../../../crm-y-clientas/infrastructure/persistence/drizzle-clienta.repository';
 
@@ -102,7 +103,7 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       // `IntegracionModule` es parte del montaje real: sin él no hay `CONTEXTO_PERSONAL_PORT` y el
       // motor de disponibilidad no arranca. Que este E2E lo exija es la prueba de que el cableado
       // entre Bounded Contexts funciona de verdad.
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, IntegracionModule],
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule, IntegracionModule],
       providers: [
         {
           provide: APP_GUARD,
@@ -651,6 +652,198 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
         .expect(200);
 
       expect(respuesta.body.citas[0]).toMatchObject({ estado: 'agendada', enListaRoja: false });
+    });
+  });
+
+  describe('anticipos (`RN-ANT-01` a `RN-ANT-04`) — Fase 3 Parte 2', () => {
+    const ANTICIPOS = '/v1/anticipos';
+
+    const anticipoDeCita = (citaId: string, autorizacion = encargada) =>
+      request(app.getHttpServer()).get(`${ANTICIPOS}/de-cita/${citaId}`).set('Authorization', `Bearer ${autorizacion}`);
+
+    it('LA CITA DE LISTA ROJA LLEGA CON SU ANTICIPO GENERADO, al 40%', async () => {
+      const { body: cita } = await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+
+      const respuesta = await anticipoDeCita(cita.id).expect(200);
+      expect(respuesta.body).toMatchObject({
+        citaId: cita.id,
+        estado: 'pendiente',
+        montoCentavos: 18000,
+        porcentajeAplicado: 40,
+        referenciaPago: null,
+      });
+    });
+
+    it('404 al pedir el anticipo de una cita de clienta normal: no lleva', async () => {
+      const { body: cita } = await agendar().expect(201);
+      await anticipoDeCita(cita.id).expect(404);
+    });
+
+    it('la lista de pendientes es la pantalla de conciliación', async () => {
+      await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+
+      const respuesta = await request(app.getHttpServer())
+        .get(ANTICIPOS)
+        .query({ estado: 'pendiente' })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      expect(respuesta.body.anticipos).toHaveLength(1);
+      expect(respuesta.body).toMatchObject({ hayMas: false });
+    });
+
+    it('400 con un estado que no existe', async () => {
+      await request(app.getHttpServer())
+        .get(ANTICIPOS)
+        .query({ estado: 'reembolsado' })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+    });
+
+    it('200 al confirmar el pago: la cita pasa a `agendada`', async () => {
+      const { body: cita } = await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+      const { body: anticipo } = await anticipoDeCita(cita.id).expect(200);
+
+      const confirmado = await request(app.getHttpServer())
+        .post(`${ANTICIPOS}/${anticipo.id}/confirmar-pago`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ referenciaPago: 'SPEI-20261207-001' })
+        .expect(200);
+
+      expect(confirmado.body).toMatchObject({ estado: 'pagado', referenciaPago: 'SPEI-20261207-001' });
+      expect(confirmado.body.confirmadoPor).toBe('encargada');
+
+      const agendaDelDia = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+      expect(agendaDelDia.body.citas.find((c: { id: string }) => c.id === cita.id).estado).toBe('agendada');
+    });
+
+    it('400 al confirmar sin referencia de transferencia', async () => {
+      const { body: cita } = await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+      const { body: anticipo } = await anticipoDeCita(cita.id).expect(200);
+
+      await request(app.getHttpServer())
+        .post(`${ANTICIPOS}/${anticipo.id}/confirmar-pago`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({})
+        .expect(400);
+    });
+
+    it('404 al confirmar un anticipo inexistente', async () => {
+      await request(app.getHttpServer())
+        .post(`${ANTICIPOS}/${randomUUID()}/confirmar-pago`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ referenciaPago: 'SPEI-001' })
+        .expect(404);
+    });
+
+    it('200 al expirar: la cita pasa a `expirada` y el hueco queda libre', async () => {
+      const { body: cita } = await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+      const { body: anticipo } = await anticipoDeCita(cita.id).expect(200);
+
+      const expirado = await request(app.getHttpServer())
+        .post(`${ANTICIPOS}/${anticipo.id}/expirar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ motivo: 'Nunca llegó la transferencia' })
+        .expect(200);
+
+      expect(expirado.body.estado).toBe('expirado');
+      // La cita ya no sale en la agenda: `expirada` no es un estado visible.
+      const agendaDelDia = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+      expect(agendaDelDia.body.citas.map((c: { id: string }) => c.id)).not.toContain(cita.id);
+    });
+
+    it('409 AL CANCELAR UNA CITA CON ANTICIPO PAGADO SIN CONFIRMAR, advirtiendo del no reembolso', async () => {
+      const { body: cita } = await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+      const { body: anticipo } = await anticipoDeCita(cita.id).expect(200);
+      await request(app.getHttpServer())
+        .post(`${ANTICIPOS}/${anticipo.id}/confirmar-pago`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ referenciaPago: 'SPEI-001' })
+        .expect(200);
+
+      const sinConfirmar = await request(app.getHttpServer())
+        .post(`${RUTA}/${cita.id}/cancelar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ motivo: 'Ya no puede venir' })
+        .expect(409);
+      expect(sinConfirmar.body.error.code).toBe('CANCELACION_REQUIERE_CONFIRMACION');
+
+      // Con la confirmación: se cancela y el anticipo queda RETENIDO (`RN-ANT-04`).
+      const confirmada = await request(app.getHttpServer())
+        .post(`${RUTA}/${cita.id}/cancelar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ motivo: 'Ya no puede venir', confirmacionDeEmpleado: true })
+        .expect(200);
+      expect(confirmada.body.anticipoRetenido).toBe(true);
+
+      const tras = await anticipoDeCita(cita.id).expect(200);
+      expect(tras.body.estado).toBe('retenido');
+    });
+
+    describe('OPACIDAD HACIA LA MANICURISTA', () => {
+      it('403 EN TODAS LAS RUTAS: ver un anticipo revelaría que la clienta está en lista roja', async () => {
+        // No es solo "no es asunto suyo": **solo las clientas de lista roja pagan anticipo**
+        // (`RN-ANT-01`), así que la existencia de un anticipo delata el estado de riesgo por
+        // inferencia. Dejarla ver anticipos haría deducible justo el dato que el presenter de la
+        // agenda protege (`DEC-040`).
+        const { body: cita } = await agendar({ clientaId: clientaEnListaRoja.id, manicuristaId: ana.id }).expect(201);
+        const { body: anticipo } = await anticipoDeCita(cita.id).expect(200);
+        const servidor = app.getHttpServer();
+
+        await request(servidor).get(ANTICIPOS).query({ estado: 'pendiente' }).set('Authorization', `Bearer ${manicuristaAna}`).expect(403);
+        await anticipoDeCita(cita.id, manicuristaAna).expect(403);
+        await request(servidor)
+          .post(`${ANTICIPOS}/${anticipo.id}/confirmar-pago`)
+          .set('Authorization', `Bearer ${manicuristaAna}`)
+          .send({ referenciaPago: 'SPEI-001' })
+          .expect(403);
+        await request(servidor)
+          .post(`${ANTICIPOS}/${anticipo.id}/expirar`)
+          .set('Authorization', `Bearer ${manicuristaAna}`)
+          .send({})
+          .expect(403);
+      });
+
+      it('y su vista de la agenda tampoco delata nada del anticipo', async () => {
+        await agendar({ clientaId: clientaEnListaRoja.id, manicuristaId: ana.id }).expect(201);
+
+        const paraElIpad = await request(app.getHttpServer())
+          .get(RUTA)
+          .query({ sucursalId, inicio: INICIO, fin: FIN })
+          .set('Authorization', `Bearer ${manicuristaAna}`)
+          .expect(200);
+
+        const suya = paraElIpad.body.citas[0];
+        expect(suya).not.toHaveProperty('enListaRoja');
+        expect(suya).not.toHaveProperty('clientaId');
+        // El estado `en_espera_pago` sí lo ve, y es inevitable: es el estado de la cita que va a
+        // atender. Lo que no puede ver es el anticipo, el monto ni el indicador de lista roja.
+        expect(JSON.stringify(suya)).not.toContain('18000');
+      });
+
+      it('403 también para la RECEPCIONISTA', async () => {
+        await request(app.getHttpServer())
+          .get(ANTICIPOS)
+          .query({ estado: 'pendiente' })
+          .set('Authorization', `Bearer ${recepcionista}`)
+          .expect(403);
+      });
+
+      it('401 sin token', async () => {
+        await request(app.getHttpServer()).get(ANTICIPOS).query({ estado: 'pendiente' }).expect(401);
+      });
+
+      it('la DUEÑA sí puede conciliar', async () => {
+        await request(app.getHttpServer()).get(ANTICIPOS).query({ estado: 'pendiente' }).set('Authorization', `Bearer ${dueña}`).expect(200);
+      });
     });
   });
 

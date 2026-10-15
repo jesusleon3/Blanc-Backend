@@ -85,6 +85,13 @@
       "when": 1792085468385,
       "tag": "0011_crm_clientas",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792087138386,
+      "tag": "0012_anticipos",
+      "breakpoints": true
     }
   ]
 }

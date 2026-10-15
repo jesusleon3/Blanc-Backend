@@ -23,6 +23,7 @@ import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { NotificacionListaEsperaPort } from '../../domain/ports/notificacion-lista-espera.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { crearAnticipoFalso } from '../../test-utils/anticipo-falso';
 import { crearRegistroDeIncidentesFalso } from '../../test-utils/registro-de-incidentes-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
@@ -49,6 +50,7 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
   const sillaRepo = new DrizzleSillaRepository(db);
   const listaEsperaRepo = new DrizzleListaEsperaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
+  const anticipos = crearAnticipoFalso();
   const uow = crearUnitOfWorkFalso();
   const incidentes = crearRegistroDeIncidentesFalso();
   const notificacion: jest.Mocked<NotificacionListaEsperaPort> = { ofertaDeHueco: jest.fn() };
@@ -60,7 +62,7 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso({ horario: horarioAbiertoSiempre() }));
   const resolutor = new ResolutorDeServicio(CATALOGO.port);
   const procesar = new ProcesarListaEsperaUseCase(listaEsperaRepo, motor, resolutor, notificacion, auditoria, uow);
-  const agendar = new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), auditoria, uow);
+  const agendar = new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), anticipos, auditoria, uow);
 
   return {
     citaRepo,
@@ -74,8 +76,8 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
     avanzar: new AvanzarTurnoListaEsperaUseCase(listaEsperaRepo, procesar, auditoria, uow),
     cancelarSolicitud: new CancelarSolicitudListaEsperaUseCase(listaEsperaRepo, auditoria, uow),
     consultarFila: new ConsultarListaEsperaUseCase(listaEsperaRepo),
-    cancelarCita: new CancelarCitaUseCase(citaRepo, auditoria, uow, procesar, incidentes),
-    reprogramarCita: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, procesar, incidentes),
+    cancelarCita: new CancelarCitaUseCase(citaRepo, auditoria, uow, procesar, incidentes, anticipos, crearContextoClientaFalso()),
+    reprogramarCita: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, procesar, incidentes, anticipos),
   };
 }
 
