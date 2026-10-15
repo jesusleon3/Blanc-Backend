@@ -14,6 +14,9 @@ import { CompletarCitaUseCase } from './application/use-cases/completar-cita.use
 import { MotorDisponibilidad } from './domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from './domain/services/resolutor-de-servicio';
 import { TransicionarCitaPorAnticipoUseCase } from './application/use-cases/transicionar-cita-por-anticipo.use-case';
+import { CerrarCitasTerminadasUseCase, SolicitarRecordatoriosUseCase } from './application/use-cases/barridos-de-agenda.use-cases';
+import { NOTIFICADOR_RECORDATORIO_PORT } from './domain/ports/notificador-recordatorio.port';
+import { RecordatorioSoloLogAdapter } from './infrastructure/notificacion/recordatorio-solo-log.adapter';
 import { ConsultarDisponibilidadUseCase } from './application/use-cases/consultar-disponibilidad.use-case';
 import { ConsultarAgendaUseCase } from './application/use-cases/consultar-agenda.use-case';
 import { GestionarSillasUseCase } from './application/use-cases/gestionar-sillas.use-case';
@@ -51,6 +54,8 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     { provide: LISTA_ESPERA_REPOSITORY, useClass: DrizzleListaEsperaRepository },
     // Provisional y a la vista: NO envía mensajes. Fase 4 sustituye solo este proveedor.
     { provide: NOTIFICACION_LISTA_ESPERA_PORT, useClass: ListaEsperaSoloLogAdapter },
+    // Provisional y a la vista: NO envía mensajes. Fase 4 Parte 2 sustituye solo este proveedor.
+    { provide: NOTIFICADOR_RECORDATORIO_PORT, useClass: RecordatorioSoloLogAdapter },
     AgendarCitaUseCase,
     AsignarManicuristaEnSucursalUseCase,
     SolicitarConfirmacionCitaUseCase,
@@ -71,7 +76,18 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     CancelarSolicitudListaEsperaUseCase,
     ConsultarListaEsperaUseCase,
     TransicionarCitaPorAnticipoUseCase,
+    CerrarCitasTerminadasUseCase,
+    SolicitarRecordatoriosUseCase,
   ],
-  exports: [SILLA_REPOSITORY, CITA_REPOSITORY, MotorDisponibilidad, TransicionarCitaPorAnticipoUseCase],
+  exports: [
+    SILLA_REPOSITORY,
+    CITA_REPOSITORY,
+    MotorDisponibilidad,
+    TransicionarCitaPorAnticipoUseCase,
+    // Los consume `PlanificadorModule`, que es un adaptador conductor y no un Bounded Context.
+    AvanzarTurnoListaEsperaUseCase,
+    CerrarCitasTerminadasUseCase,
+    SolicitarRecordatoriosUseCase,
+  ],
 })
 export class AgendaModule {}

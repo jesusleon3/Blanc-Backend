@@ -63,4 +63,18 @@ module.exports = async () => {
   // hijos y heredan el entorno.
   globalThis.__CONTENEDOR_POSTGRES__ = contenedor;
   process.env.TEST_DATABASE_URL = contenedor.getConnectionUri();
+
+  /**
+   * EL CRON DEL PLANIFICADOR SE APAGA EN PRUEBAS (`ADR-025`).
+   *
+   * No es higiene: un barrido disparándose cada 5 minutos contra la base de pruebas mientras una
+   * prueba de integración monta su escenario lo corrompería —cerraría citas, expiraría anticipos,
+   * movería la fila— de forma intermitente y dificilísima de atribuir. Sería exactamente la clase
+   * de intermitencia que esta misma fase acabó de erradicar del arnés, y reintroducirla a
+   * propósito no tiene ningún sentido.
+   *
+   * Los **casos de uso** de los barridos sí se prueban, llamándolos directamente con un `ahora`
+   * explícito, que además es la única forma de probarlos de verdad sin simular relojes.
+   */
+  process.env.PLANIFICADOR_ACTIVO = 'false';
 };

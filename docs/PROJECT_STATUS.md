@@ -1153,6 +1153,151 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-15 (d) — Fase 4 Parte 1: saneamiento del arnés (≈12 % → ≈1,6 %) y Planificador Operativo (`ADR-025`)
+
+Dos pendientes críticos, uno de ellos con una causa raíz que no era la que yo sospechaba.
+
+#### 1. 🔴 La causa raíz del `401` intermitente: el ciclo de vida del servidor en supertest
+
+**No era PostgreSQL, ni el pool, ni el paralelismo.** Era supertest.
+
+`request(app.getHttpServer())` sobre un servidor que **no está escuchando** hace que supertest ejecute `listen(0)` **y `close()` en cada petición**. Con `await app.init()` a secas —que crea el servidor pero no lo pone a escuchar— eso ocurría en las ~700 peticiones de la suite E2E, y abría una carrera:
+
+> Una petición encuentra el servidor **ya escuchando**, porque la anterior lo abrió y su `close()` todavía no terminó de completarse. Al no ver `address() === null`, **no crea el suyo**. Entonces el `close()` pendiente de la anterior se completa y le mata el socket a mitad del intercambio.
+
+Los dos síntomas, ambos observados y ambos ahora explicados:
+
+- **`read ECONNRESET`** — el socket muere antes de la respuesta.
+- **El `401` imposible** — la petición llega al guard **sin su cabecera `Authorization`**, porque nunca se terminó de recibir. La instrumentación lo confirmó: `header=undefined`, `headersPresentes=["host","accept-encoding","connection"]`.
+
+**Por qué el `401` era la pista decisiva y a la vez la más engañosa.** Descarté el producto por eliminación: `AuthorizationGuard` nunca devuelve 401 (403 por permisos, 503 por infraestructura), así que solo podía venir de `JwtAuthGuard` — que es criptografía pura, con secreto y emisor constantes y tokens de prueba firmados **sin `exp` ni `nbf`**, sin caché ni dependencia del reloj. Un 401 ahí es **imposible de forma determinista**. Eso probaba que el token no era el problema: el problema era que la petición llegaba incompleta.
+
+**Por qué no se reproducía aislando el spec** (20 de 20 limpias): la carrera necesita que el `close()` de una petición solape con el `listen()` de la siguiente. Con la máquina descargada, el cierre termina antes. Y **por eso fallaba igual con `--runInBand`**, lo que descartó el paralelismo: la carrera es **dentro** de la secuencia de peticiones de un mismo archivo.
+
+**La corrección:** `await app.listen(0)` en el `beforeAll` de los 9 specs E2E. Con el servidor escuchando, `address()` nunca es `null` y **supertest no toca su ciclo de vida**: usa el que ya hay. El puerto `0` deja que el sistema elija, así que no hay colisiones entre archivos ni workers; `app.close()` del `afterAll` lo cierra.
+
+#### Y dos defectos más que salieron por el camino
+
+**(a) El arnés recreaba la base de datos una vez por archivo de spec, no por worker.** `conexionDelWorker` es estado de módulo y **Jest reinicia el registro de módulos en cada archivo**: un worker con 30 archivos lo veía `null` 30 veces y volvía a provisionar. Provisionar hacía `DROP DATABASE ... WITH (FORCE)`, que **termina a la fuerza todas las conexiones abiertas a esa base**, no solo las propias — 30 ventanas por worker en las que una conexión no drenada era cortada de raíz. La marca vive ahora en `process.env` (lo único que sobrevive al reinicio del registro; `globalThis` no, porque `testEnvironment: 'node'` crea un contexto nuevo por archivo). Efecto secundario: las migraciones se aplican **una vez por worker** en vez de una por archivo, y la suite es notablemente más rápida.
+
+**(b) Una aserción de tiempo frágil.** El health check comparaba el timestamp contra `Date.now()` con 10 segundos de margen, lo que hacía la prueba dependiente de **lo rápido que vaya la máquina**. Ahora se acota con los instantes de antes y después de la petición: afirma lo que importa —que el timestamp se genera al atender— y es determinista a cualquier velocidad.
+
+**`forceExit: true` eliminado de `jest.config.js`.** Su única justificación era un handle que dejaba `pg-mem`, **eliminado del proyecto hace varias fases**: el comentario describía una dependencia que ya no existía. Mantenerlo era activamente malo — `forceExit` mata el proceso en cuanto terminan las pruebas y **oculta cualquier fuga de handles futura**, justo la señal que hacía falta para este diagnóstico. Verificado que la suite sale sola con código 0 y que `--detectOpenHandles` no reporta ninguno.
+
+> **Nota de método, porque afectó a la medición:** una tanda de 20 corridas intermedia dio 1 fallo, y era **artefacto mío**: estaba editando el código fuente mientras el bucle corría. La medición definitiva se hizo con el árbol quieto. Si en el futuro alguien mide estabilidad, no edite durante la medición.
+
+#### 2. Planificador Operativo (`ADR-025`)
+
+**ADR nueva: `docs/architecture/adr/ADR-025-planificador-operativo.md`** (`Accepted`).
+
+Cron en proceso con `@nestjs/schedule`, sobre jobs que **son casos de uso invocables también por HTTP**, protegidos por `pg_try_advisory_lock`.
+
+| Decisión | Por qué |
+|---|---|
+| Cron **en proceso**, no worker aparte | Blanc es un Modular Monolith en un solo servicio de Railway; un worker duplicaría despliegue, configuración y secretos para cuatro barridos de milisegundos |
+| `@nestjs/schedule` fijado en **`^4.1.2`** | La 12 exige NestJS 11/12 y el proyecto está en 10.4. Forzarla con `--legacy-peer-deps` habría metido una incompatibilidad silenciosa, el mismo error que se evitó dejando `jose` en v5 |
+| **El cron no contiene lógica** | Cada job es un caso de uso. Se puede disparar a mano (imprescindible mientras no haya WhatsApp), se prueba sin relojes con un `ahora` explícito, y mover esto a un worker cambiaría **quién llama, no qué se ejecuta** |
+| `pg_try_advisory_lock`, **no bloqueante** | Si Railway escala a dos instancias, las dos disparan a la misma hora: dos avances de la fila podrían ofrecer el mismo hueco a dos clientas. `try` y no espera — un barrido que se salta se repite en el siguiente tick; uno que espera **apila ejecuciones** |
+| `PLANIFICADOR_ACTIVO=false` en pruebas | Un tick disparándose mientras una prueba monta su escenario lo corrompería de forma intermitente: **exactamente la clase de intermitencia que esta misma fase acabó de erradicar** |
+
+#### 🐛 Un defecto real de mi primera implementación del cerrojo
+
+Los advisory locks de PostgreSQL son **por sesión**, y `postgres-js` trabaja con un **pool de 5**. Mi primera versión pedía el cerrojo por el pool, así que `pg_try_advisory_lock` podía ejecutarse en la conexión A y el `pg_advisory_unlock` del `finally` en la B. Consecuencia: **el cerrojo de A queda tomado hasta que muera el proceso y el barrido deja de correr en silencio**, mientras el `unlock` sobre B devuelve `false` con un aviso que nadie mira.
+
+Se corrige con `reserve()`, que toma una conexión **dedicada** para toda la vida del cerrojo. Hay una prueba de 10 ciclos consecutivos —con un pool de 5, basta para que las conexiones roten y el fallo aparezca— y otra que toma el cerrojo desde una sesión distinta y verifica que el barrido **no se ejecuta**, no solo que devuelva `null`.
+
+No se usa `pg_advisory_xact_lock` porque un barrido abre **una transacción por elemento** para aislar fallos: el cerrojo se liberaría en la primera.
+
+#### Los cuatro barridos
+
+| # | Barrido | Cada | Qué hace |
+|---|---|---|---|
+| a | `lista_espera` | 5 min | Cierra ofertas vencidas y avanza el FIFO (`DEC-039`) |
+| b | `anticipos` | 5 min | Expira anticipos `pendiente` cuya cita ya llegó a su hora (`RN-ANT-03`) |
+| c | `cierre_de_citas` | 5 min | Pasa a `completada` las citas activas ya terminadas (`DEC-030`) |
+| d | `recordatorios` | 1 h | Pasa a `pendiente_confirmacion` las citas a ≤24 h y emite el aviso (`RN-NOT-02`) |
+
+**Ante fallos parciales:** `procesarLote()` itera capturando **por elemento**, registra el id y sigue. Es la regla que más importa y la más fácil de olvidar al escribir el cuarto barrido: con el orden por antigüedad, detenerse en el primer error dejaría sin procesar **justo lo más urgente**, y una cita con datos corruptos podría bloquear el cierre de todas las demás indefinidamente. Cada ejecución devuelve `{procesados, fallidos, idsFallidos}`.
+
+**Ante ejecuciones repetidas:** idempotencia **por estado, no por bandera**. Cada barrido selecciona por estado de origen y la acción cambia ese estado, así que una segunda corrida inmediata no encuentra nada. No hay columna de "ya procesado" que mantener sincronizada — la misma propiedad que ya protege las transiciones de `Cita`. Hay una prueba de doble corrida para cada uno de los cuatro.
+
+**Dos decisiones de los barridos que conviene conocer:**
+
+- **El cierre automático es aceptable porque `completada → no_show` sigue siendo legal** (`N-02`). El sistema no puede saber si la clienta entró por la puerta; esa salida es la que permite que la Encargada lo corrija más tarde. Hay una prueba que lo fija.
+- **El recordatorio usa una ventana `[ahora, ahora+24h]`, no un instante.** Un barrido que buscara citas que empiecen "exactamente en 24 h" no encontraría nunca nada: corre cada hora y la probabilidad de caer en el instante justo es cero. La ventana además recupera lo que quedó sin recordar si el servicio estuvo caído.
+- **El envío va FUERA de la transacción** y su fallo no revierte la transición: mejor una cita en `pendiente_confirmacion` sin aviso —visible para la Encargada, que puede llamar— que una clienta avisada de algo que se revirtió. Un mensaje enviado no se deshace con un `ROLLBACK`.
+
+#### Archivos
+
+| Archivo | Qué es |
+|---|---|
+| `docs/architecture/adr/ADR-025-planificador-operativo.md` | ADR del planificador |
+| `shared/persistence/advisory-lock.ts` | `CerrojoDeBarrido` con sesión reservada |
+| `modules/planificador/application/planificador.service.ts` | Los 4 `@Cron` + despacho por nombre |
+| `modules/planificador/application/barrido-de-anticipos.use-case.ts` | Barrido (b), cruza Agenda y Anticipos |
+| `modules/planificador/infrastructure/http/planificador.controller.ts` | 2 endpoints administrativos |
+| `modules/planificador/planificador.module.ts` | Composición; `ScheduleModule.forRoot()` |
+| `modules/planificador/planificador.spec.ts` | **23 pruebas de integración** |
+| `agenda/application/use-cases/barridos-de-agenda.use-cases.ts` | Barridos (c) y (d) + `procesarLote` |
+| `agenda/domain/ports/notificador-recordatorio.port.ts` | Puerto de salida del recordatorio |
+| `agenda/infrastructure/notificacion/recordatorio-solo-log.adapter.ts` | **Provisional: no envía nada** |
+
+**Sin migraciones.** Ningún barrido necesitó esquema nuevo: se apoyan en los estados que ya existen, que es precisamente lo que hace la idempotencia gratuita.
+
+> **El planificador importa dos Bounded Contexts, y no viola la regla que cerró `P5`.** No es un BC: es un **adaptador conductor**, de la misma familia que un controlador HTTP, y orquestar es su función. La distinción frente a `IntegracionModule` es la dirección — aquel aloja adaptadores *conducidos* (un BC pregunta, otro responde, ninguno conoce al otro); este es quien **conduce**, y no introduce dependencia alguna entre los contextos que invoca. `madge` sigue en **0 ciclos**.
+
+#### Endpoints
+
+| Método y ruta | Roles |
+|---|---|
+| `GET /v1/planificador` | **Solo Super Admin y Administrador** |
+| `POST /v1/planificador/barridos/:nombre` | ídem |
+
+Más estrecho que la operación diaria, a propósito: un barrido actúa **sobre las tres sucursales a la vez**, así que no es una acción de turno y no tiene alcance de sucursal que respetar. La `GERENTE` recibe `403`.
+
+#### Pruebas: **+29** (959 → **988**, 68 suites)
+
+23 de integración del planificador (los 4 barridos, aislamiento de fallos por elemento, idempotencia de doble corrida, lote acotado y las 4 del cerrojo) · 6 E2E HTTP del endpoint administrativo.
+
+#### Validación
+
+`tsc --noEmit` 0 · `tsc -p tsconfig.eslint.json` 0 · `lint` 0 errores 0 avisos · `build` OK · `drizzle-kit check` OK · `madge --circular` 0 ciclos · **988/988 pruebas** en 68 suites.
+
+#### 🟡 Estabilidad del arnés: mejorada mucho, **no erradicada**
+
+| Medición (suite completa, árbol quieto) | Corridas con fallo |
+|---|---|
+| **Antes** de esta entrega | ~1 de cada 8 · 1 de 4 con `--runInBand` · 1 de 6 con `--maxWorkers=4` |
+| **Después**, tanda de medición | 1 de 30 |
+| **Después**, tanda de caza del residuo | **0 de 34** |
+| **Después**, total | **1 de 64 (≈1,6 %)**, frente a ≈12 % antes |
+
+El residuo **no se reprodujo en 34 corridas consecutivas** con instrumentación lista para capturarlo, así que no hay datos sobre su naturaleza más allá de su frecuencia.
+
+**No puedo declarar el problema erradicado, y la orden pedía erradicarlo.** Las tres causas encontradas eran reales y están corregidas —la de supertest explicaba los dos síntomas observados (`ECONNRESET` y el `401` sin cabecera), que es la evidencia más fuerte de que era *la* causa principal— pero queda un residuo de frecuencia mucho menor cuya naturaleza **todavía no está identificada**.
+
+Lo que **sí** se puede afirmar con los datos: el fallo ya no depende del número de workers, ya no se reproduce por recreación de la base entre archivos, y ninguna de las aserciones frágiles de tiempo sigue en pie.
+
+**Qué NO se hizo, deliberadamente:** no se añadió `jest.retryTimes` ni ningún reintento. La orden lo prohibía y tiene razón — convertiría la suite en un detector de ruido y enterraría la señal que falta.
+
+**Siguiente paso para quien lo retome:** la instrumentación que funcionó está descrita arriba (`console.error` temporal en las cuatro ramas de 401 de `JwtAuthGuard`, con método, URL y cabeceras presentes, y bucle de corridas completas rompiendo al primer fallo). Aplicada al residuo, debería identificarlo igual que identificó este. **Dato de método que costó una tanda entera: no editar el código fuente mientras se mide** — una medición intermedia de 20 corridas dio 1 fallo que era artefacto de mis propias ediciones concurrentes.
+
+#### Listo para Fase 4 Parte 2
+
+- **Canal WhatsApp Cloud API:** los puntos de enganche están construidos y son **tres** puertos con adaptador de solo-log, cada uno nombrado para no confundirse con el definitivo: `NotificacionListaEsperaPort`, `NotificadorRecordatorioPort` y (pendiente de crear) el de avisos de anticipo. En Fase 4 se sustituye el proveedor en el módulo y **no se toca ningún caso de uso**.
+- **El recordatorio ya funciona de extremo a extremo salvo el envío:** la cita pasa a `pendiente_confirmacion` y la Encargada lo ve en la agenda. Solo falta que el mensaje salga.
+- **Máquina de estados de Conversación y `TicketEscalamiento`** — es lo que queda de `P3`, más `P6`. Ninguna está empezada.
+- **`RN-ESC-03`** (retorno de control siempre explícito) y `RN-ESC-02` (revalidación de modo antes de cada respuesta del bot) exigirán un puerto desde Conversación hacia el bot; el patrón de `P5` ya está cerrado para eso.
+- **`DEC-044`** ya fijó que el Bot es un *principal de sistema* con lista cerrada de operaciones de **solo lectura**, y que su credencial se construye en Fase 4. Sigue sin emitirse.
+
+#### Deuda nueva que deja esta entrega
+
+1. **Una cita en `en_espera_pago` sin fila de anticipo no la expira nadie.** Ocurre con `DEC-033` (servicio de cotización manual) si la Encargada no registra el anticipo a mano: el barrido (b) busca el anticipo y, al no encontrarlo, se salta la cita — correctamente, porque no hay nada que expirar, pero la cita se queda ahí para siempre. Hay que decidir si el barrido expira también las citas sin anticipo o si se obliga a registrarlo al agendar.
+2. **Si el proceso está caído, no se dispara nada.** Asumido en `ADR-025`: las cuatro tareas son recuperables y al volver el siguiente tick procesa lo atrasado. La alternativa (cron externo de Railway) **ya es posible sin reescribir nada**, porque los endpoints existen.
+3. **Los barridos comparten CPU y pool con las peticiones HTTP.** Despreciable con el volumen de tres sucursales; deja de serlo con lotes de miles de filas, y entonces toca el worker.
+
+---
+
 ### 2026-10-15 (c) — Fase 3 Parte 2: Anticipos por transferencia manual. **🏁 FASE 3 CERRADA**
 
 Cierra Fase 3. El ciclo completo de `RN-ANT-01` a `RN-ANT-04` queda conectado con Agenda y CRM, y el último parámetro temporal de la plataforma desaparece.

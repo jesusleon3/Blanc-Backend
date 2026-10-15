@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, gte, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import { Database } from '../../../../database/connection';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
 import { citas, ESTADOS_QUE_LIBERAN_HORARIO, ESTADOS_VISIBLES_EN_AGENDA, EstadoCita, RangoHorario } from '../../../../database/schema';
@@ -134,6 +134,53 @@ export class DrizzleCitaRepository implements CitaRepository {
       .orderBy(sql`lower(${citas.rangoHorario})`, citas.id)
       .limit(opciones.limite)
       .offset(opciones.desplazamiento);
+
+    return filas.map((fila) => this.aEntidad(fila));
+  }
+
+  async listarActivasYaTerminadas(ahora: Date, limite: number): Promise<Cita[]> {
+    const filas = await this.db
+      .select()
+      .from(citas)
+      .where(
+        and(
+          inArray(citas.estado, ['agendada', 'pendiente_confirmacion', 'confirmada']),
+          // `upper()` es el fin del rango. `<=` porque el rango es `[inicio, fin)`: en el instante
+          // `fin` la cita ya no ocupa, así que ya terminó.
+          lte(sql`upper(${citas.rangoHorario})`, ahora.toISOString()),
+        ),
+      )
+      // Las más antiguas primero: son las que llevan más tiempo falseando la ocupación.
+      .orderBy(sql`upper(${citas.rangoHorario})`)
+      .limit(limite);
+
+    return filas.map((fila) => this.aEntidad(fila));
+  }
+
+  async listarEnEsperaDePagoVencidas(ahora: Date, limite: number): Promise<Cita[]> {
+    const filas = await this.db
+      .select()
+      .from(citas)
+      .where(and(eq(citas.estado, 'en_espera_pago'), lte(sql`lower(${citas.rangoHorario})`, ahora.toISOString())))
+      .orderBy(sql`lower(${citas.rangoHorario})`)
+      .limit(limite);
+
+    return filas.map((fila) => this.aEntidad(fila));
+  }
+
+  async listarProximasSinRecordatorio(desde: Date, hasta: Date, limite: number): Promise<Cita[]> {
+    const filas = await this.db
+      .select()
+      .from(citas)
+      .where(
+        and(
+          eq(citas.estado, 'agendada'),
+          gte(sql`lower(${citas.rangoHorario})`, desde.toISOString()),
+          lte(sql`lower(${citas.rangoHorario})`, hasta.toISOString()),
+        ),
+      )
+      .orderBy(sql`lower(${citas.rangoHorario})`)
+      .limit(limite);
 
     return filas.map((fila) => this.aEntidad(fila));
   }

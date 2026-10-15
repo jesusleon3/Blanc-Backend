@@ -30,6 +30,13 @@ import {
     RetenerAnticipoUseCase,
     ConsultarAnticiposUseCase,
   ],
-  exports: [ANTICIPO_REPOSITORY, GenerarAnticipoUseCase, RetenerAnticipoUseCase, ConsultarAnticiposUseCase],
+  exports: [
+    ANTICIPO_REPOSITORY,
+    GenerarAnticipoUseCase,
+    RetenerAnticipoUseCase,
+    ConsultarAnticiposUseCase,
+    // Lo consume `PlanificadorModule` para el barrido de expiración (`ADR-025`).
+    ExpirarAnticipoUseCase,
+  ],
 })
 export class AnticiposModule {}

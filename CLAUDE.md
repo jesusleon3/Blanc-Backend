@@ -56,6 +56,15 @@ NestJS + TypeScript, Modular Monolith (`ADR-001`), Hexagonal + Clean + Vertical 
 - **El dinero son `Centavos`**, un *branded type* (`RN-COT-07`). Nunca un `number` suelto ni coma flotante.
 - `jose` está fijado en `^5.10.0` **a propósito**: la v6 es solo ESM y rompe el runtime CommonJS.
 
+### Planificador operativo (`ADR-025`)
+
+Cuatro barridos temporales (`lista_espera`, `anticipos`, `cierre_de_citas`, `recordatorios`) con cron en proceso (`@nestjs/schedule`, fijado en `^4.1.2` por compatibilidad con NestJS 10).
+
+- **El cron no contiene lógica**: cada barrido es un caso de uso invocable también por `POST /v1/planificador/barridos/:nombre`. Así se dispara a mano, se prueba con un `ahora` explícito y se puede mover a un worker cambiando solo quién llama.
+- **`PLANIFICADOR_ACTIVO=false`** apaga los ticks dejando los endpoints vivos. `test/global-setup.js` lo pone en pruebas: un tick corrompería los escenarios de integración.
+- **Un elemento que falla no aborta el lote** (`procesarLote`), y la idempotencia es **por estado, no por bandera**: cada barrido selecciona por estado de origen y la acción lo cambia.
+- **El cerrojo entre instancias usa `pg_try_advisory_lock` sobre una conexión RESERVADA** (`reserve()`). Los advisory locks son por sesión y `postgres-js` usa un pool: pedirlo por el pool deja el cerrojo colgado cuando el `unlock` cae en otra conexión.
+
 ### Antes de dar por terminado un cambio
 
 `npx tsc --noEmit`, `npm run lint`, `npm run build`, `npx drizzle-kit check`, `npx madge --circular --extensions ts src/` y `npm test` — los seis en verde. **No apliques migraciones a ninguna base de datos real**: eso es actividad de despliegue (Fase 7).

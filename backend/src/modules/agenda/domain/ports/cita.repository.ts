@@ -47,4 +47,35 @@ export interface CitaRepository {
     rango: RangoHorario,
     opciones: { manicuristaId?: string; limite: number; desplazamiento: number },
   ): Promise<Cita[]>;
+
+  /**
+   * Citas activas cuyo horario **ya terminó** — las que el barrido de cierre pasa a `completada`
+   * (`DEC-030`, `ADR-025`).
+   *
+   * "Activas" son `agendada`, `pendiente_confirmacion` y `confirmada`. Las demás no se tocan:
+   * `en_espera_pago` tiene su propio barrido, y las terminales ya no se mueven.
+   *
+   * **El `limite` acota el lote**, no la verdad: si hay más, el siguiente tick las recoge. Un
+   * barrido sin tope podría traerse meses de citas olvidadas en una sola consulta.
+   */
+  listarActivasYaTerminadas(ahora: Date, limite: number): Promise<Cita[]>;
+
+  /**
+   * Citas en `en_espera_pago` cuyo horario ya llegó sin que se confirmara el pago.
+   *
+   * Es la condición de `RN-ANT-03` traducida a barrido: el anticipo dejó de tener sentido en el
+   * momento en que la cita empezó. Se mide contra el **inicio**, no el fin: una cita que ya
+   * empezó sin pagar no se va a atender.
+   */
+  listarEnEsperaDePagoVencidas(ahora: Date, limite: number): Promise<Cita[]>;
+
+  /**
+   * Citas `agendada` que empiezan dentro de la ventana `[desde, hasta]` — las candidatas al
+   * recordatorio de 24 h (`RN-NOT-02`).
+   *
+   * **Solo `agendada`**: una cita ya en `pendiente_confirmacion` tiene su recordatorio enviado, y
+   * eso es lo que hace el barrido idempotente sin necesitar una columna de "ya recordada". Pedir
+   * también las `confirmada` reenviaría recordatorios a quien ya respondió.
+   */
+  listarProximasSinRecordatorio(desde: Date, hasta: Date, limite: number): Promise<Cita[]>;
 }

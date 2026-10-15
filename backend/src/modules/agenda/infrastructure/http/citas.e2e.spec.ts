@@ -30,6 +30,7 @@ import { DrizzleServicioRepository } from '../../../catalogo-y-cotizacion/infras
 import { CatalogoYCotizacionModule } from '../../../catalogo-y-cotizacion/catalogo-y-cotizacion.module';
 import { CrmYClientasModule } from '../../../crm-y-clientas/crm-y-clientas.module';
 import { AnticiposModule } from '../../../anticipos/anticipos.module';
+import { PlanificadorModule } from '../../../planificador/planificador.module';
 import { Clienta } from '../../../crm-y-clientas/domain/entities/clienta.entity';
 import { DrizzleClientaRepository } from '../../../crm-y-clientas/infrastructure/persistence/drizzle-clienta.repository';
 
@@ -103,7 +104,7 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       // `IntegracionModule` es parte del montaje real: sin él no hay `CONTEXTO_PERSONAL_PORT` y el
       // motor de disponibilidad no arranca. Que este E2E lo exija es la prueba de que el cableado
       // entre Bounded Contexts funciona de verdad.
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule, IntegracionModule],
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule, IntegracionModule, PlanificadorModule],
       providers: [
         {
           provide: APP_GUARD,
@@ -123,6 +124,28 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
     app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
+    /**
+     * EL SERVIDOR ESCUCHA UNA SOLA VEZ, Y ESTO ES LA CORRECCIÓN DE UNA INTERMITENCIA REAL.
+     *
+     * Con `app.init()` a secas el servidor HTTP queda creado pero **sin escuchar**, y entonces
+     * `request(app.getHttpServer())` de supertest hace `listen(0)` y `close()` **en cada
+     * petición**. Eso abre una carrera: si una petición encuentra el servidor ya escuchando
+     * —porque la anterior lo abrió y su `close()` aún no ha terminado de completarse— no crea el
+     * suyo, y el `close()` pendiente de la anterior le mata el socket a mitad.
+     *
+     * Los dos síntomas que producía, ambos observados: `read ECONNRESET`, y un `401` imposible en
+     * el que la petición llegaba al guard **sin su cabecera `Authorization`** porque nunca se
+     * terminó de recibir. Aparecía ~1 de cada 8 corridas completas, cambiando de prueba, y no
+     * dependía del número de workers (fallaba igual con `--runInBand`): la carrera es **dentro**
+     * de la secuencia de peticiones de un mismo archivo, y por eso casi nunca se reproducía al
+     * ejecutar ese archivo aislado, con la máquina descargada.
+     *
+     * Con el servidor escuchando desde `beforeAll`, `address()` nunca es `null` y supertest **no
+     * toca su ciclo de vida**: usa el que ya hay. El puerto `0` deja que el sistema elija uno
+     * libre, así que no hay colisiones entre archivos ni workers. `app.close()` del `afterAll` lo
+     * cierra al terminar.
+     */
+    await app.listen(0);
   });
 
   afterAll(async () => {
@@ -1035,6 +1058,71 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       it('la DUEÑA sí puede operar la fila', async () => {
         await inscribir({}, dueña).expect(201);
       });
+    });
+  });
+
+  describe('planificador operativo (`ADR-025`) — Fase 4 Parte 1', () => {
+    const PLANIFICADOR = '/v1/planificador';
+
+    it('200 y lista los cuatro barridos, diciendo si el cron está activo', async () => {
+      const respuesta = await request(app.getHttpServer()).get(PLANIFICADOR).set('Authorization', `Bearer ${dueña}`).expect(200);
+
+      expect(respuesta.body.barridos).toEqual(['lista_espera', 'anticipos', 'cierre_de_citas', 'recordatorios']);
+      // En pruebas el cron está apagado a propósito (`global-setup.js`).
+      expect(respuesta.body.cronActivo).toBe(false);
+    });
+
+    it('DISPARA EL CIERRE A MANO y la cita pasa a `completada`', async () => {
+      // Es la razón de que el endpoint exista: mientras no haya canal de WhatsApp, la Encargada
+      // necesita poder decir "hazlo ahora" sin esperar al tick.
+      const { body: cita } = await agendar().expect(201);
+
+      const respuesta = await request(app.getHttpServer())
+        .post(`${PLANIFICADOR}/barridos/cierre_de_citas`)
+        .set('Authorization', `Bearer ${dueña}`)
+        .send({ ahora: '2026-12-07T12:00:00.000Z' })
+        .expect(200);
+
+      expect(respuesta.body).toMatchObject({ barrido: 'cierre_de_citas', procesados: 1, fallidos: 0 });
+
+      const agendaDelDia = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${dueña}`)
+        .expect(200);
+      expect(agendaDelDia.body.citas.find((c: { id: string }) => c.id === cita.id).estado).toBe('completada');
+    });
+
+    it('400 con un barrido que no existe', async () => {
+      await request(app.getHttpServer())
+        .post(`${PLANIFICADOR}/barridos/borrar_todo`)
+        .set('Authorization', `Bearer ${dueña}`)
+        .send({})
+        .expect(400);
+    });
+
+    it('400 si `ahora` no es ISO-8601', async () => {
+      await request(app.getHttpServer())
+        .post(`${PLANIFICADOR}/barridos/cierre_de_citas`)
+        .set('Authorization', `Bearer ${dueña}`)
+        .send({ ahora: 'mañana' })
+        .expect(400);
+    });
+
+    it('403 PARA LA GERENTE: un barrido actúa sobre las tres sucursales a la vez', async () => {
+      // No es una acción de turno: cierra citas de todas las sucursales, expira anticipos y mueve
+      // la fila. No tiene alcance de sucursal que respetar, así que no es de la Encargada.
+      await request(app.getHttpServer())
+        .post(`${PLANIFICADOR}/barridos/cierre_de_citas`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({})
+        .expect(403);
+      await request(app.getHttpServer()).get(PLANIFICADOR).set('Authorization', `Bearer ${encargada}`).expect(403);
+    });
+
+    it('403 para la MANICURISTA y 401 sin token', async () => {
+      await request(app.getHttpServer()).get(PLANIFICADOR).set('Authorization', `Bearer ${manicuristaAna}`).expect(403);
+      await request(app.getHttpServer()).get(PLANIFICADOR).expect(401);
     });
   });
 
