@@ -1153,6 +1153,167 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-15 (e) — Fase 4 Parte 2: canal WhatsApp Cloud API, Conversaciones, Handoff y Bandeja Compartida
+
+**1068 pruebas en 71 suites** (+78). Superada la barrera de las 1.000.
+
+#### 1. Deuda cerrada: citas `en_espera_pago` huérfanas
+
+Una clienta en lista roja agenda un servicio de cotización manual (`DEC-033`), la generación automática no puede calcular el monto y nadie lo registra a mano: la cita se quedaba **en `en_espera_pago` para siempre**, porque el barrido de anticipos buscaba un anticipo que nunca hubo.
+
+Ahora, si no hay fila de anticipo y la hora de la cita ya llegó, el barrido **expira la cita directamente**. Es seguro porque la condición de la consulta ya garantiza que su hora pasó — no se descarta nada aprovechable. Y es la única forma de cumplir el invariante que importa: **ninguna cita se queda en `en_espera_pago` indefinidamente**.
+
+#### 2. Modelo de Conversaciones
+
+**Migración `0013_conversaciones.sql`** — esquema `conversaciones`, tres tablas, 10 `CHECK` y 3 índices únicos a mano.
+
+**La identidad es `(sucursal_id, telefono_clienta)`, no `clienta_id`.** Es lo único que trae el webhook de Meta. `clienta_id` es **opcional y posterior**, y la razón es concreta: un teléfono puede corresponder a **dos clientas** (mamá e hija, `RN-CRM-01` corregido en Fase 3), así que vincular el hilo a *una* es una decisión que a veces no se puede tomar. Consecuencia deliberada: **mamá e hija comparten la conversación** aunque sean dos expedientes de CRM — es lo que pasa en la realidad, hay un solo chat.
+
+> **Solo se vincula cuando hay UNA coincidencia.** Con dos no se elige: elegir sería adivinar, y la elección equivocada ataría el historial a la clienta errónea, de la que además depende si se le pide anticipo. **Pero el bloqueo sí se evalúa aunque haya varias**: si *cualquiera* de ese teléfono está bloqueada, se escala. Lado seguro.
+
+**Enrutamiento multi-sucursal:** `numeros_de_sucursal` mapea `phone_number_id` → `sucursal_id`. Es tabla y no constante en código porque cada sucursal tiene su número, se dan de alta en momentos distintos y **el alta en Meta es un trámite, no un despliegue**. Sin el mapeo, los webhooks de ese número se descartan con un log de error — es el primer paso de la migración de cada número.
+
+#### 3. Ventana de 24 horas de Meta (`N-14`)
+
+**No es una decisión de Blanc: es una restricción de la plataforma** que apareció al elegir la API oficial (`DEC-043`). El dominio distingue **tres** estados, no dos:
+
+| Estado | Qué significa | Texto libre |
+|---|---|---|
+| `abierta` | La clienta escribió hace menos de 24 h | ✅ |
+| `cerrada` | Pasaron ≥24 h desde su último mensaje | ❌ → plantilla |
+| `nunca_abierta` | La conversación la inició el salón y ella nunca respondió | ❌ → plantilla |
+
+`nunca_abierta` es un tercer caso real: el mensaje para quien opera es distinto (*"se te pasó el plazo"* frente a *"esta clienta nunca te ha escrito"*) y es el caso en que la plantilla es la única vía **desde el principio**.
+
+**Se valida en el dominio y ANTES de llamar a Meta.** Meta lo rechazaría igual, pero entonces ya se habría gastado la petición y el operador vería un fallo genérico de API en vez de la instrucción: *usa una plantilla*. Hay una prueba que verifica que el puerto de envío **no se invoca** cuando la ventana está cerrada.
+
+**Responder no extiende la ventana** — solo la mueve un mensaje de la clienta. Es la regla de Meta, y hay prueba.
+
+#### 4. Deduplicación por `wamid`
+
+**Meta reintenta los webhooks** ante timeouts, 500 o por su propia política. Sin deduplicar, cada reintento duplicaría el mensaje, sumaría otro pendiente, **volvería a mover la ventana de 24 h** y —en la Parte 3— invocaría otra vez a la IA, con riesgo de agendar dos veces.
+
+La impone un **índice único parcial** en la base, no una consulta previa: dos reintentos simultáneos pasarían los dos un `SELECT` de comprobación.
+
+#### 🐛 Dos fallos encontrados por las pruebas, el segundo instructivo
+
+**(a) Orden de escritura.** Registraba el mensaje antes de guardar la conversación, y en un hilo nuevo la clave foránea lo rechazaba. Se invirtió sin perder la idempotencia: en un reintento, el `guardar` previo reescribe la conversación **con los mismos valores** (los efectos del mensaje aún no se han aplicado) y después `registrarMensaje` devuelve `false`.
+
+**(b) Un `try/catch` sobre el error de unicidad NO funciona dentro de una transacción.** Mi primera versión capturaba el `23505` y devolvía `false`. Parecía correcto y **no lo era**: en PostgreSQL un statement que falla **aborta la transacción entera** (`25P02`), así que el `COMMIT` posterior fallaba y el error original salía de todas formas. Se descubrió con la prueba del `wamid` repetido. Se corrigió con `ON CONFLICT DO NOTHING`, que nunca falla: `returning()` vacío **es** la señal de duplicado. **Es un patrón a recordar para cualquier inserción idempotente dentro de una transacción.**
+
+#### 5. Webhook de Meta
+
+**`GET`** — reto de verificación: devuelve `hub.challenge` **en texto plano**, o `401` si el token no coincide. Aceptar un reto con token equivocado permitiría que un tercero registrase nuestra URL en su propia app de Meta.
+
+**`POST`** — eventos. Tres decisiones:
+
+- **La firma HMAC es la autenticación.** La ruta es `@Public()` porque Meta no puede llevar un JWT de Blanc, así que `X-Hub-Signature-256` es **lo único** que distingue un evento real de uno fabricado. Sin verificarla, cualquiera con la URL podría inyectar mensajes entrantes falsos.
+- **Comparación en tiempo constante** (`timingSafeEqual`, no `===`): comparar cadenas termina en el primer byte distinto, y ese tiempo es medible — un ataque conocido contra verificación de HMAC que cuesta una línea evitar.
+- **Siempre `200`, salvo firma inválida.** Meta reintenta ante cualquier respuesta no-2xx: un `500` por un payload raro convertiría un evento defectuoso en un bucle indefinido. Todo lo que no sea un problema de autenticidad se registra y se acepta. Cada mensaje del lote se procesa aislado.
+
+> **`main.ts` necesitó capturar el cuerpo crudo.** El HMAC se calcula sobre **los bytes exactos** que Meta firmó; reserializar el JSON parseado cambia espacios y orden de claves y la firma **nunca** coincidiría. Se captura con el `verify` del parser de Express. **Y la ausencia de `rawBody` se trata como firma inválida**, no como "no se pudo comprobar": fallar abierto ahí sería dejar el webhook sin autenticación.
+
+#### 6. Handoff: del modo `humano` no se sale solo (`RN-ESC-03`)
+
+**No hay ningún camino automático de vuelta a `bot`** — ni por inactividad, ni por tiempo, ni por el propio bot. Solo `POST /:id/devolver-al-bot`, que invoca una persona. **Esa ausencia es la regla**, y hay dos pruebas que la fijan: una verifica que un mensaje nuevo de la clienta no devuelve el control, y el detector de deriva comprueba que **no existe ninguna columna de caducidad de modo** en la tabla.
+
+Tres detalles del diseño:
+
+- **Escribir desde la bandeja TOMA la conversación.** Dejarla en `bot` produciría **dos interlocutores en el mismo hilo**: la clienta recibiría la respuesta de la Encargada y, acto seguido, la del bot contestando a lo mismo. Es la colisión que `DEC-043` eliminó del lado del celular.
+- **Escalar dos veces no sobrescribe el motivo original.** El primero explica por qué dejó de atenderla el bot; sobrescribirlo con un `intervencion_manual` posterior borraría la razón real, que es el dato que la Dueña mira para saber qué se le escapa al bot.
+- **Se guarda la categoría, no solo el hecho.** Ocho motivos, porque la Dueña necesita distinguir *"me escalan por quejas"* de *"me escalan por cotizaciones complejas"*: la primera es un problema de servicio y la segunda de catálogo.
+
+**Clienta bloqueada → `humano` en silencio.** Pasa a `humano` con motivo `clienta_bloqueada` y **sin respuesta automática**. Las dos mitades importan: `humano` evita que el bot le siga el juego, y el silencio evita decirle *"estás bloqueada"* por un canal automático. **El mensaje sí se guarda**: la bandeja tiene que mostrarlo para que una persona decida.
+
+#### 7. Bandeja Compartida y RBAC
+
+| Método y ruta | Roles |
+|---|---|
+| `GET /v1/conversaciones` (filtros: sucursal, modo, pendientes, paginación) | Super Admin, Administrador, Gerente |
+| `GET /v1/conversaciones/:id` (hilo **+ estado de la ventana**) | ídem |
+| `POST /v1/conversaciones/:id/mensajes` (texto libre; toma la conversación) | ídem |
+| `POST /v1/conversaciones/:id/plantilla` | ídem |
+| `POST /v1/conversaciones/:id/escalar` | ídem |
+| `POST /v1/conversaciones/:id/devolver-al-bot` | ídem |
+| `POST /v1/conversaciones/numeros` | **Solo Super Admin y Administrador** |
+| `GET`/`POST /v1/webhooks/meta` | **`@Public()`** — autenticado por firma HMAC |
+
+**La `MANICURISTA` recibe `403` en todas las rutas de la bandeja.** Un hilo de WhatsApp contiene el teléfono de la clienta y lo que escribió: exactamente la clase de dato que su vista de iPad está construida para no transportar (`DEC-040`). El alta de números es más estrecha porque mapear un `phone_number_id` a la sucursal equivocada **desviaría las conversaciones de una sucursal a otra**.
+
+**El estado de la ventana viaja con el hilo**, no en un endpoint aparte: quien abre la conversación tiene que saber **antes de escribir** si puede mandar texto libre. Descubrirlo al pulsar enviar sería redactar un mensaje para que el sistema lo rechace.
+
+#### 8. Puerto de envío y conexión con el Planificador
+
+`ProveedorWhatsAppPort` tiene **dos métodos y no uno con una bandera**: texto libre y plantilla no son variantes de lo mismo — precondiciones distintas (`N-14`), coste distinto (la plantilla se cobra) y forma distinta. Una bandera habría permitido llamar al caso prohibido sin que el tipo lo impidiera.
+
+**Los notificadores del Planificador pasan a salir por WhatsApp.** `IntegracionModule` sobrescribe `NOTIFICADOR_RECORDATORIO_PORT` y `NOTIFICACION_LISTA_ESPERA_PORT` con `NotificacionesWhatsAppAdapter`, que manda **siempre plantillas**: las dos las dispara el planificador, así que no hay forma de saber si la clienta escribió en 24 h y lo normal es que no → la ventana estará cerrada y el texto libre se rechazaría.
+
+- **No escalan la conversación.** `comoHumano: false`. Si un recordatorio escalara, cada noche el barrido dejaría media agenda en modo `humano` y la Encargada encontraría cien conversaciones "tomadas" que nadie tomó.
+- **Nunca propagan.** La cita ya está en `pendiente_confirmacion` y la oferta ya tiene su ventana corriendo: si el aviso no sale, es trabajo manual, no motivo para revertir.
+- **Sin conversación previa no se envía nada**, y se registra. Caso real: una clienta dada de alta por teléfono que nunca ha escrito por WhatsApp.
+
+`madge` sigue en **0 ciclos** con **nueve** puertos cruzados.
+
+#### ⚠️ Lo que NO está verificado, y no puede estarlo todavía
+
+**`CloudApiAdapter` no se ha ejecutado nunca contra Meta.** El trámite de alta sigue pendiente (camino crítico) y no hay credenciales. Implementa el contrato documentado de la Graph API, pero:
+
+- **Seguro** (documentación pública): el `wamid` llega en `messages[0].id`, el endpoint es `/{phone_number_id}/messages`, el token va como `Bearer`.
+- **Sin verificar:** los códigos de error concretos, los límites de tasa reales y el comportamiento ante un número no registrado. Se tratan como fallo genérico hasta poder medirlos.
+
+Es la misma situación que con Supabase: el diseño se cierra sin credenciales, **la verificación no**.
+
+**El proveedor por defecto es el que NO envía nada** (`WhatsAppSoloLogAdapter`), y se activa el real solo con `WHATSAPP_ACCESS_TOKEN` presente. Lo peligroso sería lo contrario: un despliegue intentando hablar con Meta sin credenciales, o peor, enviando mensajes reales desde un entorno de prueba. El `wamid` sintético lleva prefijo `local.` para ser reconocible.
+
+**`N-14` sigue abierto:** el inventario y la redacción de las plantillas los aprueba Meta y la Dueña no los ha definido. Los nombres en `PLANTILLAS` son **provisionales**; un nombre que Meta no reconoce produce rechazo del envío.
+
+#### Archivos
+
+| Archivo | Qué es |
+|---|---|
+| `database/migrations/0013_conversaciones.sql` | 3 tablas, 10 `CHECK`, 3 índices únicos |
+| `conversaciones/domain/entities/conversacion.entity.ts` | Aggregate raíz, ventana de 24 h, máquina de modo |
+| `conversaciones/domain/ports/conversacion.repository.ts` | Puerto de persistencia |
+| `conversaciones/domain/ports/proveedor-whatsapp.port.ts` | Puerto de salida hacia Meta |
+| `conversaciones/domain/ports/contexto-clienta-de-conversacion.port.ts` | Conversaciones → CRM |
+| `conversaciones/application/use-cases/recibir-mensaje.use-case.ts` | Webhook entrante + estados de entrega |
+| `conversaciones/application/use-cases/bandeja.use-cases.ts` | **6 casos de uso** de la bandeja |
+| `conversaciones/infrastructure/meta/verificador-de-firma.ts` | HMAC en tiempo constante |
+| `conversaciones/infrastructure/meta/webhook-meta.controller.ts` | `GET` reto + `POST` eventos |
+| `conversaciones/infrastructure/meta/cloud-api.adapter.ts` | Adaptador real (**sin verificar**) |
+| `conversaciones/infrastructure/meta/whatsapp-solo-log.adapter.ts` | **Provisional: no envía nada** |
+| `conversaciones/infrastructure/http/bandeja.controller.ts` | 7 endpoints |
+| `conversaciones/conversaciones.spec.ts` | **39 pruebas de integración** |
+| `conversaciones/infrastructure/http/conversaciones.e2e.spec.ts` | **27 pruebas E2E HTTP** |
+| `integracion/notificaciones-whatsapp.adapter.ts` | Recordatorios y lista de espera → plantillas |
+| `integracion/contexto-clienta-de-conversacion.adapter.ts` | Conversaciones → CRM |
+| `database/schema/deriva-restricciones-conversaciones.spec.ts` | 12 pruebas de deriva |
+
+#### Pruebas: **+78** (990 → **1068**, 71 suites)
+
+39 de integración · 27 E2E HTTP · 12 de deriva. Casos que la orden pidió, todos verificados: **firma HMAC** (válida, otro secreto, sin cabecera, cuerpo alterado, App Secret vacío) · **mismo `wamid` dos veces** (integración y HTTP, con el contador y la ventana sin moverse) · **texto libre bloqueado pasadas 24 h exigiendo plantilla** · **clienta bloqueada en silencio y en `humano`** · **`403` para `Manicurista` en las siete rutas**.
+
+#### Validación
+
+`tsc --noEmit` 0 · `tsc -p tsconfig.eslint.json` 0 · `lint` 0 errores 0 avisos · `build` OK · `drizzle-kit check` OK · `madge --circular` 0 ciclos · **1068/1068 pruebas** en 71 suites.
+
+#### Listo para Fase 4 Parte 3 (cierre de Fase 4)
+
+- **El orquestador del bot tiene su sitio preparado:** `RecibirMensajeUseCase` ya devuelve `escalada` y `enSilencioPorBloqueo`, y la conversación sabe si `laLlevaElBot`. El punto de enganche es ese resultado: si la lleva el bot y no está en silencio, invocar al agente.
+- **`RN-ESC-02`** (revalidación de modo antes de cada respuesta del bot) es trivial con lo construido: `conversacion.laLlevaElBot` se consulta justo antes de responder.
+- **`RN-CONV-01`** (*la IA interpreta, nunca decide*) tiene el terreno preparado desde Fase 2: ningún caso de uso acepta decisiones del llamante, y los dos parámetros que sí las aceptaban (`anticipoPagado`, el `fin` de la cita) se eliminaron por esto.
+- **`DEC-044`** ya fijó que el Bot es un *principal de sistema* con lista cerrada de operaciones de **solo lectura**. Su credencial **sigue sin emitirse**; agendar por WhatsApp exigiría ampliar esa lista con su propia ADR.
+- **Lo que falta de `P3`:** las máquinas de estado de `Conversación` —parcialmente cubierta ahora por `modo` + motivos— y `TicketEscalamiento`, que no existe. Más `P6`.
+- **`RN-CONV-06`**: las notas de voz no se procesan. El webhook ya las guarda como `no_soportado` sin contenido, para que quede constancia de que la clienta mandó algo que el bot no puede leer.
+
+#### Deuda nueva
+
+1. **Los mensajes `no_soportado` no avisan a nadie.** Una clienta que manda una nota de voz recibe silencio del bot: el mensaje queda en la bandeja, pero nada escala la conversación ni le responde *"no puedo oír audios"*. Candidato claro para la Parte 3.
+2. **No hay notificación al personal de que llegó algo nuevo.** La bandeja hay que mirarla. `WHATSAPP_ARQUITECTURA_CANAL.md` §2.1 lo pide explícitamente (*"avisar de algo nuevo sin que haya que estar mirando la pantalla"*) y no está construido.
+3. **El contador `mensajesSinResponder` se pone a 0 con cualquier saliente**, incluido un recordatorio automático. Si el planificador manda un recordatorio a una conversación con un mensaje pendiente, esta deja de aparecer en "pendientes" sin que nadie la haya atendido.
+
+---
+
 ### 2026-10-15 (d) — Fase 4 Parte 1: saneamiento del arnés (≈12 % → ≈1,6 %) y Planificador Operativo (`ADR-025`)
 
 Dos pendientes críticos, uno de ellos con una causa raíz que no era la que yo sospechaba.

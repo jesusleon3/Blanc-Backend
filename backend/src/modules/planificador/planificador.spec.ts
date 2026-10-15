@@ -76,7 +76,8 @@ async function preparar({ sillas = 3 }: { sillas?: number } = {}) {
     new GenerarAnticipoUseCase(anticipoRepo, auditoria, uow),
     new RetenerAnticipoUseCase(anticipoRepo, auditoria, uow),
   );
-  const transicionPort = new TransicionDeCitaAdapter(new TransicionarCitaPorAnticipoUseCase(citaRepo, sillaRepo, motor, auditoria));
+  const transicionarCita = new TransicionarCitaPorAnticipoUseCase(citaRepo, sillaRepo, motor, auditoria);
+  const transicionPort = new TransicionDeCitaAdapter(transicionarCita);
   const expirarAnticipo = new ExpirarAnticipoUseCase(anticipoRepo, transicionPort, auditoria, uow);
 
   const notificadorRecordatorio: jest.Mocked<NotificadorRecordatorioPort> = { recordatorioDeCita: jest.fn() };
@@ -88,7 +89,7 @@ async function preparar({ sillas = 3 }: { sillas?: number } = {}) {
 
   const cerrarCitas = new CerrarCitasTerminadasUseCase(citaRepo, completarCita);
   const recordatorios = new SolicitarRecordatoriosUseCase(citaRepo, solicitarConfirmacion, notificadorRecordatorio);
-  const barridoAnticipos = new BarridoDeAnticiposUseCase(citaRepo, consultarAnticipos, expirarAnticipo);
+  const barridoAnticipos = new BarridoDeAnticiposUseCase(citaRepo, consultarAnticipos, expirarAnticipo, transicionarCita);
   const avanzarFila = new AvanzarTurnoListaEsperaUseCase(listaEsperaRepo, procesarFila, auditoria, uow);
 
   const crearClienta = async (nombre: string, telefono: string, enListaRoja = false) => {
@@ -314,6 +315,38 @@ describe('Planificador operativo — ADR-025 (integración, PostgreSQL real)', (
 
       expect((await barridoAnticipos.ejecutar(DUEÑA, DESPUES)).procesados).toBe(1);
       expect((await barridoAnticipos.ejecutar(DUEÑA, DESPUES)).procesados).toBe(0);
+    });
+
+    it('EXPIRA UNA CITA HUÉRFANA: `en_espera_pago` SIN fila de anticipo (deuda cerrada)', async () => {
+      // Pasa de verdad: clienta en lista roja + servicio de cotización manual (`DEC-033`) cuyo
+      // anticipo nadie registró a mano. Antes, esa cita se quedaba en `en_espera_pago` para
+      // siempre, porque el barrido buscaba un anticipo que nunca hubo.
+      const { agendar, crearClienta, barridoAnticipos, citaRepo, consultarAnticipos, db } = await preparar();
+      const lucia = await crearClienta('Lucía Martínez', '4422223344', true);
+      const cita = await agendar.ejecutar(reserva(lucia.id), DUEÑA);
+      // Se borra el anticipo generado para reproducir el caso huérfano.
+      const anticipo = await consultarAnticipos.deCita({ citaId: cita.id });
+      await db.execute(`DELETE FROM anticipos.anticipos WHERE id = '${anticipo.id}'` as unknown as never);
+      await expect(consultarAnticipos.buscarDeCita(cita.id)).resolves.toBeNull();
+
+      const resumen = await barridoAnticipos.ejecutar(DUEÑA, DESPUES);
+
+      expect(resumen).toMatchObject({ procesados: 1, fallidos: 0 });
+      // El invariante que importa: NINGUNA cita se queda en `en_espera_pago` indefinidamente.
+      expect((await citaRepo.buscarPorId(cita.id))?.estado).toBe('expirada');
+    });
+
+    it('y el hueco de la huérfana también queda libre', async () => {
+      const { agendar, crearClienta, barridoAnticipos, consultarAnticipos, db } = await preparar({ sillas: 1 });
+      const lucia = await crearClienta('Lucía Martínez', '4422223344', true);
+      const cita = await agendar.ejecutar(reserva(lucia.id), DUEÑA);
+      const anticipo = await consultarAnticipos.deCita({ citaId: cita.id });
+      await db.execute(`DELETE FROM anticipos.anticipos WHERE id = '${anticipo.id}'` as unknown as never);
+
+      await barridoAnticipos.ejecutar(DUEÑA, DESPUES);
+
+      const andrea = await crearClienta('Andrea Ramírez', '4421112233');
+      await expect(agendar.ejecutar(reserva(andrea.id), DUEÑA)).resolves.toMatchObject({ estado: 'agendada' });
     });
 
     it('y el hueco queda libre para otra clienta', async () => {

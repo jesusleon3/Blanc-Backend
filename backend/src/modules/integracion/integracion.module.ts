@@ -20,6 +20,12 @@ import { ANTICIPO_PORT } from '../agenda/domain/ports/anticipo.port';
 import { AnticipoAdapter } from './anticipo.adapter';
 import { TRANSICION_DE_CITA_PORT } from '../anticipos/domain/ports/transicion-de-cita.port';
 import { TransicionDeCitaAdapter } from './transicion-de-cita.adapter';
+import { ConversacionesModule } from '../conversaciones/conversaciones.module';
+import { CONTEXTO_CLIENTA_DE_CONVERSACION_PORT } from '../conversaciones/domain/ports/contexto-clienta-de-conversacion.port';
+import { ContextoClientaDeConversacionAdapter } from './contexto-clienta-de-conversacion.adapter';
+import { NOTIFICADOR_RECORDATORIO_PORT } from '../agenda/domain/ports/notificador-recordatorio.port';
+import { NOTIFICACION_LISTA_ESPERA_PORT } from '../agenda/domain/ports/notificacion-lista-espera.port';
+import { NotificacionesWhatsAppAdapter } from './notificaciones-whatsapp.adapter';
 
 /**
  * Punto único donde se cablean las dependencias **entre Bounded Contexts**.
@@ -54,7 +60,14 @@ import { TransicionDeCitaAdapter } from './transicion-de-cita.adapter';
  */
 @Global()
 @Module({
-  imports: [AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule],
+  imports: [
+    AgendaModule,
+    SucursalesYPersonalModule,
+    CatalogoYCotizacionModule,
+    CrmYClientasModule,
+    AnticiposModule,
+    ConversacionesModule,
+  ],
   providers: [
     { provide: CONTEXTO_PERSONAL_PORT, useClass: ContextoPersonalAdapter },
     { provide: VERIFICAR_CITAS_FUTURAS_PORT, useClass: AgendaVerificarCitasFuturasAdapter },
@@ -67,6 +80,22 @@ import { TransicionDeCitaAdapter } from './transicion-de-cita.adapter';
     // El par que cerraba `P5` en los dos sentidos: Agenda↔Anticipos.
     { provide: ANTICIPO_PORT, useClass: AnticipoAdapter },
     { provide: TRANSICION_DE_CITA_PORT, useClass: TransicionDeCitaAdapter },
+    { provide: CONTEXTO_CLIENTA_DE_CONVERSACION_PORT, useClass: ContextoClientaDeConversacionAdapter },
+    /**
+     * **Los notificadores de Agenda pasan a salir por WhatsApp.**
+     *
+     * `AgendaModule` seguía proveyendo `RecordatorioSoloLogAdapter` y `ListaEsperaSoloLogAdapter`,
+     * que no enviaban nada. Aquí se sobrescriben con el adaptador real, que manda **plantillas**
+     * (`N-14`): las dos notificaciones las dispara el planificador, así que la ventana de 24 h
+     * estará cerrada y el texto libre se rechazaría.
+     *
+     * Esto es posible porque `IntegracionModule` es `@Global()` y se registra **después** de
+     * `AgendaModule` en `AppModule`: su proveedor gana. Es el mismo mecanismo con el que ya
+     * sustituye los puertos entre contextos, y por eso Agenda no necesita saber que WhatsApp
+     * existe.
+     */
+    { provide: NOTIFICADOR_RECORDATORIO_PORT, useClass: NotificacionesWhatsAppAdapter },
+    { provide: NOTIFICACION_LISTA_ESPERA_PORT, useClass: NotificacionesWhatsAppAdapter },
   ],
   exports: [
     CONTEXTO_PERSONAL_PORT,
@@ -77,6 +106,9 @@ import { TransicionDeCitaAdapter } from './transicion-de-cita.adapter';
     REGISTRO_DE_INCIDENTES_PORT,
     ANTICIPO_PORT,
     TRANSICION_DE_CITA_PORT,
+    CONTEXTO_CLIENTA_DE_CONVERSACION_PORT,
+    NOTIFICADOR_RECORDATORIO_PORT,
+    NOTIFICACION_LISTA_ESPERA_PORT,
   ],
 })
 export class IntegracionModule {}

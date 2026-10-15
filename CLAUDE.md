@@ -56,6 +56,17 @@ NestJS + TypeScript, Modular Monolith (`ADR-001`), Hexagonal + Clean + Vertical 
 - **El dinero son `Centavos`**, un *branded type* (`RN-COT-07`). Nunca un `number` suelto ni coma flotante.
 - `jose` está fijado en `^5.10.0` **a propósito**: la v6 es solo ESM y rompe el runtime CommonJS.
 
+### Canal de WhatsApp (`DEC-043`, `ADR-008` Enmienda 1)
+
+Cloud API oficial de Meta en exclusiva. Lo que hay que saber antes de tocarlo:
+
+- **El webhook es `@Public()` y se autentica por firma HMAC** (`X-Hub-Signature-256`). El HMAC se calcula sobre el **cuerpo crudo** que captura `main.ts`; reserializar el JSON parseado rompe la firma. Si falta `rawBody`, se trata como firma inválida — nunca como "no se pudo comprobar".
+- **El webhook responde siempre `200` salvo firma inválida.** Meta reintenta ante cualquier no-2xx: un `500` convierte un evento defectuoso en un bucle.
+- **Idempotencia por `wamid`**, impuesta por índice único parcial. Para insertar de forma idempotente **dentro de una transacción** usa `ON CONFLICT DO NOTHING`, **no** `try/catch` sobre el `23505`: un statement que falla aborta la transacción entera (`25P02`) y el error sale igual en el `COMMIT`.
+- **Ventana de 24 h de Meta** (`N-14`): pasadas 24 h desde el último mensaje de la clienta solo se puede enviar una **plantilla aprobada**. Se valida en el dominio **antes** de llamar a Meta.
+- **Del modo `humano` no se sale solo** (`RN-ESC-03`): no hay vía automática de vuelta a `bot`. Esa ausencia es la regla, y la vigila el detector de deriva.
+- **El proveedor por defecto NO envía nada.** El adaptador real se activa solo con `WHATSAPP_ACCESS_TOKEN`; `META_APP_SECRET` y `META_VERIFY_TOKEN` fallan cerrado si faltan. Ningún secreto se escribe en el repositorio.
+
 ### Planificador operativo (`ADR-025`)
 
 Cuatro barridos temporales (`lista_espera`, `anticipos`, `cierre_de_citas`, `recordatorios`) con cron en proceso (`@nestjs/schedule`, fijado en `^4.1.2` por compatibilidad con NestJS 10).

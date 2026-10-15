@@ -6,6 +6,7 @@ import {
   TAMANO_DE_LOTE_POR_DEFECTO,
 } from '../../agenda/application/use-cases/barridos-de-agenda.use-cases';
 import { ConsultarAnticiposUseCase, ExpirarAnticipoUseCase } from '../../anticipos/application/use-cases/anticipos.use-cases';
+import { TransicionarCitaPorAnticipoUseCase } from '../../agenda/application/use-cases/transicionar-cita-por-anticipo.use-case';
 import { ClaimsUsuario } from '../../../shared/auth/rol';
 
 /**
@@ -41,6 +42,7 @@ export class BarridoDeAnticiposUseCase {
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
     private readonly consultarAnticipos: ConsultarAnticiposUseCase,
     private readonly expirarAnticipo: ExpirarAnticipoUseCase,
+    private readonly transicionarCita: TransicionarCitaPorAnticipoUseCase,
   ) {}
 
   async ejecutar(actor: ClaimsUsuario, ahora = new Date(), limite = TAMANO_DE_LOTE_POR_DEFECTO): Promise<ResumenDeBarrido> {
@@ -49,18 +51,31 @@ export class BarridoDeAnticiposUseCase {
     return procesarLote(citas, this.logger, 'expiracion_de_anticipos', async (cita) => {
       const anticipo = await this.consultarAnticipos.buscarDeCita(cita.id);
 
-      if (!anticipo || anticipo.estado !== 'pendiente') {
+      if (!anticipo) {
         /**
-         * Sin anticipo, o con uno que ya no está pendiente.
+         * **CITA HUÉRFANA: en `en_espera_pago` y sin fila de anticipo.** (Deuda cerrada en Fase 4
+         * Parte 2.)
          *
-         * **No es un fallo y no se cuenta como tal.** Dos casos reales: una cita de clienta en
-         * lista roja cuyo servicio exige cotización manual (`DEC-033`) y cuyo anticipo nadie
-         * registró a mano, y una carrera en la que alguien confirmó el pago entre la consulta y
-         * esta línea. En ninguno hay nada que expirar.
+         * Ocurre de verdad: una clienta en lista roja agenda un servicio de cotización manual
+         * (`DEC-033`), la generación automática no puede calcular el monto, y nadie lo registra a
+         * mano. La cita se quedaba **en `en_espera_pago` para siempre** — ensuciando la agenda del
+         * día como un cobro pendiente que no existe, y sin que ningún barrido pudiera tocarla,
+         * porque el de anticipos buscaba un anticipo que nunca hubo.
          *
-         * ⚠️ El primer caso deja la cita en `en_espera_pago` para siempre, porque este barrido no
-         * puede tocarla sin anticipo. Queda señalado en §16 como pendiente de decidir: o se expira
-         * la cita sin anticipo, o se obliga a registrarlo al agendar.
+         * Se expira **la cita directamente**, sin pasar por un anticipo inexistente. Es seguro
+         * porque la condición de la consulta ya garantiza que su hora llegó: no se está
+         * descartando nada aprovechable. Y es la única forma de cumplir el invariante que importa:
+         * **ninguna cita se queda en `en_espera_pago` indefinidamente**.
+         */
+        await this.transicionarCita.expirar({ citaId: cita.id }, actor);
+        return;
+      }
+
+      if (anticipo.estado !== 'pendiente') {
+        /**
+         * El anticipo existe pero ya no está pendiente: alguien confirmó el pago entre la consulta
+         * y esta línea, o ya se había expirado. **No es un fallo y no se cuenta como tal** — no
+         * hay nada que hacer, y la cita ya no estará en `en_espera_pago` la próxima vez.
          */
         return;
       }
