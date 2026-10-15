@@ -79,15 +79,41 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 > **Abierto nuevo (`N-01`):** las sillas no son el único límite — falta decidir qué ocurre cuando
 > hay más sillas que personal en turno.
 
-### P5 — Corregir la dependencia circular Agenda↔Anticipos en el catálogo de Decision Flows
+### P5 — Dependencia circular Agenda↔Anticipos (y Agenda↔CRM) — **RESUELTO (2026-10-15)**
 
-- **¿Por qué sigue abierto?** `FL-ANT-01` invoca `FL-AGE-09` directamente, contradiciendo tanto `01-domain-discovery.md` §4 ("Anticipos: Consumidor... de Agenda") como el diagrama unidireccional de `03-technical-architecture.md` §4.1.
-- **¿Quién debe resolverlo?** Arquitectura.
-- **Documento que cambia:** `decision-flows-catalogo-diseno.md` (una fila: `FL-ANT-01` pasa de invocar `FL-AGE-09` a publicar `AnticipoExpirado`, consumido por Agenda vía Outbox).
-- **Criterio de cierre:** el catálogo no tiene ninguna invocación directa en sentido Anticipos→Agenda.
-- **¿Bloquea implementación?** Sí, en su forma actual — pero es la corrección más barata de todo este documento.
-- **Fase que bloquea:** Fase 2/3.
-- **¿Puede resolverse durante desarrollo?** Sí, técnicamente podría corregirse al momento de codificar, pero no hay ninguna razón para no cerrarlo ahora — no depende de ningún insumo externo.
+- **Estado:** **Resuelto.** El problema era real y era más amplio de lo que este documento describía; se cierra con un patrón ya probado en producción, no con una corrección documental.
+
+- **¿Cuál era el problema?** `FL-ANT-01` invocaba `FL-AGE-09` directamente, contradiciendo `01-domain-discovery.md` §4 ("Anticipos: Consumidor... de Agenda") y el diagrama unidireccional de `03-technical-architecture.md` §4.1.
+
+- **Por qué el diagnóstico original era incompleto.** Este documento lo planteaba como *"una fila del catálogo"* y proponía resolverlo con un Outbox. Al construir Fase 2 y Fase 3 resultó que **la circularidad no es una anomalía de Anticipos: es la forma normal de las fronteras de este dominio**, y aparece tres veces:
+  - **Agenda ↔ Sucursales y Personal:** Personal pregunta por citas futuras antes de dar de baja a una manicurista (`DEC-032`); Agenda pregunta por personal operativo para calcular capacidad (`DEC-035`/`DEC-036`).
+  - **Agenda ↔ CRM / Clientas:** Agenda pregunta el estado de riesgo antes de reservar (`RN-CRM-04`, `RN-ANT-01`); Agenda **empuja** los incidentes tardíos y los no-show (`RN-CRM-06`).
+  - **Agenda ↔ Anticipos** (Fase 3 Parte 2): Anticipos necesita saber de la cita; Agenda necesita saber si el anticipo se pagó.
+
+  Un Outbox resuelve *un* sentido de *un* par. No resuelve el patrón.
+
+- **Cómo se resolvió: `IntegracionModule`.** Regla única y verificable: **ningún Bounded Context importa a otro, ni su código ni sus tipos.** Cada BC declara el **puerto** que necesita, en su propio dominio; `IntegracionModule` (`@Global`) provee los **adaptadores**. Ya cablea cinco puertos en los dos sentidos:
+
+  | Puerto | Lo declara | Lo implementa el adaptador contra |
+  |---|---|---|
+  | `ContextoPersonalPort` | Agenda | Sucursales y Personal |
+  | `VerificarCitasFuturasPort` | Sucursales y Personal | Agenda |
+  | `ConsultaAgendaPort` | Sucursales y Personal | Agenda |
+  | `ContextoCatalogoPort` | Agenda | Catálogo y Cotización |
+  | `ContextoClientaPort` | Agenda | CRM / Clientas |
+  | `RegistroDeIncidentesPort` | Agenda | CRM / Clientas |
+
+- **Atomicidad cuando se necesita.** `DrizzleUnitOfWork` **se une a la transacción en curso** si ya hay una (corregido 2026-10-15), de modo que una transición cruzada —cancelar una cita y anotar el incidente en CRM— ocurre en **una sola transacción**. Antes abría una segunda sobre otra conexión del pool: la interna no veía lo de la externa, podía bloquearse esperando filas que la externa tenía tomadas, y un fallo posterior dejaba escrito lo que la interna ya había confirmado. Un rollback a medias.
+
+- **Y cuándo NO se usa atomicidad, que también es parte de la decisión.** No todo cruce debe ser atómico, y forzarlo sería un error:
+  - La **anotación de un incidente** va dentro de la transacción (es una escritura y su pérdida quita a la Dueña la alerta que `RN-CRM-06` le promete), pero su **fallo no propaga**: cancelar es el acto, el incidente es la anotación. Si propagara, un CRM caído desharía la cancelación que la clienta pidió.
+  - El **aviso de lista de espera** va **fuera**: es una llamada de red, una transacción abierta esperando a un tercero mantiene bloqueos sobre la agenda, y un mensaje enviado no se deshace con un `ROLLBACK`.
+
+- **Criterio de cierre, verificado mecánicamente:** `madge --circular --extensions ts src/` devuelve **0 ciclos** en cada corrida, con los seis puertos cableados. No es una afirmación documental: si alguien añade un `import` directo entre dos BC, el comando falla.
+
+- **Qué queda del Outbox.** La propuesta original de `decision-flows-catalogo-diseno.md` (`FL-ANT-01` publica `AnticipoExpirado` en vez de invocar `FL-AGE-09`) **sigue siendo válida y compatible**: un adaptador de `IntegracionModule` puede leer de un Outbox en lugar de llamar a un caso de uso. Pero **el Outbox ya no es la condición para cerrar `P5`**, porque exige un planificador que el proyecto no tiene — ver la deuda de Fase 2 sobre `avanzar-turno`. El patrón de fronteras está cerrado; el mecanismo de entrega asíncrona es una decisión posterior e independiente.
+
+- **Documento que cambia:** `decision-flows-catalogo-diseno.md` queda con su fila pendiente de reescritura al construir Anticipos (Fase 3 Parte 2), **sin bloquear**: el patrón que la sustituye ya está construido y probado.
 
 ### P6 — Ratificar F-27 (patrón de ingesta de webhook) y F-14 (retención diferenciada de IA) como ADR/enmienda formal
 
@@ -181,7 +207,7 @@ Este documento se escribió el 2026-07-16, antes de que existieran `PLATFORM_ARC
 | P2 — `PA-19` (alcance RBAC) | Cliente | `RN-SEG-03`, `99-open-questions.md` | ~~Fase 1 (modelo de permisos), `05-api-design.md`~~ Ninguna | **Resuelto (2026-08-04)** | Ninguna — `RN-SEG-03: Aprobada`, transcrito a `99-open-questions.md` en Paso 11 |
 | P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | ~~Fase 2~~ Fase 4 | **Abierto — `Cita` CERRADA (2026-10-14)**: máquina formal implementada y probada (`TRANSICIONES_LEGALES`, 9 estados, `ESTADOS_INICIALES`, transición administrativa `completada → no_show` de `N-02`). `Conversación` y `TicketEscalamiento` siguen intactas | Solo quedan las dos de Fase 4 — ya no bloquea Fase 2 |
 | P4 — Invariante de capacidad sin manicurista | Cliente + Arquitectura | `01-domain-discovery.md`, `decision-flows-catalogo-diseno.md` | ~~Fase 2~~ Ninguna | **Resuelto (2026-09-30)** | Ninguna — límite físico por sucursal (Zibatá 5, Lomas 3, Álamos 1) + patrón de Sillas Virtuales, `DEC-031` |
-| P5 — Circular Agenda↔Anticipos | Arquitectura | `decision-flows-catalogo-diseno.md` | Fase 2/3 | Abierto | Corregir una fila del catálogo |
+| P5 — Circular Agenda↔Anticipos | Arquitectura | `decision-flows-catalogo-diseno.md` | ~~Fase 2/3~~ Ninguna | **Resuelto (2026-10-15)** | Ninguna — patrón `IntegracionModule` con 6 puertos y `madge` en 0 ciclos; el Outbox deja de ser condición de cierre |
 | P6 — Ratificar F-27 y F-14 | Arquitectura + Cliente | ADR nuevo + enmienda ADR-007/017/022 | Fase 4 | Abierto | Redactar y aprobar |
 | P7 — Sign-off ADR-008 | Cliente | `ADR-008-*.md` | ~~Fase 4 + trámite Meta~~ Ninguna | **Resuelto (2026-10-09)** | Ninguna — API oficial en exclusiva (`DEC-043`); `ADR-008` pasa a `Accepted` con Enmienda 1. Revierte la petición de doble adaptador de 1.29. **Dispara el trámite de Meta: ahora es camino crítico** |
 | P8 — `05-api-design.md` | Arquitectura | `05-api-design.md` (ya existe, parcial) | Módulos sin contrato específico todavía | Abierto (parcialmente iniciado) | Redactar contratos módulo por módulo |
@@ -198,7 +224,7 @@ Por dependencias reales, no por importancia:
 3. **Domain Discovery Pregunta #15 y `PA-15`** (insumos de negocio) — en paralelo con 1-2, condición previa de P3.
 4. **P3** (3 máquinas de estado) — depende del paso 3.
 5. **P4** (invariante de capacidad) — puede correr en paralelo con P3, depende solo de la decisión de negocio propia.
-6. **P5** (corrección circular) — sin dependencias, debería cerrarse ya, en cualquier punto de la secuencia.
+6. ~~**P5** (corrección circular)~~ — **✅ Resuelto (2026-10-15)**, con `IntegracionModule` en vez de la corrección documental que este plan anticipaba.
 7. **P6** (ratificar F-27/F-14) y **P7** (sign-off ADR-008) — en paralelo entre sí; no dependen de 1-5, pero P7 dispara el trámite de Meta, por lo que cuanto antes se resuelva mejor, independientemente de su posición en esta secuencia técnica.
 8. **P8** (`05-api-design.md`) — al final: depende de P1 (proveedor/ORM), P2 (contrato de auth) y P9 (para el endpoint de agenda de manicurista); consume el catálogo de Decision Flows ya congelado, no necesita esperar a P3/P4/P5/P6/P7 porque esos no afectan la forma del contrato, solo su contenido de negocio.
 

@@ -164,6 +164,26 @@ export const citas = agendaSchema.table(
 export const ESTADOS_LISTA_ESPERA = ['en_espera', 'notificada', 'aceptada', 'expirada', 'cancelada'] as const;
 export type EstadoListaEspera = (typeof ESTADOS_LISTA_ESPERA)[number];
 
+/**
+ * Estados que **se ven en la agenda del día**, distintos de los que ocupan horario.
+ *
+ * POR QUÉ NO SE REUTILIZA `ESTADOS_QUE_LIBERAN_HORARIO` NEGADO. Son dos preguntas diferentes:
+ * "¿esta cita consume capacidad?" y "¿esta cita tiene que aparecer en la pantalla?".
+ *
+ * El caso que lo destapó: una cita de clienta en lista roja nace en `en_espera_pago`, que
+ * **libera horario** (`RN-ANT-03`) pero **existe y hay que perseguirla** para cobrar el anticipo.
+ * Filtrando la vista por ocupación, esas citas eran invisibles — justo las que más atención
+ * necesitan. Se excluyen solo las que están anuladas o sustituidas por otra fila.
+ */
+export const ESTADOS_VISIBLES_EN_AGENDA = [
+  'agendada',
+  'pendiente_confirmacion',
+  'confirmada',
+  'en_espera_pago',
+  'completada',
+  'no_show',
+] as const satisfies readonly EstadoCita[];
+
 /** Estados en los que la solicitud **sigue viva** en la fila y cuenta para el FIFO. */
 export const ESTADOS_LISTA_ESPERA_ACTIVOS = ['en_espera', 'notificada'] as const satisfies readonly EstadoListaEspera[];
 

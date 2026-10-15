@@ -1,5 +1,5 @@
 import { ContextoCatalogoPort, ServicioAgendable } from '../domain/ports/contexto-catalogo.port';
-import { VerificarClientaPort } from '../domain/ports/verificar-clienta.port';
+import { ContextoClienta, ContextoClientaPort } from '../domain/ports/contexto-clienta.port';
 
 /** Servicio de catálogo por defecto: activo, 60 minutos, $450.00. */
 export function servicioDePrueba(sobreescribir: Partial<ServicioAgendable> = {}): ServicioAgendable {
@@ -27,9 +27,24 @@ export function crearContextoCatalogoFalso(servicios: ServicioAgendable[] = [ser
   return { buscarServicio: async (id) => porId.get(id) ?? null };
 }
 
-/** Doble de `VerificarClientaPort`. Por defecto la clienta existe. */
-export function crearVerificarClientaFalso(existe = true): VerificarClientaPort {
-  return { existe: async () => existe };
+/**
+ * Doble de `ContextoClientaPort`. Por defecto **cualquier** clienta existe y está en `normal`.
+ *
+ * Ese valor por defecto es deliberado: las pruebas que no van sobre CRM —reserva, sillas, ciclo de
+ * vida— deben seguir aislando lo suyo. Las que sí van sobre el estado de riesgo pasan
+ * `estadoDeRiesgo` explícitamente.
+ */
+export function crearContextoClientaFalso(
+  opciones: { existe?: boolean; estadoDeRiesgo?: ContextoClienta['estadoDeRiesgo'] } = {},
+): ContextoClientaPort {
+  const existe = opciones.existe ?? true;
+  const estadoDeRiesgo = opciones.estadoDeRiesgo ?? 'normal';
+  const contexto = (id: string): ContextoClienta => ({ id, estadoDeRiesgo });
+
+  return {
+    obtener: async (id) => (existe ? contexto(id) : null),
+    obtenerVarias: async (ids) => new Map(existe ? ids.map((id) => [id, contexto(id)]) : []),
+  };
 }
 
 /**

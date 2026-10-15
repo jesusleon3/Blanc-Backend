@@ -7,7 +7,7 @@ import { DrizzleSillaRepository } from '../../infrastructure/persistence/drizzle
 import { Silla } from '../entities/silla.entity';
 import { crearContextoPersonalFalso, horarioRealDeBlanc } from '../../test-utils/contexto-personal-falso';
 import { ResolutorDeServicio } from './resolutor-de-servicio';
-import { crearCatalogoPorDuraciones, crearVerificarClientaFalso } from '../../test-utils/contexto-catalogo-falso';
+import { crearCatalogoPorDuraciones, crearContextoClientaFalso } from '../../test-utils/contexto-catalogo-falso';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
@@ -53,7 +53,7 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
       sillaRepo,
       motor,
       new ResolutorDeServicio(CATALOGO.port),
-      crearVerificarClientaFalso(),
+      crearContextoClientaFalso(),
       auditoria,
       crearUnitOfWorkFalso(),
     ),

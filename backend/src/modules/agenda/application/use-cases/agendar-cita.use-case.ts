@@ -4,7 +4,7 @@ import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.reposit
 import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
-import { VERIFICAR_CLIENTA_PORT, VerificarClientaPort } from '../../domain/ports/verificar-clienta.port';
+import { CONTEXTO_CLIENTA_PORT, ContextoClientaPort } from '../../domain/ports/contexto-clienta.port';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
@@ -45,8 +45,11 @@ export interface AgendarCitaInput {
  * contra personal operativo.
  *
  * **Integridad referencial que la base de datos no puede dar** (`ADR-005` prohíbe las FK entre
- * esquemas): el servicio se valida contra Catálogo por puerto, y la clienta contra CRM — este
- * último con un adaptador provisional que **todavía no valida nada**, ver `VerificarClientaPort`.
+ * esquemas): el servicio se valida contra Catálogo por puerto y la clienta contra CRM, los dos
+ * con adaptadores reales desde la Parte 1 de Fase 3.
+ *
+ * **El estado de la clienta decide en qué estado nace la cita** (`RN-CRM-04`, `RN-ANT-01`):
+ * bloqueada no agenda, lista roja nace en `en_espera_pago`, normal nace `agendada`.
  *
  * **La duración la manda el catálogo.** Quien llama ya no elige cuánto dura la cita; solo cuándo
  * empieza. Antes se podía reservar una hora para un servicio de dos y la silla quedaba libre a
@@ -59,7 +62,7 @@ export class AgendarCitaUseCase {
     @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
     private readonly motorDisponibilidad: MotorDisponibilidad,
     private readonly resolutorDeServicio: ResolutorDeServicio,
-    @Inject(VERIFICAR_CLIENTA_PORT) private readonly clientas: VerificarClientaPort,
+    @Inject(CONTEXTO_CLIENTA_PORT) private readonly clientas: ContextoClientaPort,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
@@ -70,9 +73,31 @@ export class AgendarCitaUseCase {
     const servicio = await this.resolutorDeServicio.resolver(input.servicioId);
     const rangoHorario = this.resolutorDeServicio.derivarRango(input.inicio, input.fin, servicio);
 
-    if (!(await this.clientas.existe(input.clientaId))) {
-      throw new RecursoNoEncontradoError('Clienta', input.clientaId);
+    const clienta = await this.clientas.obtener(input.clientaId);
+    if (!clienta) throw new RecursoNoEncontradoError('Clienta', input.clientaId);
+
+    // `RN-CRM-04`: no agenda en absoluto hasta un desbloqueo explícito. Se corta con 409 y no con
+    // 403 porque no es un problema de permisos de quien opera, sino del estado de la clienta — y
+    // el mensaje tiene que llevar a escalar el caso a una persona, no a buscar otro horario.
+    if (clienta.estadoDeRiesgo === 'bloqueada') {
+      throw new ConflictoDeNegocioError(
+        'CLIENTA_BLOQUEADA',
+        'Esta clienta está bloqueada y no puede agendar; el caso tiene que revisarlo una persona.',
+        { clientaId: input.clientaId },
+      );
     }
+
+    /**
+     * `RN-ANT-01` + `RN-CRM-03`: la clienta en lista roja **sí puede agendar**, pero su cita nace
+     * pendiente de anticipo.
+     *
+     * Y `en_espera_pago` **NO retiene el horario** (`RN-ANT-03`, corregido en la migración `0007`
+     * frente a lo que `DEC-034` había supuesto): el hueco sigue disponible para cualquier otra
+     * clienta, y *"el primero en pagar se queda con el cupo"*. La carrera se resuelve al confirmar
+     * el pago, no reteniendo. Por eso dos citas en este estado pueden coexistir sobre la misma
+     * silla y la restricción `EXCLUDE` no las frena.
+     */
+    const estadoInicial = clienta.estadoDeRiesgo === 'lista_roja' ? 'en_espera_pago' : 'agendada';
 
     // ANTES de consultar la base: un rango invertido haría que PostgreSQL lanzara un error crudo
     // al construir el `tstzrange` de la consulta, en vez del error de dominio que corresponde.
@@ -96,6 +121,7 @@ export class AgendarCitaUseCase {
         sillaId,
         manicuristaId: input.manicuristaId ?? null,
         cotizacionSnapshot,
+        estado: estadoInicial,
       });
 
       try {
@@ -114,6 +140,9 @@ export class AgendarCitaUseCase {
               manicuristaId: cita.manicuristaId,
               inicio: cita.rangoHorario.inicio.toISOString(),
               fin: cita.rangoHorario.fin.toISOString(),
+              // Queda constancia de por qué nació donde nació: `en_espera_pago` no es un fallo
+              // ni una elección de quien agenda, es consecuencia del estado de la clienta.
+              estadoInicial,
             },
           });
         });

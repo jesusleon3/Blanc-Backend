@@ -10,7 +10,7 @@ import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
-import { crearContextoCatalogoFalso, crearVerificarClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
+import { crearContextoCatalogoFalso, crearContextoClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -48,7 +48,7 @@ async function preparar(numeroDeSillas = 2) {
       // El servicio del catálogo dura 60 minutos, que es el tamaño de todos los rangos de este
       // archivo: así el fin derivado coincide con lo que estas pruebas ya daban por supuesto.
       new ResolutorDeServicio(crearContextoCatalogoFalso([servicioDePrueba({ id: SERVICIO })])),
-      crearVerificarClientaFalso(),
+      crearContextoClientaFalso(),
       auditoria,
       crearUnitOfWorkFalso(),
     ),

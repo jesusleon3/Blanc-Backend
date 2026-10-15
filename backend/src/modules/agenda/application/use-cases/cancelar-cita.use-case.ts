@@ -6,6 +6,7 @@ import { ClaimsUsuario } from '../../../../shared/auth/rol';
 import { UNIT_OF_WORK, UnitOfWork } from '../../../../shared/persistence/unit-of-work.port';
 import { aplicarTransicion } from './transicion-cita.base';
 import { ProcesarListaEsperaUseCase, ResultadoHuecoLiberado } from './lista-espera.use-cases';
+import { REGISTRO_DE_INCIDENTES_PORT, RegistroDeIncidentesPort } from '../../domain/ports/registro-de-incidentes.port';
 import { Logger } from '@nestjs/common';
 
 /** Ventana de `RN-CRM-06`: cancelar dentro de la hora previa es un incidente, no una cancelación normal. */
@@ -50,6 +51,7 @@ export class CancelarCitaUseCase {
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
     private readonly procesarListaEspera: ProcesarListaEsperaUseCase,
+    @Inject(REGISTRO_DE_INCIDENTES_PORT) private readonly incidentes: RegistroDeIncidentesPort,
   ) {}
 
   private readonly logger = new Logger(CancelarCitaUseCase.name);
@@ -60,16 +62,23 @@ export class CancelarCitaUseCase {
     // la cita ya cancelada invita a pensar que depende del estado, y no es así.
     const incidenteTardio = previa ? this.esTardia(previa, ahora) : false;
 
-    const cita = await aplicarTransicion(
-      { citaRepository: this.citaRepository, auditoria: this.auditoria, unitOfWork: this.unitOfWork },
-      {
-        citaId: input.citaId,
-        nuevoEstado: 'cancelada',
-        accion: 'cancelar_cita',
-        actor,
-        detalleExtra: { incidenteTardio, motivo: input.motivo },
-      },
-    );
+    // El cambio de estado y la anotación en CRM van en la MISMA transacción: la unidad de trabajo
+    // se une a la que ya esté abierta, así que `aplicarTransicion` no abre una segunda.
+    const cita = await this.unitOfWork.ejecutar(async () => {
+      const cancelada = await aplicarTransicion(
+        { citaRepository: this.citaRepository, auditoria: this.auditoria, unitOfWork: this.unitOfWork },
+        {
+          citaId: input.citaId,
+          nuevoEstado: 'cancelada',
+          accion: 'cancelar_cita',
+          actor,
+          detalleExtra: { incidenteTardio, motivo: input.motivo },
+        },
+      );
+
+      await this.anotarEnCrm(cancelada, incidenteTardio, ahora);
+      return cancelada;
+    });
 
     // DESPUÉS de que la cancelación esté confirmada, y en su propia transacción. Dos motivos:
     //
@@ -82,6 +91,34 @@ export class CancelarCitaUseCase {
     const listaEspera = await this.procesarFila(cita, actor, ahora);
 
     return { cita, incidenteTardio, listaEspera };
+  }
+
+  /**
+   * Lleva el hecho a CRM (`RN-CRM-06`), distinguiendo las dos vías.
+   *
+   * **Tardía (`<= 60 min`) → incidente**, que enciende la sugerencia de lista roja.
+   * **Ordinaria (`> 60 min`) → solo contador**, porque `RN-CRM-06` descartó expresamente el
+   * umbral acumulado: *"no se cuentan N cancelaciones en una ventana de días"*. El contador existe
+   * como contexto para la Dueña (`RN-CRM-05` sugiere *"con base en historial de cancelaciones"*),
+   * no como disparador.
+   *
+   * En ninguno de los dos casos se marca lista roja: eso es de la Dueña (`DEC-042`).
+   */
+  private async anotarEnCrm(cita: Cita, incidenteTardio: boolean, ahora: Date): Promise<void> {
+    const minutosDeAntelacion = Math.round((cita.rangoHorario.inicio.getTime() - ahora.getTime()) / 60_000);
+
+    if (incidenteTardio) {
+      await this.incidentes.registrarIncidente({
+        clientaId: cita.clientaId,
+        citaId: cita.id,
+        tipo: 'cancelacion_tardia',
+        ocurridoEn: ahora,
+        minutosDeAntelacion,
+      });
+      return;
+    }
+
+    await this.incidentes.registrarCancelacionOrdinaria({ clientaId: cita.clientaId, citaId: cita.id });
   }
 
   /**

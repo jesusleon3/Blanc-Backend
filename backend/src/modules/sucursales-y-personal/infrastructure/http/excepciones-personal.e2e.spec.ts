@@ -28,6 +28,9 @@ import { horarioAbiertoSiempre } from '../../../agenda/test-utils/contexto-perso
 import { Servicio } from '../../../catalogo-y-cotizacion/domain/entities/servicio.entity';
 import { DrizzleServicioRepository } from '../../../catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
 import { CatalogoYCotizacionModule } from '../../../catalogo-y-cotizacion/catalogo-y-cotizacion.module';
+import { CrmYClientasModule } from '../../../crm-y-clientas/crm-y-clientas.module';
+import { Clienta } from '../../../crm-y-clientas/domain/entities/clienta.entity';
+import { DrizzleClientaRepository } from '../../../crm-y-clientas/infrastructure/persistence/drizzle-clienta.repository';
 
 const SECRETO = 'secreto-e2e-excepciones';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -71,6 +74,7 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
   let ana: Manicurista;
   let bea: Manicurista;
   let servicio: Servicio;
+  let clienta: Clienta;
   let dueña: string;
   let encargada: string;
   let manicurista: string;
@@ -80,7 +84,7 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
     dbDePrueba = await crearBaseDeDatosDePrueba();
 
     const moduleRef = await Test.createTestingModule({
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, IntegracionModule],
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, IntegracionModule],
       providers: [
         {
           provide: APP_GUARD,
@@ -113,6 +117,10 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
     encargada = token(Rol.GERENTE, 'encargada');
     manicurista = token(Rol.MANICURISTA, 'ana-usuaria');
     recepcionista = token(Rol.RECEPCIONISTA, 'recepcionista');
+
+    // Clienta real: el adaptador permisivo de `clientaId` desapareció en Fase 3 Parte 1.
+    clienta = Clienta.registrar({ nombre: 'Andrea Ramírez', telefono: '4421112233' });
+    await new DrizzleClientaRepository(dbDePrueba).guardar(clienta);
 
     servicio = Servicio.crear({ nombre: 'Gelish', categoria: 'aplicacion', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
     await new DrizzleServicioRepository(dbDePrueba).guardar(servicio);
@@ -150,7 +158,7 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
       .send({
         sucursalId,
         servicioId: servicio.id,
-        clientaId: randomUUID(),
+        clientaId: clienta.id,
         inicio: CITA_INICIO,
         ...(manicuristaId ? { manicuristaId } : {}),
       });
@@ -298,7 +306,7 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
   });
 
   it('audita el registro sin filtrar datos de la clienta (`RN-AUD-01`)', async () => {
-    const clientaId = randomUUID();
+    const clientaId = clienta.id;
     await request(app.getHttpServer())
       .post('/v1/agenda/citas')
       .set('Authorization', `Bearer ${encargada}`)

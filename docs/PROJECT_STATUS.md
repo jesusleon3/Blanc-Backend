@@ -1153,6 +1153,126 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-15 (b) — Kick-off Fase 3 Parte 1: `P5` cerrado y Bounded Context de CRM / Clientas
+
+Arranca Fase 3. Con esto **el adaptador permisivo de `clientaId` desaparece** y `P5` —uno de los tres bloqueadores no negociables del Closure Plan— queda resuelto.
+
+#### 1. `P5` cerrado: el diagnóstico original era incompleto
+
+El plan lo planteaba como *"una fila del catálogo"*: `FL-ANT-01` invocaba `FL-AGE-09` directamente, y la corrección propuesta era publicar `AnticipoExpirado` por Outbox. Al construir Fase 2 y 3 resultó que **la circularidad no es una anomalía de Anticipos: es la forma normal de las fronteras de este dominio**, y aparece tres veces — Agenda↔Personal, Agenda↔CRM y Agenda↔Anticipos. **Un Outbox resuelve un sentido de un par; no resuelve el patrón.**
+
+Se cierra con `IntegracionModule`, que ya estaba probado en producción: **ningún BC importa a otro, ni su código ni sus tipos**; cada uno declara el puerto que necesita en su propio dominio y la integración provee los adaptadores. Hoy cablea **seis puertos en los dos sentidos**, y el criterio de cierre es mecánico: `madge --circular` da **0 ciclos** en cada corrida. Si alguien añade un `import` directo entre contextos, el comando falla.
+
+**La parte de la decisión que no es "todo atómico":**
+
+- La **anotación de un incidente** va *dentro* de la transacción —perderla quita a la Dueña la alerta que `RN-CRM-06` le promete—, pero **su fallo no propaga**: cancelar es el acto, el incidente es la anotación. Si propagara, un CRM caído desharía la cancelación que la clienta pidió. Hay una prueba que simula CRM caído y verifica que la cita queda cancelada.
+- El **aviso de lista de espera** va *fuera*: es una llamada de red, una transacción abierta esperando a un tercero mantiene bloqueos sobre la agenda, y un mensaje enviado no se deshace con un `ROLLBACK`.
+
+El Outbox **sigue siendo compatible** (un adaptador puede leer de él en lugar de llamar a un caso de uso) pero **deja de ser condición de cierre**, porque exige el planificador que el proyecto todavía no tiene.
+
+#### 2. Cómo se concilian `RN-CRM-06` y la facultad exclusiva de la Dueña
+
+**No se contradicen: la orden de trabajo las describió como si chocaran, y leyendo las reglas no chocan.** `RN-CRM-06` dice que un incidente *"activa la sugerencia"*. `RN-CRM-05` dice que la asignación *"es manual... el sistema solo sugiere, nunca decide por sí mismo"*. Hablan de dos cosas distintas, y por eso en el modelo son **dos campos separados**:
+
+| Campo | Quién lo cambia |
+|---|---|
+| `sugerida_lista_roja` | **El sistema**, solo, ante cualquier incidente. Es una alerta |
+| `estado_de_riesgo` | **Solo una persona**, y el RBAC lo restringe a `SUPER_ADMIN`/`ADMINISTRADOR` |
+
+Fusionarlos *sería* la asignación automática que `RN-CRM-05` prohíbe. Tener dos es lo que permite que el sistema avise sin decidir. `RegistrarIncidenteClientaUseCase` **nunca** toca `estado_de_riesgo`, y hay una prueba que lo fija: tras un no-show la clienta queda `sugeridaListaRoja: true` y `estadoDeRiesgo: 'normal'`.
+
+Marcar lista roja **apaga** la sugerencia (ya se atendió; dejarla encendida haría reaparecer la alerta para siempre sobre una decisión tomada), y **rehabilitar no borra el historial** — es una decisión sobre el presente, no una amnesia: si vuelve a fallar, la Dueña tiene que poder ver que ya había pasado.
+
+#### 3. Tres puntos donde la orden roza reglas ya `Aprobada`
+
+Los tres se implementaron como pedía la orden; se registran porque tocan reglas aprobadas y el proyecto exige dejar constancia en vez de reinterpretar en silencio.
+
+**(a) `RN-CRM-01` decía que el teléfono es "clave única de identidad". No lo es.** La orden establece que mamá e hija son dos clientas que comparten número, y eso contradice la unicidad. La regla estaba marcada como *supuesto de trabajo*, así que **la realidad del salón la supera**. Si el teléfono fuera único, la segunda no podría existir — o peor, se fusionarían los dos historiales de incidentes y **una lista roja de la hija caería sobre la madre**. Lo único que se impide es el duplicado real: mismo nombre **y** mismo teléfono.
+
+**(b) `RN-CRM-02` define CUATRO estados; se construyeron tres.** Falta `vip`, y no por olvido: es una clasificación de *beneficio*, ortogonal al riesgo, y meterla en el mismo campo obligaría a decidir qué significa una clienta que sería VIP y además acumula incidentes. **Queda como pendiente**, y el `CHECK` se escribió con `text` precisamente para poder añadirlo.
+
+**(c) La orden pedía "conteo de cancelaciones ordinarias (> 60 min) para encender un indicador de `sugerida_lista_roja`".** Leído así contradiría `RN-CRM-06`, que es explícita: el disparador *"**no** es un umbral acumulado (no se cuentan N cancelaciones en una ventana de días)"*. **Resolución:** las cancelaciones ordinarias **se cuentan** —`RN-CRM-05` sugiere *"con base en historial de cancelaciones"* y la Dueña necesita ese contexto— pero **no encienden la sugerencia por sí solas**. Hay una prueba con cinco cancelaciones ordinarias que verifica `sugeridaListaRoja: false`. Si la intención era el umbral acumulado, es un cambio de una línea, pero exigiría modificar `RN-CRM-06`.
+
+#### 4. 🐛 Dos fallos encontrados por las pruebas de esta entrega
+
+**Las citas pendientes de anticipo eran invisibles en la agenda.** Una cita de clienta en lista roja nace `en_espera_pago`, que **libera horario** (`RN-ANT-03`), y `listarParaConsulta` filtraba por *"estados que ocupan"*. Resultado: **justo las citas que hay que perseguir para cobrar el anticipo no se veían**. Son dos preguntas distintas —"¿consume capacidad?" y "¿tiene que aparecer en pantalla?"— y estaban respondidas con el mismo array. Se añadió `ESTADOS_VISIBLES_EN_AGENDA`, que excluye solo lo anulado o sustituido (`cancelada`, `expirada`, `reprogramada`).
+
+**El teléfono normalizado no unificaba el formato internacional.** Mi primera versión quitaba solo los símbolos, así que `+52 442 111 2233` (12 dígitos) y `442 111 2233` (10) eran números distintos. No es hipotético: **WhatsApp entrega siempre formato internacional** y recepción teclea 10 dígitos, así que la misma clienta habría tenido **dos expedientes —uno del bot y otro del mostrador— con el historial de incidentes partido en dos**, que es el dato del que depende si se le pide anticipo. Ahora se conservan los últimos 10 dígitos, lo que absorbe el `52` y el `1` heredado de los móviles. Limitación asumida y anotada: un número extranjero se truncaría.
+
+#### Migración y archivos
+
+**`0011_crm_clientas.sql`** — esquema `crm`, tablas `clientas` e `incidentes_clienta`, 4 `CHECK` y 2 índices únicos a mano.
+
+| Decisión de modelo | Por qué |
+|---|---|
+| Identidad **global**, sin `sucursal_id` | `RN-CRM-01`: la misma clienta en las tres sucursales, historial que las cruza |
+| **Sin** único sobre `telefono` | Mamá e hija. El detector de deriva vigila que nadie lo añada |
+| `incidentes_clienta` es **tabla, no contador** | `RN-CRM-05` exige que la sugerencia sea *revisable*. Un "3" no deja juzgar si tres cancelaciones con aviso valen lo mismo que tres no-shows |
+| Único `(cita_id, tipo)` | Un reintento no infla el historial: es la base de una decisión que perjudica a la clienta |
+
+| Archivo | Qué es |
+|---|---|
+| `crm-y-clientas/domain/entities/clienta.entity.ts` | Aggregate raíz, normalización de teléfono |
+| `crm-y-clientas/domain/ports/clienta.repository.ts` | Puerto; `buscarPorTelefono` devuelve **lista** |
+| `crm-y-clientas/infrastructure/persistence/drizzle-clienta.repository.ts` | Adaptador |
+| `crm-y-clientas/application/use-cases/clientas.use-cases.ts` | **8 casos de uso** |
+| `crm-y-clientas/infrastructure/http/clientas.controller.ts` | 6 endpoints |
+| `agenda/domain/ports/contexto-clienta.port.ts` | Sustituye a `VerificarClientaPort` |
+| `agenda/domain/ports/registro-de-incidentes.port.ts` | Agenda → CRM |
+| `integracion/contexto-clienta.adapter.ts` | Adaptador **real** |
+| `integracion/registro-de-incidentes.adapter.ts` | Adaptador **real** |
+| `integracion/agenda-crm.spec.ts` | **16 pruebas con adaptadores reales** |
+| `database/schema/deriva-restricciones-crm.spec.ts` | Detector de deriva de `crm` |
+
+**Eliminados:** `verificar-clienta.port.ts` y `crm-no-construido-verificar-clienta.adapter.ts`.
+
+#### Endpoints y RBAC
+
+| Método y ruta | Roles |
+|---|---|
+| `GET /v1/crm/clientas?telefono=` | Super Admin, Administrador, Gerente |
+| `GET /v1/crm/clientas/por-telefono-anterior` | ídem |
+| `GET /v1/crm/clientas/:id` (detalle + incidentes) | ídem |
+| `POST /v1/crm/clientas` | ídem |
+| `POST /v1/crm/clientas/:id/telefono` | ídem |
+| `POST /v1/crm/clientas/:id/estado-de-riesgo` | **Solo Super Admin y Administrador** |
+
+La `MANICURISTA` **no entra en ninguna ruta**: la Dueña fue explícita en que no ve lista roja (`DEC-040`) y aquí todo es información de clientas. La `RECEPCIONISTA` tampoco, por coherencia con el resto de la plataforma.
+
+**El `enListaRoja` de la agenda no se filtra: no se consulta.** Para una `MANICURISTA`, `ConsultarAgendaUseCase` **no llama a CRM en absoluto**. La diferencia con consultarlo y no enviarlo no es sutil: si el dato nunca entra en el proceso, no puede escaparse por un presenter futuro, por un log ni por un mensaje de error.
+
+#### Integración `Agenda ↔ CRM`: los tres resultados distintos
+
+| Estado de la clienta | Qué pasa al agendar |
+|---|---|
+| No existe | **404** — antes se agendaba igual con un uuid inventado |
+| `bloqueada` | **409 `CLIENTA_BLOQUEADA`** (`RN-CRM-04`), para escalar a una persona |
+| `lista_roja` | La cita **nace `en_espera_pago`** (`RN-ANT-01`), no `agendada` |
+| `normal` | `agendada` |
+
+El puerto se llama `obtener` y no `puedeAgendar` a propósito: **la decisión es de Agenda, no de CRM**. Un booleano habría metido la política de reservas dentro de CRM y habría hecho imposible distinguir `bloqueada` de `lista_roja`, que llevan a resultados opuestos.
+
+Incidentes conectados: `MarcarNoShowUseCase` → `no_show`; `CancelarCitaUseCase` → `cancelacion_tardia` (≤60 min) o contador ordinario (>60); `ReprogramarCitaUseCase` → `reprogramacion_tardia` (≤60 min). El umbral se **importa** de `CancelarCitaUseCase` en vez de redefinirse: es una sola regla de negocio y dos constantes acabarían divergiendo.
+
+#### Pruebas: **+75** (837 → **912**, 65 suites)
+
+24 de CRM por integración · 22 E2E HTTP de CRM · 16 de integración Agenda↔CRM con adaptadores reales · 7 del detector de deriva de `crm` · 6 E2E HTTP de la integración en la API de citas.
+
+Casos borde que la orden pidió, todos verificados: **dos clientas con el mismo teléfono** (integración y HTTP) · **`clientaId` inexistente rechazado** en Agenda · **cita de lista roja naciendo `en_espera_pago`** (y visible en la agenda, y sin retener el horario) · **`Gerente` y `Manicurista` reciben 403** al marcar y al retirar lista roja.
+
+#### Validación
+
+`tsc --noEmit` 0 · `tsc -p tsconfig.eslint.json` 0 · `lint` 0 errores 0 avisos · `build` OK · `drizzle-kit check` OK · `madge --circular` 0 ciclos · **912/912 pruebas** en 65 suites.
+
+#### Terreno listo para Anticipos (Fase 3 Parte 2)
+
+- **`en_espera_pago` ya se produce de verdad**, no en teoría: lo crea `AgendarCitaUseCase` cuando la clienta está en lista roja, y **no retiene el horario** (`RN-ANT-03`) — hay una prueba en la que otra clienta toma el mismo hueco con una sola silla. La carrera se resuelve **al confirmar el pago**, que es exactamente lo que falta construir.
+- La **transición que falta** es `en_espera_pago → agendada`/`confirmada`, ya legal en `TRANSICIONES_LEGALES`. Confirmar el pago es lo que la dispara, y es ahí donde puede fallar con `SILLA_OCUPADA` si alguien se adelantó: **ese 409 es el comportamiento aprobado**, no un fallo.
+- `ReprogramarCitaUseCase` ya tiene el parámetro `anticipoPagado` y la ventana de 48 h de `RN-ANT-04`, **hoy aportado por quien llama**. Pasa a puerto cuando exista el contexto de Anticipos — es el siguiente adaptador de `IntegracionModule`, con el patrón de `P5` ya cerrado.
+- **Pendientes que Anticipos tendrá que mirar:** `RN-CRM-03` exige que *"cualquier cancelación de una clienta en lista roja requiera aprobación de un empleado"*, y eso **no está implementado** — hoy la Encargada cancela sin paso de aprobación. Y `RN-ANT-04` no se reembolsa nunca, lo que choca con la expiración de `en_espera_pago`: hay que decidir qué pasa con una cita cuyo anticipo nunca se paga.
+
+---
+
 ### 2026-10-15 — Fase 2 (parte 7): Lista de Espera y reprogramación de servicio descontinuado. **🏁 FASE 2 CERRADA**
 
 Último entregable del Motor de Agenda. Con esto Fase 2 queda completa y el proyecto puede abrir Fase 3.

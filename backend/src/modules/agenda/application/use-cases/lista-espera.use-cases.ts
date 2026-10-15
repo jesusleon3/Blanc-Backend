@@ -5,7 +5,7 @@ import {
   NOTIFICACION_LISTA_ESPERA_PORT,
   NotificacionListaEsperaPort,
 } from '../../domain/ports/notificacion-lista-espera.port';
-import { VERIFICAR_CLIENTA_PORT, VerificarClientaPort } from '../../domain/ports/verificar-clienta.port';
+import { CONTEXTO_CLIENTA_PORT, ContextoClientaPort } from '../../domain/ports/contexto-clienta.port';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { AgendarCitaUseCase } from './agendar-cita.use-case';
@@ -48,7 +48,7 @@ export class InscribirEnListaEsperaUseCase {
   constructor(
     @Inject(LISTA_ESPERA_REPOSITORY) private readonly listaEspera: ListaEsperaRepository,
     private readonly resolutorDeServicio: ResolutorDeServicio,
-    @Inject(VERIFICAR_CLIENTA_PORT) private readonly clientas: VerificarClientaPort,
+    @Inject(CONTEXTO_CLIENTA_PORT) private readonly clientas: ContextoClientaPort,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
@@ -62,8 +62,15 @@ export class InscribirEnListaEsperaUseCase {
     // una espera que no puede terminar nunca. Es una venta nueva, no mover algo ya vendido.
     const servicio = await this.resolutorDeServicio.resolver(input.servicioId);
 
-    if (!(await this.clientas.existe(input.clientaId))) {
-      throw new RecursoNoEncontradoError('Clienta', input.clientaId);
+    const clienta = await this.clientas.obtener(input.clientaId);
+    if (!clienta) throw new RecursoNoEncontradoError('Clienta', input.clientaId);
+
+    // `RN-CRM-04`: si no puede agendar, tampoco tiene sentido que espere un hueco. Dejarla
+    // entrar en la fila sería ofrecerle algo que al aceptar le daría 409.
+    if (clienta.estadoDeRiesgo === 'bloqueada') {
+      throw new ConflictoDeNegocioError('CLIENTA_BLOQUEADA', 'Esta clienta está bloqueada y no puede entrar en la lista de espera.', {
+        clientaId: input.clientaId,
+      });
     }
 
     const solicitud = SolicitudListaEspera.inscribir(input);

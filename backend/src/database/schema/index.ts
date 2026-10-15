@@ -3,3 +3,4 @@ export * from './auditoria.schema';
 export * from './identidad-accesos.schema';
 export * from './catalogo-cotizacion.schema';
 export * from './agenda.schema';
+export * from './crm.schema';

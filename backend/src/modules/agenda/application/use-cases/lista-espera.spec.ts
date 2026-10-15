@@ -18,11 +18,12 @@ import { Silla } from '../../domain/entities/silla.entity';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { crearContextoPersonalFalso, horarioAbiertoSiempre } from '../../test-utils/contexto-personal-falso';
-import { crearCatalogoPorDuraciones, crearVerificarClientaFalso } from '../../test-utils/contexto-catalogo-falso';
+import { crearCatalogoPorDuraciones, crearContextoClientaFalso } from '../../test-utils/contexto-catalogo-falso';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { NotificacionListaEsperaPort } from '../../domain/ports/notificacion-lista-espera.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { crearRegistroDeIncidentesFalso } from '../../test-utils/registro-de-incidentes-falso';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -49,6 +50,7 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
   const listaEsperaRepo = new DrizzleListaEsperaRepository(db);
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
   const uow = crearUnitOfWorkFalso();
+  const incidentes = crearRegistroDeIncidentesFalso();
   const notificacion: jest.Mocked<NotificacionListaEsperaPort> = { ofertaDeHueco: jest.fn() };
 
   for (let i = 1; i <= sillas; i += 1) {
@@ -58,7 +60,7 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso({ horario: horarioAbiertoSiempre() }));
   const resolutor = new ResolutorDeServicio(CATALOGO.port);
   const procesar = new ProcesarListaEsperaUseCase(listaEsperaRepo, motor, resolutor, notificacion, auditoria, uow);
-  const agendar = new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearVerificarClientaFalso(), auditoria, uow);
+  const agendar = new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), auditoria, uow);
 
   return {
     citaRepo,
@@ -67,13 +69,13 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
     notificacion,
     procesar,
     agendar,
-    inscribir: new InscribirEnListaEsperaUseCase(listaEsperaRepo, resolutor, crearVerificarClientaFalso(), auditoria, uow),
+    inscribir: new InscribirEnListaEsperaUseCase(listaEsperaRepo, resolutor, crearContextoClientaFalso(), auditoria, uow),
     aceptar: new AceptarOfertaListaEsperaUseCase(listaEsperaRepo, agendar, auditoria, uow),
     avanzar: new AvanzarTurnoListaEsperaUseCase(listaEsperaRepo, procesar, auditoria, uow),
     cancelarSolicitud: new CancelarSolicitudListaEsperaUseCase(listaEsperaRepo, auditoria, uow),
     consultarFila: new ConsultarListaEsperaUseCase(listaEsperaRepo),
-    cancelarCita: new CancelarCitaUseCase(citaRepo, auditoria, uow, procesar),
-    reprogramarCita: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, procesar),
+    cancelarCita: new CancelarCitaUseCase(citaRepo, auditoria, uow, procesar, incidentes),
+    reprogramarCita: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, procesar, incidentes),
   };
 }
 

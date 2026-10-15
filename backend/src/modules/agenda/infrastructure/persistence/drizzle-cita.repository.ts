@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, gte, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, notInArray, sql } from 'drizzle-orm';
 import { Database } from '../../../../database/connection';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
-import { citas, ESTADOS_QUE_LIBERAN_HORARIO, EstadoCita, RangoHorario } from '../../../../database/schema';
+import { citas, ESTADOS_QUE_LIBERAN_HORARIO, ESTADOS_VISIBLES_EN_AGENDA, EstadoCita, RangoHorario } from '../../../../database/schema';
 import { Cita } from '../../domain/entities/cita.entity';
 import { CitaRepository } from '../../domain/ports/cita.repository';
 import { TransactionContext } from '../../../../shared/persistence/transaction-context';
@@ -120,7 +120,10 @@ export class DrizzleCitaRepository implements CitaRepository {
       .where(
         and(
           eq(citas.sucursalId, sucursalId),
-          notInArray(citas.estado, [...ESTADOS_QUE_LIBERAN_HORARIO]),
+          // `ESTADOS_VISIBLES_EN_AGENDA`, no "las que ocupan": una cita `en_espera_pago` libera el
+          // horario pero tiene que verse, porque es la que hay que perseguir para cobrar el
+          // anticipo. Ver la nota del array en el esquema.
+          inArray(citas.estado, [...ESTADOS_VISIBLES_EN_AGENDA]),
           sql`${citas.rangoHorario} && ${aRangoSql(rango)}`,
           // Filtro en SQL, no en memoria: ver la nota del puerto sobre por qué con `LIMIT` esto
           // no es equivalente.

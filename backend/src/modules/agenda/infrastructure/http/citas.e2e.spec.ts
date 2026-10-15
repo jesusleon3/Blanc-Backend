@@ -28,6 +28,9 @@ import { horarioAbiertoSiempre } from '../../test-utils/contexto-personal-falso'
 import { Servicio } from '../../../catalogo-y-cotizacion/domain/entities/servicio.entity';
 import { DrizzleServicioRepository } from '../../../catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
 import { CatalogoYCotizacionModule } from '../../../catalogo-y-cotizacion/catalogo-y-cotizacion.module';
+import { CrmYClientasModule } from '../../../crm-y-clientas/crm-y-clientas.module';
+import { Clienta } from '../../../crm-y-clientas/domain/entities/clienta.entity';
+import { DrizzleClientaRepository } from '../../../crm-y-clientas/infrastructure/persistence/drizzle-clienta.repository';
 
 const SECRETO = 'secreto-e2e-agenda';
 const ISSUER = 'https://issuer-e2e.example/auth/v1';
@@ -49,7 +52,6 @@ const RUTA = '/v1/agenda/citas';
 // `randomUUID` y no literales a mano: `@IsUUID()` exige variante válida (el cuarto grupo empieza
 // en [89ab]), así que un `2222-...` escrito a ojo se rechaza con 400 y la prueba mediría el
 // validador en vez del caso de uso.
-const CLIENTA = randomUUID();
 const INICIO = '2026-12-07T10:00:00.000Z';
 /** Derivado del catálogo (60 min), no elegido por el cliente. */
 const FIN = '2026-12-07T11:00:00.000Z';
@@ -76,6 +78,15 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
   /** Servicio REAL del catálogo: desde esta parte, `servicioId` ya no es un uuid cualquiera. */
   let servicio: Servicio;
   let servicioDeDosHoras: Servicio;
+  /**
+   * Clienta REAL de CRM. Desde Fase 3, `clientaId` ya no puede ser un uuid cualquiera: el
+   * adaptador permisivo desapareció y el agendamiento falla con 404.
+   */
+  let clienta: Clienta;
+  let clientaEnListaRoja: Clienta;
+  let clientaBloqueada: Clienta;
+  /** Alias del id, para no reescribir las ~40 pruebas que ya usaban `CLIENTA`. */
+  let CLIENTA: string;
 
   /** Token con cada rol. `manicuristaAna` lleva su vínculo de `P9`. */
   let dueña: string;
@@ -91,7 +102,7 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       // `IntegracionModule` es parte del montaje real: sin él no hay `CONTEXTO_PERSONAL_PORT` y el
       // motor de disponibilidad no arranca. Que este E2E lo exija es la prueba de que el cableado
       // entre Bounded Contexts funciona de verdad.
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, IntegracionModule],
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, IntegracionModule],
       providers: [
         {
           provide: APP_GUARD,
@@ -140,6 +151,17 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
     const repoServicios = new DrizzleServicioRepository(dbDePrueba);
     await repoServicios.guardar(servicio);
     await repoServicios.guardar(servicioDeDosHoras);
+
+    const repoClientas = new DrizzleClientaRepository(dbDePrueba);
+    clienta = Clienta.registrar({ nombre: 'Andrea Ramírez', telefono: '4421112233' });
+    clientaEnListaRoja = Clienta.registrar({ nombre: 'Lucía Martínez', telefono: '4422223344' });
+    clientaEnListaRoja.marcarListaRoja();
+    clientaBloqueada = Clienta.registrar({ nombre: 'Ximena Morales', telefono: '4423334455' });
+    clientaBloqueada.marcarBloqueada();
+    for (const registro of [clienta, clientaEnListaRoja, clientaBloqueada]) {
+      await repoClientas.guardar(registro);
+    }
+    CLIENTA = clienta.id;
 
     const sucursal = Sucursal.crear({ nombre: 'Lomas', horarioSemanal: horarioAbiertoSiempre() });
     await sucursalRepo.guardar(sucursal);
@@ -568,16 +590,104 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
     });
   });
 
+  describe('integración con CRM (`RN-CRM-04`, `RN-ANT-01`) — Fase 3 Parte 1', () => {
+    it('404 CON UN `clientaId` INEXISTENTE: se retiró el adaptador permisivo', async () => {
+      const respuesta = await agendar({ clientaId: randomUUID() }).expect(404);
+      expect(respuesta.body.error.code).toBe('RECURSO_NO_ENCONTRADO');
+    });
+
+    it('409 CLIENTA_BLOQUEADA (`RN-CRM-04`): el caso se escala a una persona', async () => {
+      const respuesta = await agendar({ clientaId: clientaBloqueada.id }).expect(409);
+      expect(respuesta.body.error.code).toBe('CLIENTA_BLOQUEADA');
+    });
+
+    it('LISTA ROJA: LA CITA NACE `en_espera_pago` (`RN-ANT-01`), no `agendada`', async () => {
+      const respuesta = await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+      expect(respuesta.body.estado).toBe('en_espera_pago');
+    });
+
+    it('y esa cita SE VE en la agenda aunque `en_espera_pago` libere horario', async () => {
+      // El fallo que esto atrapa: filtrando la vista por "estados que ocupan", las citas
+      // pendientes de anticipo eran invisibles — justo las que hay que perseguir para cobrar.
+      const { body: cita } = await agendar({ clientaId: clientaEnListaRoja.id }).expect(201);
+
+      const agendaDelDia = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      expect(agendaDelDia.body.citas.map((c: { id: string }) => c.id)).toContain(cita.id);
+    });
+
+    it('LA ENCARGADA VE `enListaRoja`; la MANICURISTA NO RECIBE EL CAMPO', async () => {
+      await agendar({ clientaId: clientaEnListaRoja.id, manicuristaId: ana.id }).expect(201);
+
+      const paraLaEncargada = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+      expect(paraLaEncargada.body.citas[0].enListaRoja).toBe(true);
+
+      const paraElIpad = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${manicuristaAna}`)
+        .expect(200);
+
+      expect(paraElIpad.body.citas).toHaveLength(1);
+      expect(paraElIpad.body.citas[0]).not.toHaveProperty('enListaRoja');
+      expect(paraElIpad.body.citas[0]).not.toHaveProperty('clientaId');
+    });
+
+    it('una clienta `normal` sigue naciendo `agendada` y con `enListaRoja: false`', async () => {
+      await agendar().expect(201);
+
+      const respuesta = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      expect(respuesta.body.citas[0]).toMatchObject({ estado: 'agendada', enListaRoja: false });
+    });
+  });
+
   describe('lista de espera (`DEC-039`)', () => {
     const LISTA = '/v1/agenda/lista-espera';
     /** La fecha de pared en Querétaro de `INICIO` (10:00 UTC del 7 de diciembre). */
     const FECHA = '2026-12-07';
 
-    const inscribir = (cuerpo: Record<string, unknown> = {}, autorizacion = encargada) =>
-      request(app.getHttpServer())
+    /**
+     * Cada inscripción necesita una clienta REAL y **distinta**: el índice único impide que la
+     * misma se apunte dos veces al mismo servicio, sucursal y fecha. Antes bastaba un
+     * `randomUUID()`; desde Fase 3 el adaptador contra CRM es real y un uuid inventado da 404.
+     *
+     * Se siembran por adelantado para que `inscribir` siga siendo **encadenable**: si creara la
+     * clienta dentro, tendría que ser `async`, y como el `Test` de supertest es *thenable*, el
+     * `await` colapsaría el `Test` en un `Response` y `.expect(201)` dejaría de existir.
+     */
+    const clientasDeFila: string[] = [];
+
+    beforeEach(async () => {
+      clientasDeFila.length = 0;
+      const repo = new DrizzleClientaRepository(dbDePrueba);
+      for (let i = 1; i <= 6; i += 1) {
+        const nueva = Clienta.registrar({ nombre: `Clienta de fila ${i}`, telefono: `442880000${i}` });
+        await repo.guardar(nueva);
+        clientasDeFila.push(nueva.id);
+      }
+    });
+
+    let siguiente = 0;
+    const inscribir = (cuerpo: Record<string, unknown> = {}, autorizacion = encargada) => {
+      const clientaId = clientasDeFila[siguiente++ % clientasDeFila.length];
+      return request(app.getHttpServer())
         .post(LISTA)
         .set('Authorization', `Bearer ${autorizacion}`)
-        .send({ sucursalId, clientaId: randomUUID(), servicioId: servicio.id, fecha: FECHA, ...cuerpo });
+        .send({ sucursalId, clientaId, servicioId: servicio.id, fecha: FECHA, ...cuerpo });
+    };
 
     it('201 al inscribir y 200 al consultar la fila', async () => {
       const alta = await inscribir().expect(201);

@@ -64,7 +64,9 @@ export class CitasController {
     );
 
     return {
-      citas: pagina.citas.map((cita) => citaAJson(cita, usuario)),
+      citas: pagina.citas.map((cita) =>
+        citaAJson(cita, usuario, { enListaRoja: pagina.enListaRojaPorClienta.get(cita.clientaId) }),
+      ),
       limite: pagina.limite,
       desplazamiento: pagina.desplazamiento,
       hayMas: pagina.hayMas,

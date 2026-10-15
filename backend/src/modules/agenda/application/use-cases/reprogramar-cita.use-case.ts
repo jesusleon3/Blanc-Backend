@@ -5,12 +5,23 @@ import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repo
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { ProcesarListaEsperaUseCase, ResultadoHuecoLiberado } from './lista-espera.use-cases';
+import { REGISTRO_DE_INCIDENTES_PORT, RegistroDeIncidentesPort } from '../../domain/ports/registro-de-incidentes.port';
 import { Logger } from '@nestjs/common';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
+import { MINUTOS_DE_INCIDENTE_TARDIO } from './cancelar-cita.use-case';
 import { ClaimsUsuario } from '../../../../shared/auth/rol';
 import { UNIT_OF_WORK, UnitOfWork } from '../../../../shared/persistence/unit-of-work.port';
+
+/**
+ * Ventana de `RN-CRM-06`, la misma que usa `CancelarCitaUseCase`.
+ *
+ * Se importa de allí en vez de redefinirla: es **una sola regla de negocio** (*"de 60 a 0 minutos
+ * antes de la cita se manda sugerencia de lista roja"*), y dos constantes separadas acabarían
+ * divergiendo el día que el umbral cambie.
+ */
+export { MINUTOS_DE_INCIDENTE_TARDIO } from './cancelar-cita.use-case';
 
 /** Tope de reprogramaciones por cadena (`DEC-042`). */
 export const MAXIMO_DE_REPROGRAMACIONES = 3;
@@ -56,6 +67,7 @@ export class ReprogramarCitaUseCase {
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
     private readonly procesarListaEspera: ProcesarListaEsperaUseCase,
+    @Inject(REGISTRO_DE_INCIDENTES_PORT) private readonly incidentes: RegistroDeIncidentesPort,
   ) {}
 
   private readonly logger = new Logger(ReprogramarCitaUseCase.name);
@@ -101,11 +113,32 @@ export class ReprogramarCitaUseCase {
 
     original.cambiarEstado('reprogramada');
 
+    /**
+     * `RN-CRM-06`: reagendar a 60 minutos o menos **es un incidente**, igual que cancelar tarde.
+     * La clienta no pierde la cita, pero el hueco ya no se puede revender a nadie — es el mismo
+     * daño operativo, y la Dueña recibe la misma sugerencia.
+     *
+     * Se mide contra el inicio de la cita ORIGINAL, no de la nueva: lo que llega tarde es el
+     * aviso de que ya no viene a su hora.
+     */
+    const minutosDeAntelacion = Math.round((original.rangoHorario.inicio.getTime() - ahora.getTime()) / 60_000);
+    const esReprogramacionTardia = minutosDeAntelacion <= MINUTOS_DE_INCIDENTE_TARDIO;
+
     await this.unitOfWork.ejecutar(async () => {
       // Primero la original: libera su hueco, de modo que la nueva pueda ocupar ESE MISMO horario
       // si la clienta solo movió la manicurista. Al revés chocarían consigo mismas.
       await this.citaRepository.guardar(original);
       await this.citaRepository.guardar(nueva);
+
+      if (esReprogramacionTardia) {
+        await this.incidentes.registrarIncidente({
+          clientaId: original.clientaId,
+          citaId: original.id,
+          tipo: 'reprogramacion_tardia',
+          ocurridoEn: ahora,
+          minutosDeAntelacion,
+        });
+      }
 
       await this.auditoria.registrar({
         tipoAccion: 'agendamiento',
@@ -119,6 +152,7 @@ export class ReprogramarCitaUseCase {
           numeroDeReprogramaciones: nueva.numeroDeReprogramaciones,
           inicioAnterior: original.rangoHorario.inicio.toISOString(),
           inicioNuevo: nueva.rangoHorario.inicio.toISOString(),
+          esReprogramacionTardia,
         },
       });
     });

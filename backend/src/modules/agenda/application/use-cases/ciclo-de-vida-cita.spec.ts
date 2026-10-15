@@ -13,10 +13,11 @@ import { Cita } from '../../domain/entities/cita.entity';
 import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
+import { crearRegistroDeIncidentesFalso } from '../../test-utils/registro-de-incidentes-falso';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
 import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-falso';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
-import { crearContextoCatalogoFalso, crearVerificarClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
+import { crearContextoCatalogoFalso, crearContextoClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
 import { crearProcesarListaEsperaInerte } from '../../test-utils/lista-espera-inerte';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
@@ -37,6 +38,7 @@ async function preparar(numeroDeSillas = 2) {
   // Horario abierto y personal de sobra: estas pruebas no van sobre disponibilidad.
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso());
   const uow = crearUnitOfWorkFalso();
+  const incidentes = crearRegistroDeIncidentesFalso();
   const resolutor = new ResolutorDeServicio(crearContextoCatalogoFalso([servicioDePrueba({ id: SERVICIO })]));
 
   for (let i = 1; i <= numeroDeSillas; i += 1) {
@@ -47,12 +49,12 @@ async function preparar(numeroDeSillas = 2) {
     citaRepo,
     sillaRepo,
     auditoria,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearVerificarClientaFalso(), auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), auditoria, uow),
     solicitar: new SolicitarConfirmacionCitaUseCase(citaRepo, auditoria, uow),
     confirmar: new ConfirmarCitaUseCase(citaRepo, auditoria, uow),
-    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte()),
-    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, crearProcesarListaEsperaInerte()),
-    noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow),
+    cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes),
+    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes),
+    noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow, incidentes),
     completar: new CompletarCitaUseCase(citaRepo, auditoria, uow),
   };
 }
