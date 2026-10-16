@@ -206,12 +206,41 @@ export type EstadoCita =
   | 'reprogramada'
   | 'expirada';
 
-/** Desglose de precio congelado al agendar. El backend lo calcula; el cliente NUNCA. */
+/**
+ * Precio congelado al agendar. El backend lo calcula; el cliente **nunca**.
+ *
+ * ## ESTA FORMA ESTUVO MAL DESDE LA FASE 5, Y EL DEFECTO ERA VISIBLE
+ *
+ * La primera versión declaraba `precioBaseCentavos`, un `totalCentavos` no nulo y un arreglo de
+ * `modificadores`, **ninguno de los cuales existe en el backend**, más un `[clave: string]:
+ * unknown` que hacía que `tsc` lo aceptara todo. Las consecuencias eran dos y la segunda es grave:
+ *
+ * - `precioBaseCentavos` llegaba `undefined` y la vista de iPad mostraba **`NaN`**.
+ * - `totalCentavos` es `number | null`, y `null` **no es cero**: es la negativa explícita del
+ *   sistema a inventar un precio que debe fijar una persona (`DEC-033`). Tratándolo como número,
+ *   un servicio de cotización manual se mostraba como **$0.00** — un precio falso en pantalla, que
+ *   alguien podría decirle a la clienta.
+ *
+ * Lo destapó el cruce de datos de Analítica, no el verificador de contrato de `P8`: ese comparaba
+ * solo las claves de primer nivel. Ahora cubre también las formas anidadas, y `cotizacion-snapshot`
+ * es la primera que vigila.
+ */
 export interface CotizacionSnapshot {
-  precioBaseCentavos: number;
-  totalCentavos: number;
-  modificadores?: { nombre: string; montoCentavos: number }[];
-  [clave: string]: unknown;
+  /** Versión del formato. Permite leer snapshots viejos sin adivinar su estructura. */
+  version: number;
+  congeladoEn: string;
+  servicio: {
+    id: string;
+    nombre: string;
+    categoria: string;
+    duracionMinutos: number;
+    precioCentavos: number;
+  };
+  /** **`null` cuando el servicio exige cotización manual.** No es cero: nadie lo ha cotizado. */
+  totalCentavos: number | null;
+  requiereCotizacionManual: boolean;
+  /** Siempre `false` por ahora (`FL-COT-03` pospuesto). Explícito para que nadie lo suponga. */
+  incluyeModificadores: boolean;
 }
 
 /**
@@ -366,6 +395,58 @@ export interface SolicitudListaEspera {
 export interface ResultadoDeAvance {
   expiradas: SolicitudListaEspera[];
   nuevasOfertas: SolicitudListaEspera[];
+}
+
+// ---------------------------------------------------------------------------
+// Analítica (Fase 6)
+// ---------------------------------------------------------------------------
+
+export interface ReporteDeAgenda {
+  porEstado: Record<EstadoCita, number>;
+  total: number;
+  /** Canceladas a `<= 60 min` del inicio (`RN-CRM-06`). */
+  cancelacionesTardias: number;
+  atendidasPorSucursal: { sucursalId: string; completadas: number; noShow: number }[];
+  /** `manicuristaId` `null` agrupa las completadas sin nadie asignado (`DEC-031`). */
+  atendidasPorManicurista: { manicuristaId: string | null; completadas: number }[];
+  /** **Estimado**: sale de lo cotizado al agendar, no de lo cobrado. */
+  ingresoEstimadoCentavos: number;
+  /** Completadas sin precio en plataforma (cotización manual): quedan FUERA de la suma. */
+  completadasSinCotizar: number;
+  listaDeEspera: { inscritas: number; notificadas: number; aceptadas: number; expiradas: number };
+}
+
+export interface ReporteDeAnticipos {
+  porEstado: Record<EstadoAnticipo, { cantidad: number; centavos: number }>;
+  /** `pagado` + `retenido`: dinero que el salón tiene. Un retenido no se reembolsa (`RN-ANT-04`). */
+  cobradoCentavos: number;
+}
+
+export interface ReporteDeConversaciones {
+  activas: number;
+  /** Se derivan de los MENSAJES, no del `modo` actual. Ver la pantalla de Analítica. */
+  soloBot: number;
+  conIntervencionHumana: number;
+  /** `null` —no 0— si no hubo conversaciones. */
+  porcentajeResueltoPorElBot: number | null;
+  escalamientosPorMotivo: Record<MotivoDeEscalamiento, number>;
+}
+
+export interface ResumenAnalitico {
+  rango: { desde: string; hasta: string };
+  sucursalId: string | null;
+  citas: ReporteDeAgenda;
+  anticipos: ReporteDeAnticipos;
+  conversaciones: ReporteDeConversaciones;
+  indicadores: {
+    /** `no_show / (completada + no_show)`. `null` si no hubo citas atendibles. */
+    tasaDeNoShow: number | null;
+    efectividadDeListaDeEspera: number | null;
+    porcentajeResueltoPorElBot: number | null;
+    ingresoTotalEstimadoCentavos: number;
+  };
+  /** **Viajan en la respuesta a propósito**: quien lee un número debe saber qué no incluye. */
+  advertencias: string[];
 }
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import { ErrorDeApi } from '../../../api/cliente';
 import { Boton } from '../../../componentes/Boton';
 import { AvisoDeError } from '../../../componentes/AvisoDeError';
 import { SelectorDeManicurista } from '../../../componentes/selectores';
-import { fechaLocalDeHoy, instanteDesdeHoraLocal, pesos } from '../../../componentes/etiquetas';
+import { fechaLocalDeHoy, instanteDesdeHoraLocal, pesosOSinCotizar } from '../../../componentes/etiquetas';
 
 /**
  * Qué transiciones ofrece cada estado. **Copiado de `TRANSICIONES_LEGALES` del backend.**
@@ -378,7 +378,7 @@ function DialogoDeReprogramacion({
 
       {cita.cotizacionSnapshot ? (
         <p className="mt-2 text-[11px] text-texto-terciario">
-          El precio ({pesos(cita.cotizacionSnapshot.totalCentavos)}) se conserva: reprogramar no recotiza.
+          El precio ({pesosOSinCotizar(cita.cotizacionSnapshot.totalCentavos)}) se conserva: reprogramar no recotiza.
         </p>
       ) : null}
 

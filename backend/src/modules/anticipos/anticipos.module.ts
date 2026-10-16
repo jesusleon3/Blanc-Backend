@@ -1,3 +1,4 @@
+import { ReporteDeAnticiposUseCase } from './application/use-cases/reporte-de-anticipos.use-case';
 import { Module } from '@nestjs/common';
 import { AnticiposController } from './infrastructure/http/anticipos.controller';
 import { ANTICIPO_REPOSITORY } from './domain/ports/anticipo.repository';
@@ -23,6 +24,8 @@ import {
 @Module({
   controllers: [AnticiposController],
   providers: [
+    // Lectura agregada para `AnaliticaModule` (Fase 6). Toca SOLO su propio esquema.
+    ReporteDeAnticiposUseCase,
     { provide: ANTICIPO_REPOSITORY, useClass: DrizzleAnticipoRepository },
     GenerarAnticipoUseCase,
     ConfirmarPagoAnticipoUseCase,
@@ -31,6 +34,7 @@ import {
     ConsultarAnticiposUseCase,
   ],
   exports: [
+    ReporteDeAnticiposUseCase,
     ANTICIPO_REPOSITORY,
     GenerarAnticipoUseCase,
     RetenerAnticipoUseCase,

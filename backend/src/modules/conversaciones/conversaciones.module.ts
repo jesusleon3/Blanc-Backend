@@ -1,3 +1,5 @@
+import { PurgarMensajesUseCase } from './application/use-cases/purgar-mensajes.use-case';
+import { ReporteDeConversacionesUseCase } from './application/use-cases/reporte-de-conversaciones.use-case';
 import { Module } from '@nestjs/common';
 import { CONVERSACION_REPOSITORY } from './domain/ports/conversacion.repository';
 import { DrizzleConversacionRepository } from './infrastructure/persistence/drizzle-conversacion.repository';
@@ -41,6 +43,10 @@ import {
 @Module({
   controllers: [WebhookMetaController, BandejaController],
   providers: [
+    // Barrido de retención (`ADR-029`), invocado por el Planificador.
+    PurgarMensajesUseCase,
+    // Lectura agregada para `AnaliticaModule` (Fase 6). Toca SOLO su propio esquema.
+    ReporteDeConversacionesUseCase,
     { provide: CONVERSACION_REPOSITORY, useClass: DrizzleConversacionRepository },
     {
       provide: PROVEEDOR_WHATSAPP_PORT,
@@ -91,6 +97,8 @@ import {
   // Los exporta para que `IntegracionModule` construya los adaptadores de notificación que hoy
   // solo escriben en el log (recordatorios y lista de espera).
   exports: [
+    PurgarMensajesUseCase,
+    ReporteDeConversacionesUseCase,
     CONVERSACION_REPOSITORY,
     PROVEEDOR_WHATSAPP_PORT,
     EnviarPlantillaUseCase,

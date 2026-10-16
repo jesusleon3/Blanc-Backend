@@ -113,6 +113,17 @@ export function pesos(centavos: number): string {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(centavos / 100);
 }
 
+/**
+ * Texto para un total que **puede estar sin cotizar**.
+ *
+ * `null` no es cero: es la negativa explícita del sistema a inventar un precio que debe fijar una
+ * persona (`DEC-033`). Pasarlo por `pesos()` daría **$0.00** — un precio falso en pantalla que
+ * alguien podría decirle a la clienta. Era un defecto real de la Fase 5.
+ */
+export function pesosOSinCotizar(centavos: number | null | undefined): string {
+  return centavos === null || centavos === undefined ? 'Precio por confirmar' : pesos(centavos);
+}
+
 const ZONA = 'America/Mexico_City';
 
 /** Hora de pared de Querétaro, no UTC: es lo que quien opera tiene en la pared. */

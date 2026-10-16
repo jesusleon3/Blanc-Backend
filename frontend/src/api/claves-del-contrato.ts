@@ -1,6 +1,11 @@
 import type {
   Anticipo,
   Cita,
+  ReporteDeAgenda,
+  ReporteDeAnticipos,
+  ReporteDeConversaciones,
+  ResumenAnalitico,
+  CotizacionSnapshot,
   Clienta,
   Conversacion,
   ExcepcionPersonal,
@@ -176,3 +181,73 @@ export const CLAVES_DE_PERFIL = completas<PerfilUsuario>()(['sub', 'rol', 'sucur
  * mantener. Lo que sí se verifica es que **cada clave declarada exista en el backend**.
  */
 export const CLAVES_DE_SUCURSAL = completas<Sucursal>()(['id', 'nombre', 'enMantenimiento']);
+
+/**
+ * Formas **anidadas**, y la razón de que existan es un defecto real.
+ *
+ * El verificador comparaba solo las claves de primer nivel, así que `cotizacionSnapshot` coincidía
+ * como nombre mientras su **contenido** estaba equivocado: el tipo declaraba `precioBaseCentavos`,
+ * un `totalCentavos` no nulo y un arreglo de `modificadores`, ninguno de los cuales existe en el
+ * backend. La vista de iPad mostraba `NaN` y —peor— **$0.00 para un servicio de cotización
+ * manual**, que es un precio falso en pantalla.
+ *
+ * Toda forma anidada que una pantalla lea debe declararse aquí.
+ */
+export const CLAVES_DE_COTIZACION = completas<CotizacionSnapshot>()([
+  'version',
+  'congeladoEn',
+  'servicio',
+  'totalCentavos',
+  'requiereCotizacionManual',
+  'incluyeModificadores',
+]);
+
+export const CLAVES_DE_COTIZACION_SERVICIO = completas<CotizacionSnapshot['servicio']>()([
+  'id',
+  'nombre',
+  'categoria',
+  'duracionMinutos',
+  'precioCentavos',
+]);
+
+// ---------------------------------------------------------------------------
+// Analítica (Fase 6)
+// ---------------------------------------------------------------------------
+
+export const CLAVES_DE_RESUMEN_ANALITICO = completas<ResumenAnalitico>()([
+  'rango',
+  'sucursalId',
+  'citas',
+  'anticipos',
+  'conversaciones',
+  'indicadores',
+  'advertencias',
+]);
+
+export const CLAVES_DE_REPORTE_DE_AGENDA = completas<ReporteDeAgenda>()([
+  'porEstado',
+  'total',
+  'cancelacionesTardias',
+  'atendidasPorSucursal',
+  'atendidasPorManicurista',
+  'ingresoEstimadoCentavos',
+  'completadasSinCotizar',
+  'listaDeEspera',
+]);
+
+export const CLAVES_DE_REPORTE_DE_ANTICIPOS = completas<ReporteDeAnticipos>()(['porEstado', 'cobradoCentavos']);
+
+export const CLAVES_DE_REPORTE_DE_CONVERSACIONES = completas<ReporteDeConversaciones>()([
+  'activas',
+  'soloBot',
+  'conIntervencionHumana',
+  'porcentajeResueltoPorElBot',
+  'escalamientosPorMotivo',
+]);
+
+export const CLAVES_DE_INDICADORES = completas<ResumenAnalitico['indicadores']>()([
+  'tasaDeNoShow',
+  'efectividadDeListaDeEspera',
+  'porcentajeResueltoPorElBot',
+  'ingresoTotalEstimadoCentavos',
+]);

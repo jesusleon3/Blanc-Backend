@@ -3,6 +3,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CLAVES_DE_ANTICIPO,
+  CLAVES_DE_INDICADORES,
+  CLAVES_DE_REPORTE_DE_AGENDA,
+  CLAVES_DE_REPORTE_DE_ANTICIPOS,
+  CLAVES_DE_REPORTE_DE_CONVERSACIONES,
+  CLAVES_DE_RESUMEN_ANALITICO,
+  CLAVES_DE_COTIZACION,
+  CLAVES_DE_COTIZACION_SERVICIO,
   CLAVES_DE_CITA_IPAD,
   CLAVES_DE_CITA_OPERACION,
   CLAVES_DE_CLIENTA,
@@ -61,6 +68,16 @@ describe('Contrato compartido con el backend (`P8`)', () => {
     ['ExcepcionPersonal', CLAVES_DE_EXCEPCION],
     ['Servicio', CLAVES_DE_SERVICIO],
     ['Manicurista', CLAVES_DE_MANICURISTA],
+    // Formas ANIDADAS. Su ausencia dejó pasar un defecto que llegó hasta la pantalla: ver la nota
+    // de `CLAVES_DE_COTIZACION`.
+    ['CotizacionSnapshot (anidado en Cita)', CLAVES_DE_COTIZACION],
+    ['CotizacionSnapshot.servicio', CLAVES_DE_COTIZACION_SERVICIO],
+    // Analítica (Fase 6), incluidas sus cuatro formas anidadas.
+    ['ResumenAnalitico', CLAVES_DE_RESUMEN_ANALITICO],
+    ['ResumenAnalitico.citas', CLAVES_DE_REPORTE_DE_AGENDA],
+    ['ResumenAnalitico.anticipos', CLAVES_DE_REPORTE_DE_ANTICIPOS],
+    ['ResumenAnalitico.conversaciones', CLAVES_DE_REPORTE_DE_CONVERSACIONES],
+    ['ResumenAnalitico.indicadores', CLAVES_DE_INDICADORES],
   ] as const)('los campos de `%s` coinciden EXACTAMENTE con los del backend', (nombre, declaradas) => {
     comparar(nombre, declaradas);
   });
@@ -131,6 +148,7 @@ describe('Contrato compartido con el backend (`P8`)', () => {
       ['GET', '/v1/crm/clientas'],
       ['GET', '/v1/crm/clientas/:id'],
       ['POST', '/v1/crm/clientas/:id/estado-de-riesgo'],
+      ['GET', '/v1/analitica/resumen'],
       ['GET', '/v1/anticipos'],
       ['POST', '/v1/anticipos/:id/confirmar-pago'],
       ['POST', '/v1/anticipos/:id/expirar'],

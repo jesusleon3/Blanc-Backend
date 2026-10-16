@@ -2,6 +2,8 @@ import { crearBaseDeDatosDePrueba } from '../../database/test-utils/postgres-de-
 import { OrquestadorDeBotUseCase, RESPUESTAS } from './application/orquestador-de-bot.use-case';
 import { HerramientasDelBot } from './application/herramientas-del-bot';
 import { AgenteDeterministicoAdapter } from './infrastructure/llm/agente-deterministico.adapter';
+import { PresupuestoDeIaEnPostgres } from './infrastructure/presupuesto-de-ia.adapter';
+import type { PresupuestoDeIaPort } from './domain/presupuesto-de-ia.port';
 import { AgenteConversacionalPort } from './domain/agente-conversacional.port';
 import { CONFIANZA_MINIMA, Intencion } from './domain/intencion';
 import { detectarEscalamientoPorTexto, FRASES_DE_ESCALAMIENTO, normalizarTexto } from './domain/deteccion-de-escalamiento';
@@ -78,7 +80,7 @@ const AHORA = new Date('2027-03-08T16:00:00.000Z'); // 10:00 en Querétaro
  * El **único** doble es el intérprete cuando una prueba necesita forzar una intención o una
  * confianza concreta. El adaptador por defecto es el determinista real.
  */
-async function preparar(opciones: { interprete?: AgenteConversacionalPort; sillas?: number } = {}) {
+async function preparar(opciones: { interprete?: AgenteConversacionalPort; sillas?: number; presupuesto?: PresupuestoDeIaPort } = {}) {
   const db = await crearBaseDeDatosDePrueba();
   const auditoria: jest.Mocked<AuditoriaPort> = { registrar: jest.fn() };
   const uow = new DrizzleUnitOfWork(db);
@@ -140,8 +142,15 @@ async function preparar(opciones: { interprete?: AgenteConversacionalPort; silla
   const enviarDelBot = new EnviarMensajeDelBotUseCase(conversacionRepo, whatsapp, uow);
   const cambiarModo = new CambiarModoConversacionUseCase(conversacionRepo, auditoria, uow);
 
+  /**
+   * Presupuesto de IA **con tope alto** salvo que la prueba pida otro: las pruebas que no van sobre
+   * `F-07` no deben verse afectadas por él, y una que sí vaya lo pasa explícitamente.
+   */
+  const presupuesto = opciones.presupuesto ?? new PresupuestoDeIaEnPostgres(db, 10_000);
+
   const orquestador = new OrquestadorDeBotUseCase(
     opciones.interprete ?? new AgenteDeterministicoAdapter(),
+    presupuesto,
     herramientas,
     enviarDelBot,
     cambiarModo,
@@ -194,6 +203,7 @@ async function preparar(opciones: { interprete?: AgenteConversacionalPort; silla
     servicios: { gelish, diseno },
     herramientas,
     orquestador,
+    presupuesto,
     agendar,
     cambiarModo,
     // El mismo caso de uso que usa el barrido de recordatorios del planificador: así la cita llega
@@ -629,5 +639,75 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       expect(serializado).not.toContain('me pasas los precios');
       expect(serializado).not.toContain(TELEFONO);
     });
+  });
+});
+
+describe('Cortacircuitos de gasto de IA (`F-07`)', () => {
+  it('con el PRESUPUESTO AGOTADO el bot SIGUE ATENDIENDO con el intérprete sin coste', async () => {
+    /**
+     * **Es deliberado que no escale todo.** La propia review advirtió que la respuesta ingenua
+     * —*"escalar todo a humano"* al tocar el tope— **agravaría `F-05`**: una escalada masiva que el
+     * personal no puede absorber. El tope degrada **la comprensión, no el servicio**.
+     *
+     * El intérprete que se dobla aquí NUNCA debería invocarse: con el presupuesto a 0, el
+     * orquestador usa el determinista. Que `interpretar` no se llame es la aserción.
+     */
+    const interprete = interpreteFijo({ tipo: 'agendar', confianza: 1 });
+    const { db } = await preparar();
+    const preparado = await preparar({ interprete, presupuesto: new PresupuestoDeIaEnPostgres(db, 0) });
+    await preparado.crearClienta('Ana');
+
+    await preparado.entra('hola, me pasas los precios?');
+
+    // El modelo NO se invocó: el presupuesto estaba agotado.
+    expect(interprete.interpretar).not.toHaveBeenCalled();
+    // Y la clienta SÍ recibió los precios del catálogo real: el determinista entiende esto.
+    expect(preparado.ultimoTextoEnviado()).toContain('Gelish manos');
+    expect((await preparado.conversacion()).modo).toBe('bot');
+  });
+
+  it('con presupuesto disponible SÍ invoca al modelo, y lo CONSUME', async () => {
+    const interprete = interpreteFijo({ tipo: 'saludo', confianza: 1 });
+    const { db } = await preparar();
+    const presupuesto = new PresupuestoDeIaEnPostgres(db, 5);
+    const preparado = await preparar({ interprete, presupuesto });
+    await preparado.crearClienta('Ana');
+
+    await preparado.entra('oye una cosa rara que nadie entiende');
+
+    expect(interprete.interpretar).toHaveBeenCalledTimes(1);
+    expect((await presupuesto.consumoDeHoy()).llamadas).toBe(1);
+  });
+
+  it('el FILTRO DETERMINISTA no consume presupuesto: corta antes del modelo', async () => {
+    /**
+     * `DEC-040`: cancelar, pedir una persona y quejarse escalan **sin consultar al modelo**. Que
+     * tampoco gasten presupuesto no es casual: son los casos más frecuentes de escalamiento, y si
+     * consumieran, una tarde de quejas agotaría el tope sin haber llamado a OpenAI ni una vez.
+     */
+    const { db } = await preparar();
+    const presupuesto = new PresupuestoDeIaEnPostgres(db, 5);
+    const preparado = await preparar({ presupuesto });
+    await preparado.crearClienta('Ana');
+
+    await preparado.entra('quiero cancelar mi cita');
+
+    expect((await preparado.conversacion()).motivoDeEscalamiento).toBe('cancelacion_solicitada');
+    expect((await presupuesto.consumoDeHoy()).llamadas).toBe(0);
+  });
+
+  it('AUDITA que la decisión se tomó sin presupuesto (`RN-CONV-04`)', async () => {
+    // "Lo clasificó el intérprete de respaldo porque el presupuesto estaba agotado" es una
+    // respuesta distinta de "lo clasificó el modelo", y la trazabilidad de IA tiene que poder
+    // distinguirlas: si no, un día de respuestas peores parecería un fallo del modelo.
+    const { db } = await preparar();
+    const preparado = await preparar({ presupuesto: new PresupuestoDeIaEnPostgres(db, 0) });
+    await preparado.crearClienta('Ana');
+
+    await preparado.entra('xyzzy qwerty asdf');
+
+    const registros = preparado.auditoria.registrar.mock.calls.map(([registro]) => registro);
+    const decision = registros.find((registro) => (registro.detalle as { accion?: string })?.accion === 'bot_escala');
+    expect(decision!.detalle).toMatchObject({ sinPresupuesto: true });
   });
 });

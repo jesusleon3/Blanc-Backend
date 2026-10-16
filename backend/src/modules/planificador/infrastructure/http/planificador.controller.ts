@@ -5,7 +5,18 @@ import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
 import { NombreDeBarrido, PlanificadorService } from '../../application/planificador.service';
 
-const BARRIDOS: NombreDeBarrido[] = ['lista_espera', 'anticipos', 'cierre_de_citas', 'recordatorios'];
+/**
+ * Los cinco barridos. **El `satisfies` no es decorativo**: si `NombreDeBarrido` gana un valor y
+ * nadie lo añade aquí, el endpoint lo rechazaría con un `400` y nada más avisaría — un barrido
+ * imposible de disparar a mano, que es justo cuando hace falta.
+ */
+const BARRIDOS = [
+  'lista_espera',
+  'anticipos',
+  'cierre_de_citas',
+  'recordatorios',
+  'retencion_de_mensajes',
+] as const satisfies readonly NombreDeBarrido[];
 
 export class DispararBarridoDto {
   /**
@@ -22,7 +33,7 @@ export class DispararBarridoDto {
 }
 
 export class NombreDeBarridoDto {
-  @IsIn(BARRIDOS)
+  @IsIn([...BARRIDOS])
   nombre!: NombreDeBarrido;
 }
 

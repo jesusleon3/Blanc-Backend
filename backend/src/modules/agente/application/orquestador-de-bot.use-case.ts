@@ -3,6 +3,8 @@ import { OrquestadorDeBotPort, ResultadoDelTurno, TurnoDelBot } from '../../conv
 import { EnviarMensajeDelBotUseCase } from '../../conversaciones/application/use-cases/enviar-mensaje-del-bot.use-case';
 import { CambiarModoConversacionUseCase } from '../../conversaciones/application/use-cases/bandeja.use-cases';
 import { AGENTE_CONVERSACIONAL_PORT, AgenteConversacionalPort } from '../domain/agente-conversacional.port';
+import { PRESUPUESTO_DE_IA_PORT, type PresupuestoDeIaPort } from '../domain/presupuesto-de-ia.port';
+import { AgenteDeterministicoAdapter } from '../infrastructure/llm/agente-deterministico.adapter';
 import { CONFIANZA_MINIMA, Intencion } from '../domain/intencion';
 import { detectarEscalamientoPorTexto, motivoDeEscalamientoDe, normalizarTexto } from '../domain/deteccion-de-escalamiento';
 import { HerramientasDelBot } from './herramientas-del-bot';
@@ -48,8 +50,18 @@ export const RESPUESTAS = {
 export class OrquestadorDeBotUseCase implements OrquestadorDeBotPort {
   private readonly logger = new Logger(OrquestadorDeBotUseCase.name);
 
+  /**
+   * Intérprete de respaldo **sin coste por mensaje**, para cuando el presupuesto de IA se agota.
+   *
+   * Se instancia aquí y no se inyecta porque no es un punto de configuración: es *el que no
+   * cuesta*. Inyectarlo por token permitiría sustituirlo por otro que sí cueste, que es justo lo
+   * contrario de lo que este respaldo es.
+   */
+  private readonly interpreteSinCoste = new AgenteDeterministicoAdapter();
+
   constructor(
     @Inject(AGENTE_CONVERSACIONAL_PORT) private readonly agente: AgenteConversacionalPort,
+    @Inject(PRESUPUESTO_DE_IA_PORT) private readonly presupuesto: PresupuestoDeIaPort,
     private readonly herramientas: HerramientasDelBot,
     private readonly enviarMensaje: EnviarMensajeDelBotUseCase,
     private readonly cambiarModo: CambiarModoConversacionUseCase,
@@ -71,22 +83,52 @@ export class OrquestadorDeBotUseCase implements OrquestadorDeBotPort {
 
     // CAPA 2 — el modelo clasifica. Nada más.
     const contexto = await this.herramientas.contextoDe(turno.conversacion);
-    const intencion = await this.agente.interpretar({
+    const turnoParaInterpretar = {
       texto: turno.texto,
       contexto: {
         tieneCitaPendienteDeConfirmar: contexto.citaPendienteDeConfirmar !== null,
         tieneOfertaDeHuecoAbierta: contexto.ofertaAbierta !== null,
       },
-    });
+    };
+
+    /**
+     * **El cortacircuitos de gasto de IA (`F-07`).**
+     *
+     * Si el presupuesto diario está agotado, **el bot no deja de funcionar**: clasifica con el
+     * intérprete determinista, que no tiene coste por mensaje y atiende saludos, precios y
+     * disponibilidad. Solo escala lo que ese intérprete no reconoce.
+     *
+     * Es deliberado que NO sea *"escalar todo a humano"*: la propia review advirtió que esa
+     * respuesta ingenua **agravaría `F-05`** —una escalada masiva que el personal no puede
+     * absorber—. El tope degrada **la comprensión, no el servicio**.
+     *
+     * Y no es un camino nuevo que haya que probar aparte: es exactamente el mismo
+     * comportamiento que el sistema ya tiene cuando no hay `OPENAI_API_KEY` (`ADR-026`).
+     *
+     * `intentarConsumir` consulta e incrementa en un solo acto, así que dos mensajes simultáneos
+     * no pueden pasar los dos el último hueco del presupuesto.
+     *
+     * **Se carga al día de HOY, no a `turno.ocurridoEn`**, y la diferencia importa: `ocurridoEn` es
+     * la marca de tiempo que manda Meta, y un reintento de un evento viejo traería una fecha
+     * pasada. Cargarlo ahí **esquivaría el tope de hoy** — una ráfaga de reintentos antiguos
+     * gastaría sin tocar el presupuesto vigente. El gasto se incurre ahora, así que se cuenta ahora.
+     */
+    const hayPresupuesto = await this.presupuesto.intentarConsumir();
+    const interprete = hayPresupuesto ? this.agente : this.interpreteSinCoste;
+
+    const intencion = await interprete.interpretar(turnoParaInterpretar);
 
     // `RN-CONV-05` — degradación a humano ante baja confianza.
     if (intencion.confianza < CONFIANZA_MINIMA) {
-      return this.escalar(turno, 'baja_confianza_ia', { fuente: 'confianza', confianza: intencion.confianza });
+      return this.escalar(turno, 'baja_confianza_ia', { fuente: 'confianza', confianza: intencion.confianza, sinPresupuesto: !hayPresupuesto });
     }
 
     const motivoPorIntencion = motivoDeEscalamientoDe(intencion);
     if (motivoPorIntencion) {
-      return this.escalar(turno, motivoPorIntencion, { fuente: 'intencion', intencion: intencion.tipo });
+      // `sinPresupuesto` entra en la auditoría: `RN-CONV-04` exige saber POR QUÉ el bot decidió
+      // algo, y "lo clasificó el intérprete de respaldo porque el presupuesto estaba agotado" es
+      // una respuesta distinta de "lo clasificó el modelo".
+      return this.escalar(turno, motivoPorIntencion, { fuente: 'intencion', intencion: intencion.tipo, sinPresupuesto: !hayPresupuesto });
     }
 
     // CAPA 3 — los datos y las acciones salen del backend real.

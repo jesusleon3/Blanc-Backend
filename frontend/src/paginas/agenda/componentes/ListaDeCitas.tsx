@@ -4,7 +4,7 @@ import { catalogoApi } from '../../../api/catalogo';
 import { personalApi } from '../../../api/personal';
 import { Insignia } from '../../../componentes/Insignia';
 import { Vacio } from '../../../componentes/Vacio';
-import { ETIQUETA_DE_ESTADO_CITA, TONO_DE_ESTADO_CITA, horaLocal, pesos } from '../../../componentes/etiquetas';
+import { ETIQUETA_DE_ESTADO_CITA, TONO_DE_ESTADO_CITA, horaLocal, pesosOSinCotizar } from '../../../componentes/etiquetas';
 import { AccionesDeCita } from './AccionesDeCita';
 
 /**
@@ -61,7 +61,7 @@ export function ListaDeCitas({ citas, sucursalId, onCambio }: { citas: Cita[]; s
             <div className="ml-auto flex flex-col items-end gap-1.5">
               <Insignia tono={TONO_DE_ESTADO_CITA[cita.estado]}>{ETIQUETA_DE_ESTADO_CITA[cita.estado]}</Insignia>
               {cita.cotizacionSnapshot ? (
-                <span className="text-sm font-medium text-texto">{pesos(cita.cotizacionSnapshot.totalCentavos)}</span>
+                <span className="text-sm font-medium text-texto">{pesosOSinCotizar(cita.cotizacionSnapshot.totalCentavos)}</span>
               ) : null}
               {/* Indicadores discretos para recepción. `enListaRoja` solo llega a los roles de
                   operación: el presenter del backend no lo incluye para la Manicurista. */}

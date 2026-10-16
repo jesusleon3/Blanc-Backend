@@ -11,6 +11,7 @@ export const CERROJOS = {
   expiracionAnticipos: 8_401_002,
   cierreDeCitas: 8_401_003,
   recordatorios: 8_401_004,
+  retencionDeMensajes: 8_401_005,
 } as const;
 
 /**

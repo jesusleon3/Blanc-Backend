@@ -59,6 +59,21 @@ Inventar un número —"90 días"— sería peor que dejarlo abierto: parecería
 
 Mientras no se fije, **no hay purga y los mensajes se conservan**. Es el estado actual y conviene nombrarlo: no es una decisión de retención indefinida, es la ausencia del insumo para decidirla.
 
+### Actualización 2026-10-16 — el mecanismo YA EXISTE; sigue faltando el número
+
+El barrido está construido: `PurgarMensajesUseCase`, disparado por el **quinto barrido** del Planificador (`retencion_de_mensajes`, cada hora, con su propio cerrojo `advisory lock`).
+
+| Qué hace | Detalle |
+|---|---|
+| Borra | Filas de `conversaciones.mensajes` con `ocurrido_en` anterior a N días |
+| **No toca** | `auditoria` — es lo que hace que esta ADR funcione, y hay una prueba que lo verifica |
+| **No borra** | La `Conversacion`: es la identidad persistente de la clienta en ese número y su `modo` es estado operativo vigente. Lo que caduca es el contenido, no el hilo |
+| Por lotes | 5.000 filas por ejecución. Un `DELETE` sin tope sobre un año de mensajes bloquearía la tabla que la Bandeja lee en caliente: **la primera purga podría dejar al equipo sin poder atender** |
+
+**`RETENCION_MENSAJES_DIAS` vacío o `0` = no purga nada, y es el valor por defecto.** Un valor no entero o negativo se trata como "no configurado": un typo no debe borrar con un umbral absurdo ni desactivar la purga creyéndola activa. El borrado es irreversible, así que el lado seguro es no borrar.
+
+> **Lo que sigue abierto es exactamente lo que esta ADR ya declaraba: el número.** Depende de la Pregunta Abierta #12. La diferencia es que ahora activar la retención es poner una variable, no escribir código.
+
 ---
 
 ## Consequences

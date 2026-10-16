@@ -1209,6 +1209,155 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-16 (e) — Plataforma completa (Parte 1/2): Fase 6 Analítica, cortacircuitos de IA (`F-07`) y retención (`ADR-029`)
+
+**Backend: 1204 pruebas en 79 suites** (+39). **Frontend: 180 pruebas en 11 suites** (+27). Los seis controles del backend y los cuatro del frontend en verde.
+
+> **Lo primero: encontré un defecto real de la Fase 5 que llegaba hasta la pantalla.** Está en el punto 5 y conviene leerlo antes del resto, porque explica por qué el verificador de contrato de `P8` tenía una laguna.
+
+---
+
+#### 1. Fase 6 — Analítica: cómo se cruzan los datos sin romper `ADR-005`
+
+**No se cruzan en SQL.** `AnaliticaModule` no tiene una sola consulta propia.
+
+`ADR-005` prohíbe que un contexto haga `JOIN` contra las tablas de otro, y `CLAUDE.md` lo dice literal: *"si necesita ese dato, lo pide a través del caso de uso público de ese contexto"*. Un `modules/analitica` con SQL cruzando `agenda`, `anticipos` y `conversaciones` sería exactamente el `JOIN` entre esquemas que la decisión existe para impedir — y el día que uno de esos contextos se extraiga a su propio servicio, el reporte dejaría de compilar.
+
+Así que **cada Bounded Context agrega lo suyo**:
+
+| Caso de uso | Esquema que toca | Qué devuelve |
+|---|---|---|
+| `ReporteDeAgendaUseCase` | `agenda` **y solo `agenda`** | Citas por estado, cancelaciones tardías, desglose por sucursal y por manicurista, ingreso estimado, lista de espera |
+| `ReporteDeAnticiposUseCase` | `anticipos` | Cantidad y monto por estado, y lo **cobrado** (`pagado` + `retenido`) |
+| `ReporteDeConversacionesUseCase` | `conversaciones` | Activas, resueltas solo por el bot, escalamientos por motivo |
+
+`ResumenAnaliticoUseCase` los invoca **en paralelo** y compone en memoria. Es un **adaptador conductor**, igual que `PlanificadorModule` y `AgenteModule`: sin dominio propio, sin entidades, sin tablas. Importa los módulos de los BC y ninguno lo importa a él, así que `madge --circular` sigue en 0 sin necesidad de puertos.
+
+**El precio de este diseño, dicho sin adornos:** no se puede filtrar anticipos por sucursal, porque `anticipos.anticipos` guarda `cita_id` y `clienta_id`, no `sucursal_id` — la sucursal es un dato de la cita, en otro esquema. Un `JOIN` lo daría gratis. La alternativa era traer los ids de cita de Agenda y pasarlos en un `IN`, que con un año de datos son miles de uuids por consulta. **Se eligió reportarlos globales y decirlo en la respuesta** antes que fingir un desglose mal calculado.
+
+> 🐛 **Un error mío que corregí a mitad:** los reportes de Anticipos y Conversaciones importaban dos helpers desde el módulo de Agenda. **Eso es un BC importando a otro**, justo lo que `P5` cerró — y no habría dado un ciclo en `madge`, así que la regla se habría roto sin que nada fallara. Los moví a `shared/reportes/`.
+
+**Tres decisiones de medición que no son obvias:**
+
+**(a) La tasa de no-show usa `completada + no_show` como denominador, no el total.** Las canceladas no entran: una cita cancelada con tiempo no es un no-show, y meterla en el denominador **diluiría la tasa justo en los periodos con muchas cancelaciones**, que es cuando el indicador tiene que notarse. Las activas tampoco: todavía no se sabe.
+
+**(b) «Se quedó en el bot» se mide por los MENSAJES, no por el `modo`.** La forma obvia —contar `modo = 'bot'`— **es incorrecta y el error sería silencioso**: `devolverAlBot` limpia `motivo_de_escalamiento` y `escalada_en` (`RN-ESC-03`), así que una conversación escalada, atendida por una persona y devuelta al bot **queda indistinguible** de una que nunca se escaló. El indicador de resolución autónoma saldría inflado **justo en los casos en que una persona trabajó**. Se deriva de los mensajes: si ninguno tiene `emisor = 'humano'`, se atendió sola. Un `emisor = 'sistema'` (recordatorio, oferta) **no cuenta**: lo manda el Planificador.
+
+**(c) `null` no es `0`.** Un indicador sin datos devuelve `null` y la pantalla muestra «—». Un `0%` de resolución del bot haría pensar que está roto cuando simplemente no hubo conversaciones, y eso es una conclusión equivocada sobre la que alguien podría actuar.
+
+**Dos ejes de tiempo distintos, y hay que saberlo:** el reporte de citas filtra por `lower(rango_horario)` —*cuándo es la cita*— mientras anticipos y lista de espera filtran por `creado_en` —*cuándo se registró la fila*, porque un anticipo no tiene fecha de servicio propia. En un reporte mensual de actividad pasada coinciden; con datos futuros, no. Lo descubrí porque mis primeras pruebas sembraban citas a cinco meses vista y los anticipos caían fuera del rango. Está documentado en el spec y la advertencia correspondiente viaja en la respuesta.
+
+**RBAC: exclusivo de `SUPER_ADMIN` y `ADMINISTRADOR`.** Más estricto que el resto del panel, y el motivo decisivo es el **desglose por manicurista**: *"cuántas citas completó cada una"* es una medida del trabajo de las compañeras de la Encargada, y darla a quien no decide sobre su contratación es una fuga de un dato sensible sin necesidad operativa. **No hice la lectura acotada por sucursal** que la orden permitía como alternativa, porque no quita el problema: en Álamos, de una sola silla, el desglose por manicurista **es** el desempeño de una persona identificable.
+
+---
+
+#### 2. La pantalla `/analitica`
+
+Cuatro KPIs de cabecera (citas atendidas, tasa de no-show, resolución autónoma del bot, ingreso estimado), filtros de rango y sucursal con atajos de 30/90/365 días en la URL, y seis tarjetas de desglose.
+
+**Las advertencias van ARRIBA, antes de los números.** No es letra pequeña: el ingreso es un estimado y quien lo lee tiene que saberlo *antes* de leerlo. Y se renderizan **desde la respuesta**, no desde una lista del cliente: si el backend añade una advertencia mañana, aparece sola.
+
+El enlace del encabezado vive en una **lista aparte** (`ENLACES_DE_ADMINISTRACION`), no en un `if` dentro de la compartida. Es el mismo criterio que hace de la vista de iPad un árbol de rutas separado: una condición dentro de una lista común es la forma habitual de que un día se filtre un enlace. Para la Encargada el enlace **no existe**, no está oculto — y si navegara a mano, `ExigeRol` la devuelve a su pantalla y el endpoint responde `403`.
+
+> 🐛 **Reintroduje el defecto del plural en español.** `cancelación` + `es` da **«cancelaciónes»**: el plural pierde la tilde. Es el mismo error que ya corregí en el contador de la Bandeja y en Clientas, y volvió a aparecer en cuanto escribí un texto con cantidad variable. Lo destapó una prueba que no encontraba el texto porque estaba partido entre elementos. Ahora las dos formas van escritas enteras.
+
+---
+
+#### 3. `F-07` — el cortacircuitos de gasto de IA (`ADR-030`)
+
+Era el único de los cinco candidatos a ADR sin cubrir que **seguía siendo un vacío con consecuencia práctica** al cerrar el MVP.
+
+**Al agotarse el tope, el bot no deja de funcionar: usa el intérprete determinista.** Y eso es deliberado, no una comodidad — la propia review advirtió que la respuesta obvia, *"escalar todo a humano"*, **agravaría `F-05`**: una escalada masiva que nadie ha validado que el personal pueda absorber. **El tope degrada la comprensión, no el servicio.** Además no es un camino nuevo que probar: es exactamente el mismo comportamiento que cuando no hay `OPENAI_API_KEY` (`ADR-026`).
+
+**La cuenta vive en PostgreSQL** (`agente.consumo_de_ia`, migración `0015`), no en memoria. Un contador en memoria habría sido una línea y **habría protegido justo del caso que no importa**: lo que `F-07` teme es el gasto por un bucle o una ráfaga, y en ese escenario lo probable es que el proceso se reinicie —Railway reinicia ante un fallo— y un contador en memoria volvería a cero en cada reinicio, así que **el tope no se alcanzaría nunca**.
+
+**Consultar e incrementar son un solo acto.** Con dos métodos, diez mensajes simultáneos pasarían los diez la comprobación antes de que ninguno incrementara, y el tope no serviría **justo en la ráfaga que previene**. Hay una prueba de concurrencia: diez llamadas simultáneas con tope 5 dejan pasar exactamente 5.
+
+`OPENAI_MAX_LLAMADAS_DIA`, y sin la variable el tope por defecto es **500 — finito a propósito**: uno ilimitado dejaría sin protección a quien no configure nada, que es quien más lo necesita. `0` apaga el modelo por completo. La fecha es **de pared de Querétaro**: con UTC, el corte caería a las 18:00 locales, en mitad del turno de tarde.
+
+⚠️ **El número no está calibrado contra coste real.** `Pregunta 8` y `N-13` siguen abiertas: 500 es una cota de cordura, no un presupuesto en pesos. Lo que sí queda resuelto es el mecanismo y la pregunta *"¿qué hace el sistema al alcanzarlo?"*, que es lo que `F-07` pedía.
+
+> 🐛 **Defecto propio que una prueba destapó:** con tope `0`, el `INSERT ... ON CONFLICT` se ejecutaba igual —el `WHERE` del `DO UPDATE` solo gobierna el conflicto, no la inserción inicial— así que **el apagado total no apagaba** la primera llamada del día. El guardia ahora corre antes de tocar la base.
+>
+> 🐛 **Y otro de diseño:** el presupuesto se cargaba a `turno.ocurridoEn`, la marca de tiempo que manda Meta. Un reintento de un evento viejo traería una fecha pasada y **esquivaría el tope de hoy**. El gasto se incurre ahora, así que se cuenta ahora.
+
+---
+
+#### 4. `ADR-029` — el barrido de retención
+
+Quinto barrido del Planificador (`retencion_de_mensajes`, cada hora, con su propio cerrojo).
+
+| Qué hace | Detalle |
+|---|---|
+| Borra | Filas de `conversaciones.mensajes` anteriores a N días |
+| **Nunca toca** | `auditoria` — **es lo que hace que `ADR-029` funcione**, con una prueba que lo verifica |
+| **No borra** | La `Conversacion`: es la identidad persistente de la clienta en ese número y su `modo` es estado vigente. Lo que caduca es el contenido, no el hilo |
+| Por lotes | 5.000 por ejecución. Un `DELETE` sin tope sobre un año bloquearía la tabla que la Bandeja lee en caliente: **la primera purga podría dejar al equipo sin poder atender** |
+
+**`RETENCION_MENSAJES_DIAS` vacío o `0` = no purga nada, y es el valor por defecto.** `ADR-029` cerró la *estructura* pero **no el valor**, que depende de la Pregunta Abierta #12 (marco legal). Inventar un número parecería una decisión informada sobre obligaciones legales cuando sería una suposición — y un borrado es irreversible. Un valor no entero o negativo se trata como «no configurado»: un typo no debe borrar con un umbral absurdo ni desactivar la purga creyéndola activa.
+
+**La diferencia con antes es que ahora activar la retención es poner una variable, no escribir código.**
+
+> El smoke test del contenedor (`app.module.spec.ts`) detectó que `PlanificadorModule` no importaba `ConversacionesModule` para el barrido nuevo. Es la tercera vez que esa prueba atrapa una omisión de módulo, y es exactamente para lo que existe.
+
+---
+
+#### 5. 🐛 EL DEFECTO DE LA FASE 5 QUE EL CONTRATO NO VIO
+
+Al ir a sumar ingresos descubrí que el tipo `CotizacionSnapshot` del frontend **no se parecía al del backend**:
+
+| Frontend declaraba | Backend devuelve |
+|---|---|
+| `precioBaseCentavos: number` | *(no existe)* — está en `servicio.precioCentavos` |
+| `totalCentavos: number` | `totalCentavos: number \| null` |
+| `modificadores?: [...]` | *(no existe)* |
+| — | `version`, `congeladoEn`, `servicio`, `requiereCotizacionManual`, `incluyeModificadores` |
+
+Dos consecuencias, y la segunda es grave:
+
+- `precioBaseCentavos` llegaba `undefined` y la vista de iPad mostraba **`NaN`**.
+- `totalCentavos` es `null` cuando el servicio exige cotización manual (`DEC-033`) — **y `null` no es cero**: es la negativa explícita del sistema a inventar un precio que debe fijar una persona. Tratándolo como número, un servicio de cotización manual se mostraba como **$0.00**: un precio falso en pantalla que la manicurista podría decirle a la clienta.
+
+Lo dejó pasar un `[clave: string]: unknown` en el tipo, que hacía que `tsc` lo aceptara todo. **Y el verificador de contrato de `P8` no lo vio porque comparaba solo las claves de primer nivel**: `cotizacionSnapshot` coincidía como nombre mientras su contenido estaba equivocado.
+
+Corregido en tres frentes: el tipo ahora refleja la forma real, hay un `pesosOSinCotizar()` que muestra «Precio por confirmar» en vez de `$0.00`, y **el contrato cubre ahora las formas anidadas** — `CotizacionSnapshot` y `CotizacionSnapshot.servicio` son las dos primeras, y las cuatro de Analítica entraron igual. Hay una prueba nueva en la vista de iPad que verifica que un servicio de cotización manual no muestra `$0.00`.
+
+---
+
+#### Nuevos endpoints, variables y contrato
+
+| Endpoint | RBAC |
+|---|---|
+| `GET /v1/analitica/resumen?desde&hasta&sucursalId` | `SUPER_ADMIN`, `ADMINISTRADOR` |
+| `POST /v1/planificador/barridos/retencion_de_mensajes` | `SUPER_ADMIN`, `ADMINISTRADOR` (el quinto barrido, ya existente por nombre) |
+
+**Variables nuevas** en `backend/.env.example`, las dos documentadas con qué pasa si faltan:
+
+- `OPENAI_MAX_LLAMADAS_DIA` — por defecto 500, finito a propósito. `0` apaga el modelo.
+- `RETENCION_MENSAJES_DIAS` — **vacío por defecto: no purga nada.**
+
+**Contrato:** 81 rutas y 19 formas de respuesta en `contratos/api-v1.json`, regenerado. Las cinco de Analítica se derivan de los **tipos** con `satisfies` (son agregados, no hay entidad que pasar a un presenter), así que si un reporte gana un campo y nadie lo añade, **falla el build del backend**.
+
+---
+
+#### Listo para la Parte 2 de 2
+
+| Tarea | Qué hay hecho | Qué falta |
+|---|---|---|
+| **Backoffice de Catálogo** | `POST`/`PATCH`/`desactivar` de servicios y modificadores, con su RBAC | La pantalla. El selector de servicios ya consume `GET /servicios` |
+| **Backoffice de Sucursales y Sillas** | CRUD de sucursales, `POST /sillas`, `POST /sillas/:id/desactivar` | La pantalla. ⚠️ **El horario semanal es el formulario más delicado del backoffice**: de él depende el motor, y el seed ya documenta su forma real (bloques partidos, domingo vacío) |
+| **Backoffice de Personal y Usuarios** | CRUD de manicuristas con asignación a sucursal, y de usuarios con `provisionar` | La pantalla. `GET /manicuristas?sucursalId=` ya existe |
+| **`P10` (Garantías)** | `RN-GAR-01..06` `Aprobada`, `PoliticaDeGarantia` en `ADR-023` | **Todo el modelado.** Cerrado como diferido en Fase 7; reabrirlo exige decidir Bounded Context, aggregates, eventos y persistencia |
+| **Alertas activas en Bandeja (`DEC-046`)** | `NotificadorEscalamientoPort` en su sitio, con adaptador de solo-log; el contador del encabezado funciona | **El canal sigue sin decidir** (correo, push, WhatsApp a un número interno). Es una pregunta para la Dueña, no una tarea técnica |
+
+Tres avisos para quien la tome:
+
+1. **El contrato es el primer paso, no el último.** Al añadir un endpoint, correr `npm run contrato:actualizar` y revisar el diff. Y si una pantalla lee una forma **anidada**, declararla en `claves-del-contrato.ts`: la laguna del punto 5 fue exactamente eso.
+2. **Las pantallas de configuración son de Administración, no de operación.** Las sillas son capacidad vendible (`DEC-031`), los servicios son precio: el backend ya lo restringe a `SUPER_ADMIN`/`ADMINISTRADOR` y el frontend debe usar `ENLACES_DE_ADMINISTRACION`, no `ENLACES`.
+3. **Los plurales en español siguen siendo una trampa.** `cancelación` → `cancelaciones`, `conversación` → `conversaciones`: el plural pierde la tilde. Ya ha aparecido tres veces.
+
+---
+
 ### 2026-10-16 (d) — Fase 7: alistamiento de producción, cierre de `P6`/`P8`/`P10` y `N-14`. **🏁 MVP CERRADO · ARQUITECTURA CERRADA**
 
 **Backend: 1165 pruebas en 76 suites** (+16). **Frontend: 152 pruebas en 10 suites** (+51). Los seis controles del backend y los cuatro del frontend en verde.

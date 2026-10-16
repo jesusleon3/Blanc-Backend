@@ -7,6 +7,9 @@ import { ConversacionesModule } from '../conversaciones/conversaciones.module';
 import { ORQUESTADOR_DE_BOT_PORT } from '../conversaciones/domain/ports/orquestador-de-bot.port';
 import { OrquestadorInactivoAdapter } from '../conversaciones/infrastructure/orquestador-inactivo.adapter';
 import { AGENTE_CONVERSACIONAL_PORT } from './domain/agente-conversacional.port';
+import { PRESUPUESTO_DE_IA_PORT } from './domain/presupuesto-de-ia.port';
+import { PresupuestoDeIaEnPostgres, TOPE_DIARIO_POR_DEFECTO } from './infrastructure/presupuesto-de-ia.adapter';
+import { DATABASE_CONNECTION, type Database } from '../../database/connection';
 import { AgenteDeterministicoAdapter } from './infrastructure/llm/agente-deterministico.adapter';
 import { MODELO_POR_DEFECTO, OpenAiAgenteAdapter } from './infrastructure/llm/openai.adapter';
 import { OrquestadorDeBotUseCase } from './application/orquestador-de-bot.use-case';
@@ -65,6 +68,32 @@ import { HerramientasDelBot } from './application/herramientas-del-bot';
   providers: [
     HerramientasDelBot,
     {
+      /**
+       * **El cortacircuitos de gasto de IA (`F-07`).**
+       *
+       * `OPENAI_MAX_LLAMADAS_DIA` lo configura; sin la variable, el tope por defecto **existe y es
+       * finito**. Un valor por defecto ilimitado dejaría sin protección justo a quien no la
+       * configure, que es quien más la necesita. `0` apaga el modelo por completo.
+       *
+       * Un valor no numérico se trata como "no configurado" en vez de como `NaN`: un typo en la
+       * variable no debe desactivar el tope en silencio.
+       */
+      provide: PRESUPUESTO_DE_IA_PORT,
+      useFactory: (db: Database) => {
+        const crudo = process.env.OPENAI_MAX_LLAMADAS_DIA;
+        const configurado = crudo === undefined || crudo.trim() === '' ? null : Number(crudo);
+        const tope = configurado !== null && Number.isInteger(configurado) && configurado >= 0 ? configurado : TOPE_DIARIO_POR_DEFECTO;
+
+        if (configurado !== null && tope !== configurado) {
+          new Logger('AgenteModule').warn(
+            `OPENAI_MAX_LLAMADAS_DIA="${crudo}" no es un entero >= 0; se usa el tope por defecto (${TOPE_DIARIO_POR_DEFECTO}).`,
+          );
+        }
+        return new PresupuestoDeIaEnPostgres(db, tope);
+      },
+      inject: [DATABASE_CONNECTION],
+    },
+    {
       provide: AGENTE_CONVERSACIONAL_PORT,
       useFactory: () => {
         const apiKey = process.env.OPENAI_API_KEY;
@@ -93,6 +122,6 @@ import { HerramientasDelBot } from './application/herramientas-del-bot';
       inject: [OrquestadorDeBotUseCase, OrquestadorInactivoAdapter],
     },
   ],
-  exports: [ORQUESTADOR_DE_BOT_PORT, AGENTE_CONVERSACIONAL_PORT, HerramientasDelBot, OrquestadorDeBotUseCase],
+  exports: [ORQUESTADOR_DE_BOT_PORT, AGENTE_CONVERSACIONAL_PORT, PRESUPUESTO_DE_IA_PORT, HerramientasDelBot, OrquestadorDeBotUseCase],
 })
 export class AgenteModule {}

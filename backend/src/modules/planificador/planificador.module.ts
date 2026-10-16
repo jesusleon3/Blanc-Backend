@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AgendaModule } from '../agenda/agenda.module';
+import { ConversacionesModule } from '../conversaciones/conversaciones.module';
 import { AnticiposModule } from '../anticipos/anticipos.module';
 import { PlanificadorService } from './application/planificador.service';
 import { BarridoDeAnticiposUseCase } from './application/barrido-de-anticipos.use-case';
@@ -27,7 +28,14 @@ import { CerrojoDeBarrido } from '../../shared/persistence/advisory-lock';
  * pieza que se quita entera quitando este módulo, sin dejar infraestructura de cron huérfana.
  */
 @Module({
-  imports: [ScheduleModule.forRoot(), AgendaModule, AnticiposModule],
+  imports: [
+    ScheduleModule.forRoot(),
+    AgendaModule,
+    AnticiposModule,
+    // Para el quinto barrido, el de retención (`ADR-029`): `PurgarMensajesUseCase` vive en
+    // Conversaciones porque los mensajes son suyos. El Planificador solo lo dispara.
+    ConversacionesModule,
+  ],
   controllers: [PlanificadorController],
   providers: [CerrojoDeBarrido, PlanificadorService, BarridoDeAnticiposUseCase],
   exports: [PlanificadorService],

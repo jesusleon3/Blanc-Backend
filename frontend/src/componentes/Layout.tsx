@@ -1,16 +1,29 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useSesion } from '../auth/sesion';
-import { esDeOperacion } from '../auth/roles';
+import { esDeAdministracion, esDeOperacion } from '../auth/roles';
 import { ETIQUETA_DE_ROL } from './etiquetas';
 import { ContadorDeEscaladas } from './ContadorDeEscaladas';
 import { Boton } from './Boton';
 
 const ENLACES = [
   { a: '/bandeja', texto: 'Bandeja' },
+  { a: '/agenda', texto: 'Agenda' },
   { a: '/anticipos', texto: 'Anticipos' },
   { a: '/clientas', texto: 'Clientas' },
-  { a: '/agenda', texto: 'Agenda' },
 ] as const;
+
+/**
+ * Enlaces reservados a Administración.
+ *
+ * **Lista aparte, no un `if` dentro de `ENLACES`.** Es la misma razón por la que la vista de iPad
+ * es un árbol de rutas separado: una condición dentro de la lista compartida es la forma habitual
+ * de que un día se filtre un enlace. Con dos listas, el enlace de Analítica **no existe** para la
+ * Encargada, no está oculto.
+ *
+ * Y recordatorio de `ADR-027`: esto decide qué se dibuja. La autorización está en el `@Roles` del
+ * endpoint, que responde `403` aunque alguien navegue a mano.
+ */
+const ENLACES_DE_ADMINISTRACION = [{ a: '/analitica', texto: 'Analítica' }] as const;
 
 /**
  * Marco del panel operativo.
@@ -33,7 +46,7 @@ export function Layout() {
           </span>
 
           <nav className="flex items-center gap-1" aria-label="Secciones">
-            {ENLACES.map((enlace) => (
+            {[...ENLACES, ...(esDeAdministracion(perfil?.rol) ? ENLACES_DE_ADMINISTRACION : [])].map((enlace) => (
               <NavLink
                 key={enlace.a}
                 to={enlace.a}

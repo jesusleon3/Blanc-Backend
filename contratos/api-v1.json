@@ -170,6 +170,14 @@
     },
     {
       "metodo": "GET",
+      "ruta": "/v1/analitica/resumen",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
       "ruta": "/v1/anticipos",
       "roles": [
         "ADMINISTRADOR",
@@ -782,6 +790,57 @@
       "id",
       "nombre",
       "rol"
+    ],
+    "CotizacionSnapshot (anidado en Cita)": [
+      "congeladoEn",
+      "incluyeModificadores",
+      "requiereCotizacionManual",
+      "servicio",
+      "totalCentavos",
+      "version"
+    ],
+    "CotizacionSnapshot.servicio": [
+      "categoria",
+      "duracionMinutos",
+      "id",
+      "nombre",
+      "precioCentavos"
+    ],
+    "ResumenAnalitico": [
+      "advertencias",
+      "anticipos",
+      "citas",
+      "conversaciones",
+      "indicadores",
+      "rango",
+      "sucursalId"
+    ],
+    "ResumenAnalitico.citas": [
+      "atendidasPorManicurista",
+      "atendidasPorSucursal",
+      "cancelacionesTardias",
+      "completadasSinCotizar",
+      "ingresoEstimadoCentavos",
+      "listaDeEspera",
+      "porEstado",
+      "total"
+    ],
+    "ResumenAnalitico.anticipos": [
+      "cobradoCentavos",
+      "porEstado"
+    ],
+    "ResumenAnalitico.conversaciones": [
+      "activas",
+      "conIntervencionHumana",
+      "escalamientosPorMotivo",
+      "porcentajeResueltoPorElBot",
+      "soloBot"
+    ],
+    "ResumenAnalitico.indicadores": [
+      "efectividadDeListaDeEspera",
+      "ingresoTotalEstimadoCentavos",
+      "porcentajeResueltoPorElBot",
+      "tasaDeNoShow"
     ]
   }
 }

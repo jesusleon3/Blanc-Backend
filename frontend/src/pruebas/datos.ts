@@ -1,5 +1,6 @@
 import type {
   Anticipo,
+  ResumenAnalitico,
   Cita,
   CitaAfectada,
   CotizacionSnapshot,
@@ -155,10 +156,20 @@ export const manicurista = (extra: Partial<Manicurista> = {}): Manicurista => ({
   ...extra,
 });
 
+/** Con la forma REAL del snapshot del backend (`ResolutorDeServicio.construirSnapshot`). */
 export const cotizacion = (extra: Partial<CotizacionSnapshot> = {}): CotizacionSnapshot => ({
-  precioBaseCentavos: 45000,
+  version: 1,
+  congeladoEn: '2027-03-01T16:00:00.000Z',
+  servicio: {
+    id: SERVICIO_GELISH,
+    nombre: 'Gelish manos',
+    categoria: 'manos',
+    duracionMinutos: 60,
+    precioCentavos: 45000,
+  },
   totalCentavos: 45000,
-  modificadores: [],
+  requiereCotizacionManual: false,
+  incluyeModificadores: false,
   ...extra,
 });
 
@@ -239,5 +250,77 @@ export const solicitud = (extra: Partial<SolicitudListaEspera> = {}): SolicitudL
   expiraEn: null,
   citaId: null,
   creadoEn: '2027-03-01T16:00:00.000Z',
+  ...extra,
+});
+
+// ---------------------------------------------------------------------------
+// Analítica (Fase 6)
+// ---------------------------------------------------------------------------
+
+/** Con la forma exacta de `GET /v1/analitica/resumen`. */
+export const resumenAnalitico = (extra: Partial<ResumenAnalitico> = {}): ResumenAnalitico => ({
+  rango: { desde: '2027-03-01T06:00:00.000Z', hasta: '2027-03-31T05:59:59.000Z' },
+  sucursalId: null,
+  citas: {
+    porEstado: {
+      en_espera_pago: 1,
+      agendada: 4,
+      pendiente_confirmacion: 0,
+      confirmada: 2,
+      completada: 40,
+      no_show: 5,
+      cancelada: 8,
+      reprogramada: 3,
+      expirada: 1,
+    },
+    total: 64,
+    cancelacionesTardias: 3,
+    atendidasPorSucursal: [
+      { sucursalId: SUCURSAL_LOMAS, completadas: 25, noShow: 3 },
+      { sucursalId: SUCURSAL_ZIBATA, completadas: 15, noShow: 2 },
+    ],
+    atendidasPorManicurista: [
+      { manicuristaId: MANICURISTA_ANA, completadas: 22 },
+      { manicuristaId: null, completadas: 18 },
+    ],
+    ingresoEstimadoCentavos: 1_800_000,
+    completadasSinCotizar: 2,
+    listaDeEspera: { inscritas: 12, notificadas: 8, aceptadas: 5, expiradas: 3 },
+  },
+  anticipos: {
+    porEstado: {
+      pendiente: { cantidad: 2, centavos: 36000 },
+      pagado: { cantidad: 6, centavos: 108000 },
+      retenido: { cantidad: 1, centavos: 18000 },
+      expirado: { cantidad: 1, centavos: 18000 },
+    },
+    cobradoCentavos: 126000,
+  },
+  conversaciones: {
+    activas: 50,
+    soloBot: 42,
+    conIntervencionHumana: 8,
+    porcentajeResueltoPorElBot: 84,
+    escalamientosPorMotivo: {
+      clienta_bloqueada: 0,
+      solicitud_humana: 2,
+      queja_o_reclamo: 1,
+      cotizacion_compleja: 3,
+      cancelacion_solicitada: 2,
+      intervencion_manual: 0,
+      baja_confianza_ia: 0,
+      fuera_de_alcance: 0,
+      medio_no_soportado: 0,
+    },
+  },
+  indicadores: {
+    tasaDeNoShow: 11.1,
+    efectividadDeListaDeEspera: 62.5,
+    porcentajeResueltoPorElBot: 84,
+    ingresoTotalEstimadoCentavos: 1_926_000,
+  },
+  advertencias: [
+    'El ingreso es un ESTIMADO: sale de lo cotizado al agendar, no de lo cobrado. No incluye extras, propinas, descuentos de mostrador ni productos, que viven en el registro paralelo de Excel.',
+  ],
   ...extra,
 });

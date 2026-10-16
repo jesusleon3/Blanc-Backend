@@ -12,6 +12,7 @@ import { IntegracionModule } from './modules/integracion/integracion.module';
 import { ConversacionesModule } from './modules/conversaciones/conversaciones.module';
 import { PlanificadorModule } from './modules/planificador/planificador.module';
 import { AgenteModule } from './modules/agente/agente.module';
+import { AnaliticaModule } from './modules/analitica/analitica.module';
 import { HealthController } from './shared/health/health.controller';
 
 /**
@@ -41,6 +42,7 @@ import { HealthController } from './shared/health/health.controller';
     // `ORQUESTADOR_DE_BOT_PORT`, que allí apunta al adaptador inactivo. Quitar esta línea apaga el
     // bot y deja el canal atendido solo por personas — el rollback completo es esta línea.
     AgenteModule,
+    AnaliticaModule,
   ],
   // `HealthController` se declara aquí, no en un módulo propio: no tiene providers, no tiene
   // dependencias y no pertenece a ningún Bounded Context — es infraestructura de despliegue.

@@ -6,3 +6,4 @@ export * from './agenda.schema';
 export * from './crm.schema';
 export * from './anticipos.schema';
 export * from './conversaciones.schema';
+export * from './agente.schema';

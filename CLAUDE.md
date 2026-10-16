@@ -66,13 +66,26 @@ NestJS + TypeScript, Modular Monolith (`ADR-001`), Hexagonal + Clean + Vertical 
 
 - **Si cambias un presenter, un DTO, una ruta o un `@Roles`, la prueba falla** hasta que corras `npm run contrato:actualizar`. Eso es deliberado: así el cambio aparece en el diff de un commit en vez de inadvertido.
 - **Un campo que desaparezca del backend rompe el build del frontend**, porque `tsc` allí obliga a que `claves-del-contrato.ts` coincida con las interfaces, y una prueba compara esos arreglos con este JSON.
+- **Si una pantalla lee una forma ANIDADA, hay que declararla.** El verificador comparaba solo las claves de primer nivel y eso dejó pasar un defecto hasta la pantalla: `cotizacionSnapshot` coincidía como nombre mientras su contenido estaba equivocado, y el iPad mostraba `NaN` y **$0.00 para un servicio de cotización manual**.
 - Verifica además tres invariantes que ninguna prueba de módulo puede ver: que **toda ruta declara sus roles** (sin `@Roles`, `RolesGuard` deja pasar a cualquier autenticado), que **ninguna escritura está abierta a `MANICURISTA` ni `SOLO_LECTURA`**, y que la forma de `Cita` del iPad es un **subconjunto estricto** de la de operación.
+
+### Analítica y reportes (Fase 6)
+
+- **`AnaliticaModule` NO tiene SQL propio.** Es un adaptador conductor: cada Bounded Context agrega **su propio esquema** (`ReporteDeAgendaUseCase`, `ReporteDeAnticiposUseCase`, `ReporteDeConversacionesUseCase`) y él compone en memoria. Un módulo de analítica con `JOIN` entre esquemas es lo que `ADR-005` prohíbe.
+- **Los helpers de reporte viven en `shared/reportes/`**, no en el módulo de Agenda: que un BC los importara de otro sería violar `P5` **sin que `madge` lo marcara**.
+- **«Se quedó en el bot» se mide por los MENSAJES, no por el `modo`.** `devolverAlBot` limpia el motivo (`RN-ESC-03`), así que contar `modo='bot'` inflaría el indicador justo en los casos en que una persona trabajó.
+- **La tasa de no-show usa `completada + no_show` como denominador**, no el total: incluir las canceladas diluiría la tasa cuando más tiene que notarse.
+- **`null` no es `0`** en un indicador: «no hubo datos» y «salió cero» llevan a conclusiones distintas. La pantalla muestra «—».
+- **El ingreso es un ESTIMADO** y las advertencias viajan **en la respuesta**, no en la documentación: quien lee un número tiene que saber qué no incluye en el mismo sitio donde lo lee.
+- **Los reportes usan dos ejes de tiempo distintos**: citas por `lower(rango_horario)` (cuándo es la cita), anticipos y lista de espera por `creado_en` (cuándo se registró la fila). En actividad pasada coinciden; con datos futuros, no.
 
 ### Despliegue y operación
 
 - **El seed es idempotente, y eso incluye NO reimponer valores de fábrica**: no pisa un horario ajustado a mano ni reactiva una silla desactivada. *Idempotente* significa "no cambia el resultado", no "reescribe el valor por defecto".
 - **CORS nunca responde `*`.** Sin `CORS_ORIGIN` en producción queda desactivado, asumiendo el mismo origen (`ADR-027`). Falla cerrado.
 - **Dos interruptores de rollback por entorno**: `PLANIFICADOR_ACTIVO=false` y `BOT_ACTIVO=false`. **Ninguno se apaga quitando su módulo** — el contenedor no arrancaría (`ADR-026`).
+- **`OPENAI_MAX_LLAMADAS_DIA`** (`ADR-030`): tope diario de llamadas al modelo, contado en PostgreSQL para que **sobreviva a reinicios**. Al agotarse, el bot **sigue atendiendo** con el intérprete determinista: escalar todo agravaría `F-05`. Por defecto 500, finito a propósito; `0` apaga el modelo.
+- **`RETENCION_MENSAJES_DIAS`** (`ADR-029`): **vacío o `0` no purga nada**, y es el valor por defecto. El *valor* de retención depende de la Pregunta Abierta #12 y no se inventa; un borrado es irreversible. El barrido nunca toca `auditoria`.
 - **El orden de puesta en marcha no es negociable**: `docs/operations/GO_LIVE_RUNBOOK.md`. Migrar un número a la Cloud API **lo desconecta de la app de WhatsApp Business inmediatamente**; si la Bandeja no está viva, el salón se queda incomunicado.
 - **Nada está verificado contra Supabase, Meta, OpenAI ni Railway reales.** No hay credenciales en este entorno; está declarado en `ADR-024`, `ADR-008`, `ADR-027` y `ADR-028`.
 
@@ -134,7 +147,7 @@ SPA de React + Vite, TypeScript estricto, Tailwind, TanStack Query, React Router
 - **Los errores se leen por su `code` de negocio** (`ADR-013`), nunca por el texto ni solo por el HTTP. `409 HORARIO_NO_DISPONIBLE` al confirmar un anticipo significa *"otra clienta ganó el cupo"* (`RN-ANT-03`) y necesita su propio mensaje.
 - **La vista de la Manicurista es un árbol de rutas separado**, sin `Layout`: ese marco lleva el contador de escaladas y los enlaces al panel, y ninguno puede aparecer en el iPad (`DEC-040`). La separación estructural evita depender de un `if` de rol.
 - **Las pruebas usan MSW, no dobles del cliente de API.** Interceptan HTTP y responden con la forma real del contrato, así que un cambio de forma en el backend las rompe — necesario mientras los tipos de `api/contrato.ts` se escriban a mano (`P8` abierto).
-- **Plurales en español: no concatenes sufijos.** `conversación` + `es` da «conversaciónes» — el plural pierde la tilde. Escribe las dos formas enteras.
+- **Plurales en español: no concatenes sufijos.** `conversación` + `es` da «conversaciónes» y `cancelación` + `es` da «cancelaciónes» — el plural pierde la tilde. Escribe las dos formas enteras. **Ya ha aparecido tres veces**: contador de la Bandeja, Clientas y Analítica.
 - **Los tokens visuales salen de `mockup/css/tokens.css`**, declarados como tema en `tailwind.config.ts`. Los colores semánticos van por variable CSS para que el tema oscuro no duplique clases.
 - **La hora de pared de Querétaro se construye con `-06:00` explícito** (`instanteDesdeHoraLocal` en `componentes/etiquetas.ts`). `new Date('2026-12-07T10:00')` la interpretaría en la zona del navegador: una Encargada con el portátil en otra zona agendaría a otra hora sin que nada avisara. Es el error más probable de todo el frontend.
 - **Las tablas de transiciones y los agrupamientos de rol son COPIAS del backend**, igual que las uniones de literales del contrato. Ofrecer un botón que el backend rechazará con `409 TRANSICION_ILEGAL` es peor que no ofrecerlo, porque invita a intentarlo — pero **la autoridad sigue siendo el backend**.

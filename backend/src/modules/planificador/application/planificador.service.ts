@@ -8,6 +8,7 @@ import {
 } from '../../agenda/application/use-cases/barridos-de-agenda.use-cases';
 import { AvanzarTurnoListaEsperaUseCase } from '../../agenda/application/use-cases/lista-espera.use-cases';
 import { BarridoDeAnticiposUseCase } from './barrido-de-anticipos.use-case';
+import { PurgarMensajesUseCase } from '../../conversaciones/application/use-cases/purgar-mensajes.use-case';
 import { ClaimsUsuario, Rol } from '../../../shared/auth/rol';
 
 /** `true` salvo que se desactive explícitamente. Ver `estaActivo`. */
@@ -15,10 +16,14 @@ function planificadorActivo(): boolean {
   return process.env.PLANIFICADOR_ACTIVO !== 'false';
 }
 
-export type NombreDeBarrido = 'lista_espera' | 'anticipos' | 'cierre_de_citas' | 'recordatorios';
+export type NombreDeBarrido = 'lista_espera' | 'anticipos' | 'cierre_de_citas' | 'recordatorios' | 'retencion_de_mensajes';
 
 /**
- * Planificador operativo (`ADR-025`) — los cuatro barridos temporales de la plataforma.
+ * Planificador operativo (`ADR-025`) — los **cinco** barridos temporales de la plataforma.
+ *
+ * El quinto, `retencion_de_mensajes`, se añadió al cerrar `ADR-029` y es el único **destructivo**:
+ * borra contenido conversacional. Por eso su valor por defecto **no purga nada** y hay que
+ * activarlo con `RETENCION_MENSAJES_DIAS` — ver `PurgarMensajesUseCase`.
  *
  * ## EL CRON NO CONTIENE LÓGICA
  *
@@ -56,6 +61,7 @@ export class PlanificadorService {
     private readonly barridoDeAnticipos: BarridoDeAnticiposUseCase,
     private readonly cerrarCitas: CerrarCitasTerminadasUseCase,
     private readonly recordatorios: SolicitarRecordatoriosUseCase,
+    private readonly purgarMensajes: PurgarMensajesUseCase,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES, { name: 'lista_espera' })
@@ -76,6 +82,19 @@ export class PlanificadorService {
   @Cron(CronExpression.EVERY_HOUR, { name: 'recordatorios' })
   async tickRecordatorios(): Promise<void> {
     await this.tick('recordatorios', CERROJOS.recordatorios);
+  }
+
+  /**
+   * Retención de contenido conversacional (`ADR-029`).
+   *
+   * Cada hora, y no cada 5 minutos, por dos razones: **sin `RETENCION_MENSAJES_DIAS` no borra
+   * nada** —así que correrlo más seguido solo multiplicaría consultas vacías— y cuando sí borra lo
+   * hace por lotes de 5.000, que a un lote por hora escalona la primera purga sin bloquear la
+   * tabla que la Bandeja lee en caliente.
+   */
+  @Cron(CronExpression.EVERY_HOUR, { name: 'retencion_de_mensajes' })
+  async tickRetencionDeMensajes(): Promise<void> {
+    await this.tick('retencion_de_mensajes', CERROJOS.retencionDeMensajes);
   }
 
   /**
@@ -112,6 +131,10 @@ export class PlanificadorService {
         return this.cerrarCitas.ejecutar(actor, ahora);
       case 'recordatorios':
         return this.recordatorios.ejecutar(actor, ahora);
+      case 'retencion_de_mensajes':
+        // `procesados` = mensajes purgados. Encaja en `ResumenDeBarrido` sin inventar otra forma,
+        // y `fallidos` es 0 porque un `DELETE` acotado o borra o lanza: no hay fallo por elemento.
+        return this.purgarMensajes.ejecutar(ahora).then((r) => ({ procesados: r.mensajesPurgados, fallidos: 0, idsFallidos: [] }));
     }
   }
 

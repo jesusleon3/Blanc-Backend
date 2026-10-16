@@ -1136,10 +1136,18 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
   describe('planificador operativo (`ADR-025`) — Fase 4 Parte 1', () => {
     const PLANIFICADOR = '/v1/planificador';
 
-    it('200 y lista los cuatro barridos, diciendo si el cron está activo', async () => {
+    it('200 y lista los CINCO barridos, diciendo si el cron está activo', async () => {
       const respuesta = await request(app.getHttpServer()).get(PLANIFICADOR).set('Authorization', `Bearer ${dueña}`).expect(200);
 
-      expect(respuesta.body.barridos).toEqual(['lista_espera', 'anticipos', 'cierre_de_citas', 'recordatorios']);
+      // El quinto, `retencion_de_mensajes`, se añadió al cerrar `ADR-029`. Es el único destructivo
+      // y por eso no purga nada sin `RETENCION_MENSAJES_DIAS`.
+      expect(respuesta.body.barridos).toEqual([
+        'lista_espera',
+        'anticipos',
+        'cierre_de_citas',
+        'recordatorios',
+        'retencion_de_mensajes',
+      ]);
       // En pruebas el cron está apagado a propósito (`global-setup.js`).
       expect(respuesta.body.cronActivo).toBe(false);
     });

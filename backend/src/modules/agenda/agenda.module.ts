@@ -1,3 +1,4 @@
+import { ReporteDeAgendaUseCase } from './application/use-cases/reporte-de-agenda.use-case';
 import { Module } from '@nestjs/common';
 import { SILLA_REPOSITORY } from './domain/ports/silla.repository';
 import { CITA_REPOSITORY } from './domain/ports/cita.repository';
@@ -45,6 +46,8 @@ import { SillasController } from './infrastructure/http/sillas.controller';
 @Module({
   controllers: [CitasController, SillasController, ListaEsperaController],
   providers: [
+    // Lectura agregada para `AnaliticaModule` (Fase 6). Toca SOLO su propio esquema.
+    ReporteDeAgendaUseCase,
     { provide: SILLA_REPOSITORY, useClass: DrizzleSillaRepository },
     { provide: CITA_REPOSITORY, useClass: DrizzleCitaRepository },
     { provide: LISTA_ESPERA_REPOSITORY, useClass: DrizzleListaEsperaRepository },
@@ -90,6 +93,7 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     SolicitarRecordatoriosUseCase,
   ],
   exports: [
+    ReporteDeAgendaUseCase,
     SILLA_REPOSITORY,
     CITA_REPOSITORY,
     MotorDisponibilidad,

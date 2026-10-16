@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ExigeRol, ExigeSesion } from './auth/guardas';
-import { ROLES_DE_OPERACION, ROL_DE_MANICURISTA, rutaInicialDe } from './auth/roles';
+import { ROLES_DE_ADMINISTRACION, ROLES_DE_OPERACION, ROL_DE_MANICURISTA, rutaInicialDe } from './auth/roles';
 import { useSesion } from './auth/sesion';
 import { Layout } from './componentes/Layout';
 import { Cargando } from './componentes/Cargando';
@@ -8,6 +8,7 @@ import { Entrar } from './paginas/entrar/Entrar';
 import { Bandeja } from './paginas/bandeja/Bandeja';
 import { Anticipos } from './paginas/anticipos/Anticipos';
 import { Clientas } from './paginas/clientas/Clientas';
+import { Analitica } from './paginas/analitica/Analitica';
 import { Agenda } from './paginas/agenda/Agenda';
 import { MiAgenda } from './paginas/mi-agenda/MiAgenda';
 import { SinAcceso } from './paginas/SinAcceso';
@@ -47,6 +48,23 @@ export function App() {
         <Route path="/anticipos" element={<Anticipos />} />
         <Route path="/clientas" element={<Clientas />} />
         <Route path="/agenda" element={<Agenda />} />
+        {/**
+         * Analítica va **anidada en el layout de operación pero con su propia guarda de rol**.
+         *
+         * Es la única pantalla del panel más restringida que el resto: `ROLES_DE_ADMINISTRACION`,
+         * no `ROLES_DE_OPERACION`. El motivo decisivo es el desglose por manicurista — una medida
+         * del trabajo de las compañeras de la Encargada. Si llega aquí, `ExigeRol` la devuelve a su
+         * pantalla inicial en vez de mostrarle un error; y si forzara la petición, el endpoint
+         * responde `403`.
+         */}
+        <Route
+          path="/analitica"
+          element={
+            <ExigeRol roles={ROLES_DE_ADMINISTRACION}>
+              <Analitica />
+            </ExigeRol>
+          }
+        />
       </Route>
 
       {/* Manicurista: su propio marco, sin navegación ni contador. */}

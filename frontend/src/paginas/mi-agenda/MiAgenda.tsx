@@ -9,7 +9,7 @@ import { Boton } from '../../componentes/Boton';
 import { Cargando } from '../../componentes/Cargando';
 import { AvisoDeError } from '../../componentes/AvisoDeError';
 import { Vacio } from '../../componentes/Vacio';
-import { ETIQUETA_DE_ESTADO_CITA, fechaLocalDeHoy, horaLocal, pesos, rangoDelDia } from '../../componentes/etiquetas';
+import { ETIQUETA_DE_ESTADO_CITA, fechaLocalDeHoy, horaLocal, pesos, pesosOSinCotizar, rangoDelDia } from '../../componentes/etiquetas';
 
 /**
  * Vista de iPad de la Manicurista — **solo lectura, y aislada por construcción**.
@@ -144,7 +144,6 @@ export function MiAgenda() {
 /** Una cita, en grande. Horario, clienta, servicio y desglose de precio. */
 function TarjetaDeCita({ cita, nombreDeServicio }: { cita: Cita; nombreDeServicio: (id: string) => string }) {
   const snapshot = cita.cotizacionSnapshot;
-  const modificadores = snapshot?.modificadores ?? [];
 
   return (
     <li className="rounded-xl border border-borde bg-fondo-elevado p-5 shadow-sm">
@@ -161,24 +160,26 @@ function TarjetaDeCita({ cita, nombreDeServicio }: { cita: Cita; nombreDeServici
 
       {snapshot ? (
         <div className="mt-4 border-t border-borde pt-3">
-          {/* La Dueña lo confirmó explícitamente: *"ve precios"*. El desglose, no solo el total —
-              es lo que le permite responder si la clienta pregunta por qué cuesta eso. */}
+          {/* La Dueña lo confirmó explícitamente: *"ve precios"*. Se muestra el precio del servicio
+              y el total congelado, que es todo lo que el snapshot tiene hoy: los modificadores no
+              entran en el total mientras `FL-COT-03` siga pospuesto (`incluyeModificadores:
+              false`), así que un desglose por modificador sería inventado. */}
           <dl className="space-y-1 text-sm">
             <div className="flex justify-between">
-              <dt className="text-texto-secundario">Precio base</dt>
-              <dd className="tabular-nums text-texto">{pesos(snapshot.precioBaseCentavos)}</dd>
+              <dt className="text-texto-secundario">{snapshot.servicio.nombre}</dt>
+              <dd className="tabular-nums text-texto">{pesos(snapshot.servicio.precioCentavos)}</dd>
             </div>
-            {modificadores.map((modificador) => (
-              <div key={modificador.nombre} className="flex justify-between">
-                <dt className="text-texto-secundario">{modificador.nombre}</dt>
-                <dd className="tabular-nums text-texto">{pesos(modificador.montoCentavos)}</dd>
-              </div>
-            ))}
             <div className="flex justify-between border-t border-borde pt-1 font-semibold">
               <dt className="text-texto">Total</dt>
-              <dd className="tabular-nums text-texto">{pesos(snapshot.totalCentavos)}</dd>
+              {/* `null` NO es cero: es cotización manual pendiente (`DEC-033`). Mostrarlo como
+                  $0.00 era un defecto real — un precio falso que alguien podría decirle a la
+                  clienta. */}
+              <dd className="tabular-nums text-texto">{pesosOSinCotizar(snapshot.totalCentavos)}</dd>
             </div>
           </dl>
+          {snapshot.requiereCotizacionManual ? (
+            <p className="mt-2 text-xs text-aviso">El precio final lo fija una encargada: este servicio se cotiza a mano.</p>
+          ) : null}
         </div>
       ) : null}
     </li>

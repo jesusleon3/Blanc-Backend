@@ -2,6 +2,7 @@ import { crearBaseDeDatosDePrueba } from '../../database/test-utils/postgres-de-
 import { PlanificadorService } from './application/planificador.service';
 import { BarridoDeAnticiposUseCase } from './application/barrido-de-anticipos.use-case';
 import { CerrojoDeBarrido } from '../../shared/persistence/advisory-lock';
+import { PurgarMensajesUseCase } from '../conversaciones/application/use-cases/purgar-mensajes.use-case';
 import {
   CerrarCitasTerminadasUseCase,
   SolicitarRecordatoriosUseCase,
@@ -99,6 +100,8 @@ async function preparar({ sillas = 3 }: { sillas?: number } = {}) {
     return clienta;
   };
 
+  const purgarMensajes = new PurgarMensajesUseCase(db);
+
   return {
     db,
     citaRepo,
@@ -110,10 +113,11 @@ async function preparar({ sillas = 3 }: { sillas?: number } = {}) {
     cerrarCitas,
     recordatorios,
     barridoAnticipos,
+    purgarMensajes,
     agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, contextoClienta, anticipoPort, auditoria, uow),
     confirmarPago: new ConfirmarPagoAnticipoUseCase(anticipoRepo, transicionPort, auditoria, uow),
     completarCita,
-    planificador: new PlanificadorService(new CerrojoDeBarrido(db), avanzarFila, barridoAnticipos, cerrarCitas, recordatorios),
+    planificador: new PlanificadorService(new CerrojoDeBarrido(db), avanzarFila, barridoAnticipos, cerrarCitas, recordatorios, purgarMensajes),
     cerrojo: new CerrojoDeBarrido(db),
   };
 }

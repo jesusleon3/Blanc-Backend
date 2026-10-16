@@ -26,25 +26,39 @@ describe('Vista de iPad — qué muestra', () => {
      * El nombre de la clienta se añadió en esta entrega: va a atender físicamente a esa persona, y
      * ocultárselo no protege nada. Lo que `DEC-040` protege es la clasificación de riesgo.
      */
+    basico([citaDeManicurista({ cotizacionSnapshot: cotizacion({ totalCentavos: 45000 }) })]);
+
+    montar(<MiAgenda />, { ruta: '/mi-agenda' });
+
+    const lista = await screen.findByRole('list', { name: 'Mis citas' });
+    expect(within(lista).getByText('Andrea Ramírez')).toBeInTheDocument();
+    // El nombre del servicio sale del snapshot congelado, no del catálogo vigente: es lo que se
+    // cotizó al agendar, y el catálogo pudo cambiar de precio desde entonces.
+    expect(within(lista).getAllByText('Gelish manos').length).toBeGreaterThan(0);
+    expect(within(lista).getAllByText('$450.00').length).toBeGreaterThan(0);
+  });
+
+  it('un servicio de COTIZACIÓN MANUAL dice "por confirmar", NO $0.00', async () => {
+    /**
+     * **Era un defecto real de la Fase 5.** El tipo declaraba `totalCentavos: number` y el
+     * backend devuelve `number | null`; `null` pasaba por el formateador de moneda y salía
+     * **$0.00** — un precio falso en pantalla que la manicurista podría decirle a la clienta.
+     *
+     * `null` no es cero: es la negativa explícita del sistema a inventar un precio que debe fijar
+     * una persona (`DEC-033`).
+     */
     basico([
       citaDeManicurista({
-        cotizacionSnapshot: cotizacion({
-          precioBaseCentavos: 45000,
-          totalCentavos: 58000,
-          modificadores: [{ nombre: 'Decoración francesa', montoCentavos: 13000 }],
-        }),
+        cotizacionSnapshot: cotizacion({ totalCentavos: null, requiereCotizacionManual: true }),
       }),
     ]);
 
     montar(<MiAgenda />, { ruta: '/mi-agenda' });
 
     const lista = await screen.findByRole('list', { name: 'Mis citas' });
-    expect(within(lista).getByText('Andrea Ramírez')).toBeInTheDocument();
-    expect(within(lista).getByText('Gelish manos')).toBeInTheDocument();
-    expect(within(lista).getByText('$450.00')).toBeInTheDocument();
-    expect(within(lista).getByText('Decoración francesa')).toBeInTheDocument();
-    expect(within(lista).getByText('$130.00')).toBeInTheDocument();
-    expect(within(lista).getByText('$580.00')).toBeInTheDocument();
+    expect(within(lista).getByText('Precio por confirmar')).toBeInTheDocument();
+    expect(within(lista).queryByText('$0.00')).not.toBeInTheDocument();
+    expect(within(lista).getByText(/lo fija una encargada/)).toBeInTheDocument();
   });
 
   it('las citas vienen ORDENADAS por hora', async () => {

@@ -18,6 +18,11 @@ import { ManicuristasController } from '../modules/sucursales-y-personal/infrast
 import { MantenimientoController } from '../modules/sucursales-y-personal/infrastructure/http/mantenimiento.controller';
 import { ExcepcionesPersonalController } from '../modules/sucursales-y-personal/infrastructure/http/excepciones-personal.controller';
 import { PlanificadorController } from '../modules/planificador/infrastructure/http/planificador.controller';
+import { AnaliticaController } from '../modules/analitica/infrastructure/http/analitica.controller';
+import type { ResumenAnalitico } from '../modules/analitica/application/resumen-analitico.use-case';
+import type { ReporteDeAgenda } from '../modules/agenda/application/use-cases/reporte-de-agenda.use-case';
+import type { ReporteDeAnticipos } from '../modules/anticipos/application/use-cases/reporte-de-anticipos.use-case';
+import type { ReporteDeConversaciones } from '../modules/conversaciones/application/use-cases/reporte-de-conversaciones.use-case';
 import { HealthController } from '../shared/health/health.controller';
 
 // --- Presenters (la forma real de cada respuesta) -------------------------
@@ -45,6 +50,7 @@ import { Sucursal } from '../modules/sucursales-y-personal/domain/entities/sucur
 import { Manicurista } from '../modules/sucursales-y-personal/domain/entities/manicurista.entity';
 import { Usuario } from '../modules/identidad-y-accesos/domain/entities/usuario.entity';
 import { horarioAbiertoSiempre } from '../modules/agenda/test-utils/contexto-personal-falso';
+import { ResolutorDeServicio } from '../modules/agenda/domain/services/resolutor-de-servicio';
 
 /** Ruta del contrato versionado, **relativa a la raíz del repositorio**: los dos proyectos la leen. */
 export const RUTA_DEL_CONTRATO = 'contratos/api-v1.json';
@@ -75,6 +81,7 @@ const CONTROLADORES = [
   WebhookMetaController,
   BandejaController,
   PlanificadorController,
+  AnaliticaController,
 ] as const;
 
 const UUID = randomUUID();
@@ -97,6 +104,28 @@ const actor = (rol: Rol): ClaimsUsuario => ({ sub: 'contrato', rol, sucursales: 
  * exactamente lo que hace el controlador en producción.
  */
 export function construirContrato(): ContratoDeApi {
+  /**
+   * El snapshot de cotización, **construido por el servicio de dominio real**.
+   *
+   * ## POR QUÉ ESTA FORMA ANIDADA ENTRÓ AL CONTRATO (2026-10-16)
+   *
+   * La primera versión del verificador comparaba **solo las claves de primer nivel**, y eso dejó
+   * pasar un defecto real: el frontend declaraba `cotizacionSnapshot` con `precioBaseCentavos`, un
+   * `totalCentavos` no nulo y un arreglo de `modificadores`, **ninguno de los cuales existe**.
+   * `cotizacionSnapshot` coincidía como clave, así que la prueba pasaba — mientras la vista de
+   * iPad mostraba `NaN` y, peor, **$0.00 para un servicio de cotización manual**, que es un precio
+   * falso en pantalla.
+   *
+   * Lo destapó el cruce de datos de Analítica al ir a sumar ingresos, no el contrato. Por eso las
+   * formas anidadas que el cliente lee **tienen que estar aquí**.
+   */
+  const snapshot = new ResolutorDeServicio({
+    buscarServicio: async () => null,
+  }).construirSnapshot(
+    { id: UUID, nombre: 'Contrato', categoria: 'manos', duracionMinutos: 60, precioCentavos: 10000, activo: true, requiereCotizacionManual: false },
+    AHORA,
+  );
+
   const cita = Cita.crear({
     sucursalId: UUID,
     sillaId: UUID,
@@ -139,6 +168,70 @@ export function construirContrato(): ContratoDeApi {
       Sucursal: clavesDeRespuesta(sucursalAJson(sucursal)),
       Manicurista: clavesDeRespuesta(manicuristaAJson(manicurista)),
       Usuario: clavesDeRespuesta(usuarioAJson(usuario)),
+      // Formas ANIDADAS que el cliente lee. Ver la nota de `snapshot` arriba: su ausencia dejó
+      // pasar un defecto que llegó hasta la pantalla.
+      'CotizacionSnapshot (anidado en Cita)': clavesDeRespuesta(snapshot as unknown as Record<string, unknown>),
+      'CotizacionSnapshot.servicio': clavesDeRespuesta(snapshot.servicio as unknown as Record<string, unknown>),
+      // Analítica (Fase 6). Las formas se derivan de los TIPOS de los reportes, no de ejecutar las
+      // consultas: estas respuestas son agregados y no hay entidad que pasarles.
+      ...formasDeAnalitica(),
     },
+  };
+}
+
+/**
+ * Formas de la respuesta de Analítica.
+ *
+ * Se declaran a partir de objetos **tipados**: `satisfies` obliga a que las claves coincidan
+ * exactamente con las interfaces de los reportes, así que si un reporte gana un campo y nadie lo
+ * añade aquí, **el build del backend falla**. Es el mismo mecanismo que usa el frontend en
+ * `claves-del-contrato.ts`, por la misma razón: los agregados no tienen entidad que invocar, así
+ * que no se pueden derivar ejecutando un presenter.
+ */
+function formasDeAnalitica(): Record<string, string[]> {
+  const resumen = {
+    rango: 0,
+    sucursalId: 0,
+    citas: 0,
+    anticipos: 0,
+    conversaciones: 0,
+    indicadores: 0,
+    advertencias: 0,
+  } satisfies Record<keyof ResumenAnalitico, number>;
+
+  const agenda = {
+    porEstado: 0,
+    total: 0,
+    cancelacionesTardias: 0,
+    atendidasPorSucursal: 0,
+    atendidasPorManicurista: 0,
+    ingresoEstimadoCentavos: 0,
+    completadasSinCotizar: 0,
+    listaDeEspera: 0,
+  } satisfies Record<keyof ReporteDeAgenda, number>;
+
+  const anticipos = { porEstado: 0, cobradoCentavos: 0 } satisfies Record<keyof ReporteDeAnticipos, number>;
+
+  const conversaciones = {
+    activas: 0,
+    soloBot: 0,
+    conIntervencionHumana: 0,
+    porcentajeResueltoPorElBot: 0,
+    escalamientosPorMotivo: 0,
+  } satisfies Record<keyof ReporteDeConversaciones, number>;
+
+  const indicadores = {
+    tasaDeNoShow: 0,
+    efectividadDeListaDeEspera: 0,
+    porcentajeResueltoPorElBot: 0,
+    ingresoTotalEstimadoCentavos: 0,
+  } satisfies Record<keyof ResumenAnalitico['indicadores'], number>;
+
+  return {
+    ResumenAnalitico: clavesDeRespuesta(resumen),
+    'ResumenAnalitico.citas': clavesDeRespuesta(agenda),
+    'ResumenAnalitico.anticipos': clavesDeRespuesta(anticipos),
+    'ResumenAnalitico.conversaciones': clavesDeRespuesta(conversaciones),
+    'ResumenAnalitico.indicadores': clavesDeRespuesta(indicadores),
   };
 }
