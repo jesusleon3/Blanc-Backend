@@ -4,7 +4,7 @@ Este archivo guía a Claude Code (claude.ai/code) al trabajar en este repositori
 
 ## Estado del proyecto
 
-Blanc es una plataforma de agendamiento de citas para un salón de uñas de 3 sucursales (próximamente 4), impulsada por WhatsApp y asistida por IA. El diseño de dominio está hecho y **la implementación está en curso**: existe un backend real en `backend/` (ver la sección *Trabajar en el código* más abajo). La documentación de `docs/` sigue siendo autoritativa sobre el código en materia de reglas de negocio y decisiones de arquitectura.
+Blanc es una plataforma de agendamiento de citas para un salón de uñas de 3 sucursales (próximamente 4), impulsada por WhatsApp y asistida por IA. El diseño de dominio está hecho y **la implementación está en curso**: existe un backend real en `backend/` y un frontend real en `frontend/` (ver las secciones *Trabajar en el código* más abajo). `mockup/` es un prototipo visual comercial **sin backend**, se puede borrar entero, y es la fuente de los tokens de diseño que usa el frontend. La documentación de `docs/` sigue siendo autoritativa sobre el código en materia de reglas de negocio y decisiones de arquitectura.
 
 **Arquitectura:** propuesta y en gran parte congelada, pero **no cerrada formalmente todavía**. `docs/ARCHITECTURE_CLOSURE_PLAN.md` define los pendientes exactos (P1-P10) que faltan para el cierre — a la fecha (2026-10-15) están `Resueltos` `P1`, `P2`, `P4`, `P5`, `P7` y `P9`; `P3` está cerrado para la máquina de estados de `Cita` y solo le quedan las dos de Fase 4 (`Conversación`, `TicketEscalamiento`); siguen `Abierto` `P6`, `P8` y `P10`. **Los tres bloqueadores no negociables del plan (`P3`, `P4`, `P5`) están resueltos.** No debe iniciarse implementación (Fase 1) hasta que ese documento lo autorice (su propia "Definition of Ready" es la autorización formal, no se requiere un documento adicional).
 
@@ -77,6 +77,7 @@ Cloud API oficial de Meta en exclusiva. Lo que hay que saber antes de tocarlo:
 - **Tres capas, en orden.** (1) Filtro determinista de frases — cancelar, pedir una persona y quejarse escalan **sin consultar al modelo**; (2) el modelo clasifica, y por debajo de `CONFIANZA_MINIMA` se escala (`RN-CONV-05`); (3) las herramientas reales. Toda intención no contemplada escala: el lado seguro.
 - **`PATRONES` del adaptador determinista se recorre en orden y `saludo` va al final.** Es la señal más débil: ponerlo primero convierte *"Hola, ¿qué precios tienen?"* en un saludo.
 - **El intérprete por defecto NO es OpenAI.** Sin `OPENAI_API_KEY` corre `AgenteDeterministicoAdapter`, con confianza binaria (1/0). Es un modo de operación desplegable, no un simulacro: las pruebas no pueden depender de un modelo probabilístico. **`OpenAiAgenteAdapter` no se ha ejecutado nunca contra OpenAI** (sin credenciales); cualquier fallo suyo degrada a `desconocida` y **nunca propaga**, porque lanzar devolvería un 500 a Meta y provocaría un bucle de reintentos.
+- **El bot ejecuta escrituras acotadas** (`DEC-044` Enmienda 1): agendar, confirmar recordatorio, inscribir/aceptar lista de espera, generar anticipo. **Cancelar y reprogramar siguen prohibidos** (`DEC-040`) y lo vigila una lista negra en `principal-de-sistema.spec.ts`. Toda escritura nueva debe declararse además en `ESCRITURAS_AUTORIZADAS_AL_BOT`.
 - **`BOT_ACTIVO=false` es el plan de rollback**, como `PLANIFICADOR_ACTIVO`: el puerto recibe `OrquestadorInactivoAdapter` y el canal queda atendido solo por personas. **No** se apaga quitando el módulo: entonces nadie provee el puerto.
 - **Un acuse no es una respuesta.** `EnviarMensajeDelBotUseCase` toma `esAcuse`: con `true` usa `registrarNotificacionDeSistema` y **no toca `mensajes_sin_responder`**. Si un acuse lo limpiara, una conversación recién escalada desaparecería del contador de pendientes y nadie sabría que hay que atenderla.
 - **El motivo de escalamiento viaja en `ResultadoDelTurno`**, no se relee de la entidad: la copia que tiene `RecibirMensajeUseCase` se cargó antes de que el bot escalara sobre la suya.
@@ -90,6 +91,33 @@ Cuatro barridos temporales (`lista_espera`, `anticipos`, `cierre_de_citas`, `rec
 - **Un elemento que falla no aborta el lote** (`procesarLote`), y la idempotencia es **por estado, no por bandera**: cada barrido selecciona por estado de origen y la acción lo cambia.
 - **El cerrojo entre instancias usa `pg_try_advisory_lock` sobre una conexión RESERVADA** (`reserve()`). Los advisory locks son por sesión y `postgres-js` usa un pool: pedirlo por el pool deja el cerrojo colgado cuando el `unlock` cae en otra conexión.
 
+## Trabajar en el código (`frontend/`)
+
+SPA de React + Vite, TypeScript estricto, Tailwind, TanStack Query, React Router (`ADR-027`). **Todo comando se corre desde `frontend/`.**
+
+| Qué | Comando |
+|---|---|
+| Desarrollo | `npm run dev` (proxy de `/v1` a `localhost:3000`) |
+| Tipos | `npx tsc -b` |
+| Lint | `npm run lint` |
+| Build | `npm run build` |
+| Pruebas | `npm test` |
+| **Un archivo** | `npx vitest run ruta/al/archivo.spec.tsx` |
+| **Una prueba** | `npx vitest run ruta -t "fragmento del nombre"` |
+
+### Convenciones no obvias del frontend
+
+- **No hay `POST /v1/auth/login`, y no debe haberlo.** El login va contra **Supabase Auth directo** y el JWT se manda a Blanc en `Authorization`. `ADR-024` evaluó que Blanc emitiera su propio token y **lo rechazó**.
+- **El rol se obtiene de `GET /v1/identidad-y-accesos/usuarios/yo`, nunca del JWT** (`DEC-029`): no viaja en el token, se resuelve contra PostgreSQL.
+- **El rol sirve para dibujar, nunca para autorizar.** Cada endpoint revalida su `@Roles` en el servidor. **Una restricción no está implementada porque el botón no se vea.**
+- **Ningún dato de negocio se calcula en el cliente.** Ni precios, ni duraciones, ni si la ventana de 24 h está abierta: `GET /v1/conversaciones/:id` devuelve `estadoDeVentana` **precisamente** para que el cliente no lo deduzca de las marcas de tiempo.
+- **Los errores se leen por su `code` de negocio** (`ADR-013`), nunca por el texto ni solo por el HTTP. `409 HORARIO_NO_DISPONIBLE` al confirmar un anticipo significa *"otra clienta ganó el cupo"* (`RN-ANT-03`) y necesita su propio mensaje.
+- **La vista de la Manicurista es un árbol de rutas separado**, sin `Layout`: ese marco lleva el contador de escaladas y los enlaces al panel, y ninguno puede aparecer en el iPad (`DEC-040`). La separación estructural evita depender de un `if` de rol.
+- **Las pruebas usan MSW, no dobles del cliente de API.** Interceptan HTTP y responden con la forma real del contrato, así que un cambio de forma en el backend las rompe — necesario mientras los tipos de `api/contrato.ts` se escriban a mano (`P8` abierto).
+- **Plurales en español: no concatenes sufijos.** `conversación` + `es` da «conversaciónes» — el plural pierde la tilde. Escribe las dos formas enteras.
+- **Los tokens visuales salen de `mockup/css/tokens.css`**, declarados como tema en `tailwind.config.ts`. Los colores semánticos van por variable CSS para que el tema oscuro no duplique clases.
+- **Sin valores de secretos en el repositorio.** `.env.example` lleva solo nombres. La `anon key` de Supabase es publicable (va en el bundle); la `service_role key` **no aparece nunca** en el frontend.
+
 ### Antes de dar por terminado un cambio
 
-`npx tsc --noEmit`, `npm run lint`, `npm run build`, `npx drizzle-kit check`, `npx madge --circular --extensions ts src/` y `npm test` — los seis en verde. **No apliques migraciones a ninguna base de datos real**: eso es actividad de despliegue (Fase 7).
+**Backend:** `npx tsc --noEmit`, `npm run lint`, `npm run build`, `npx drizzle-kit check`, `npx madge --circular --extensions ts src/` y `npm test` — los seis en verde. **Frontend:** `npx tsc -b`, `npm run lint`, `npm run build` y `npm test` — los cuatro en verde. **No apliques migraciones a ninguna base de datos real**: eso es actividad de despliegue (Fase 7).

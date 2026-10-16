@@ -7,22 +7,12 @@ import { CONVERSACION_REPOSITORY, ConversacionRepository } from '../conversacion
 import { EnviarPlantillaUseCase } from '../conversaciones/application/use-cases/bandeja.use-cases';
 import { CLIENTA_REPOSITORY, ClientaRepository } from '../crm-y-clientas/domain/ports/clienta.repository';
 import { Conversacion } from '../conversaciones/domain/entities/conversacion.entity';
+// Única fuente de verdad del catálogo: ver la nota de `plantillas.ts`. La copia que vivía aquí se
+// eliminó al aparecer el segundo consumidor (el selector del panel web).
+import { PLANTILLAS } from '../conversaciones/domain/plantillas';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { fechaLocal, ZONA_HORARIA_NEGOCIO } from '../../shared/tiempo/zona-horaria-negocio';
 
-/**
- * Nombres de las plantillas de Meta.
- *
- * ⚠️ **ESTOS NOMBRES SON PROVISIONALES: `N-14` SIGUE ABIERTO.** El inventario y la redacción de las
- * plantillas los aprueba Meta tras revisión, y la Dueña todavía no los ha definido. Hasta
- * entonces, el adaptador por defecto es el de solo-log, así que estos nombres **no se envían a
- * ningún sitio**. Cuando `N-14` se cierre, hay que alinear estas constantes con las plantillas
- * realmente aprobadas — un nombre que Meta no reconoce produce un rechazo del envío.
- */
-export const PLANTILLAS = {
-  recordatorioDeCita: 'recordatorio_cita_24h',
-  ofertaDeHueco: 'oferta_hueco_lista_espera',
-} as const;
 
 /**
  * Lleva las notificaciones de Agenda al canal de WhatsApp (`DEC-043`).

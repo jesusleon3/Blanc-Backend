@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Tokens semánticos, copiados de `mockup/css/tokens.css` (ver `tailwind.config.ts`).
+ *
+ * El tema oscuro redefine las MISMAS variables, así que ningún componente necesita una clase
+ * `dark:`. Es lo que permite que el marcado no sepa en qué tema está.
+ */
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #f8f7f9;
+  --bg-muted: #f1f0f3;
+  --bg-elevated: #ffffff;
+  --border: #e7e5ea;
+  --border-strong: #d7d4dc;
+  --text: #18151b;
+  --text-secondary: #625d6a;
+  --text-tertiary: #9a95a3;
+  --text-on-accent: #ffffff;
+  --accent: #ad2860;
+  --success-100: #e0f7ee;
+  --warning-100: #fdf1dc;
+  --danger-100: #fbe4e6;
+  --info-100: #e5eefc;
+  --shadow-sm: 0 1px 2px rgba(20, 15, 25, 0.05);
+  --shadow-md: 0 4px 12px rgba(20, 15, 25, 0.06), 0 1px 2px rgba(20, 15, 25, 0.04);
+  --shadow-lg: 0 12px 32px rgba(20, 15, 25, 0.1), 0 2px 6px rgba(20, 15, 25, 0.05);
+}
+
+:root[data-theme='dark'] {
+  --bg: #0c0b0e;
+  --bg-subtle: #131218;
+  --bg-muted: #1a1820;
+  --bg-elevated: #17161c;
+  --border: #27242e;
+  --border-strong: #37333f;
+  --text: #f3f1f5;
+  --text-secondary: #a8a3b3;
+  --text-tertiary: #716c7c;
+  --accent: #e56e9a;
+  --success-100: #0f2a20;
+  --warning-100: #2e230d;
+  --danger-100: #2e1417;
+  --info-100: #101f33;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0c0b0e;
+    --bg-subtle: #131218;
+    --bg-muted: #1a1820;
+    --bg-elevated: #17161c;
+    --border: #27242e;
+    --border-strong: #37333f;
+    --text: #f3f1f5;
+    --text-secondary: #a8a3b3;
+    --text-tertiary: #716c7c;
+    --accent: #e56e9a;
+    --success-100: #0f2a20;
+    --warning-100: #2e230d;
+    --danger-100: #2e1417;
+    --info-100: #101f33;
+  }
+}
+
+body {
+  @apply bg-fondo text-texto font-sans antialiased;
+}
+
+/* Foco visible siempre: es un panel que se opera con teclado durante todo el turno. */
+:focus-visible {
+  @apply outline-none ring-2 ring-acento-400 ring-offset-2;
+  --tw-ring-offset-color: var(--bg);
+}

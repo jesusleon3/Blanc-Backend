@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, HttpCode, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import { Roles } from '../../../../shared/auth/roles.decorator';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
@@ -14,9 +14,10 @@ import { usuarioAJson } from './usuario.presenter';
 
 /**
  * `/v1/identidad-y-accesos/usuarios` — FL-SEG-01/03/04/05, alcance mínimo. Alta, edición,
- * asignación/remoción de sucursal y desactivación del registro administrativo. Sin `GET`
- * (`POST`/`PATCH` ya devuelven el recurso completo; asignar/remover/desactivar son `204`, mismo
- * patrón que `manicuristas.controller.ts`). Sin Supabase (`FL-SEG-06`), sin MFA (`FL-SEG-07`),
+ * asignación/remoción de sucursal y desactivación del registro administrativo. Sin `GET` de
+ * listado o detalle (`POST`/`PATCH` ya devuelven el recurso completo; asignar/remover/desactivar
+ * son `204`, mismo patrón que `manicuristas.controller.ts`) — el único `GET` es `/yo`, que no
+ * consulta el registro administrativo sino los permisos ya resueltos de quien pregunta. Sin Supabase (`FL-SEG-06`), sin MFA (`FL-SEG-07`),
  * sin reactivar (fuera de alcance de `FL-SEG-05`, ver `decision-flows-catalogo-diseno.md`).
  */
 @Controller('v1/identidad-y-accesos/usuarios')
@@ -29,6 +30,38 @@ export class UsuariosController {
     private readonly desactivarUsuario: DesactivarUsuarioUseCase,
     private readonly provisionarUsuario: ProvisionarUsuarioUseCase,
   ) {}
+
+  /**
+   * `GET /yo` — **quién soy**: rol, alcance de sucursales y vínculo de manicurista.
+   *
+   * ## POR QUÉ ESTO TIENE QUE EXISTIR PARA QUE HAYA UN FRONTEND
+   *
+   * El panel web necesita saber el rol de quien entró **antes** de pintar nada: la Manicurista va
+   * a `/mi-agenda` y no debe ver ni un enlace a la Bandeja o a Clientas, y los botones de lista
+   * roja solo existen para la Dueña. Sin este endpoint, el frontend tendría que **adivinar el rol
+   * desde el JWT**, y eso es exactamente lo que no puede hacer: `DEC-029` establece que el rol y
+   * el alcance **no viajan en el token**, se resuelven contra PostgreSQL, porque su fuente de
+   * verdad es Blanc y no Supabase.
+   *
+   * ## NO ES UNA PUERTA DE AUTORIZACIÓN, ES UNA PUERTA DE PRESENTACIÓN
+   *
+   * Lo que devuelve sirve para **decidir qué se dibuja**, nunca para decidir qué se permite. Cada
+   * endpoint revalida su propio `@Roles` con los permisos resueltos en el servidor, así que un
+   * cliente que mintiera sobre su rol —o que simplemente navegara a una ruta que no le toca—
+   * recibiría `403` igual. Ocultar un botón es una cortesía; la autorización está en el backend.
+   *
+   * **Sin `@Roles`** a propósito: cualquiera autenticado puede preguntar quién es. Restringirlo
+   * por rol sería circular — haría falta conocer el rol para poder preguntar por el rol.
+   */
+  @Get('yo')
+  async yo(@CurrentUser() usuario: ClaimsUsuario) {
+    return {
+      sub: usuario.sub,
+      rol: usuario.rol,
+      sucursales: usuario.sucursales,
+      manicuristaId: usuario.manicuristaId,
+    };
+  }
 
   @Post()
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR)

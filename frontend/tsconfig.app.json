@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vitest/globals", "@testing-library/jest-dom"],
+
+    /* Tipado estricto — mismo criterio que el backend (ADR-027). */
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    /**
+     * `noUncheckedIndexedAccess` NO está en el `strict` por defecto, y aquí es obligatorio: este
+     * código vive de arreglos que vienen de la API, y `mensajes[0]` siendo `undefined` es el fallo
+     * más probable de todo el frontend. Con esta bandera, el compilador obliga a comprobarlo.
+     */
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}

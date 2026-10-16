@@ -21,6 +21,7 @@ import {
   RegistrarNumeroDto,
 } from './dto/bandeja.dto';
 import { Conversacion } from '../../domain/entities/conversacion.entity';
+import { PLANTILLAS_DE_WHATSAPP } from '../../domain/plantillas';
 
 const conversacionAJson = (conversacion: Conversacion) => ({
   id: conversacion.id,
@@ -92,6 +93,22 @@ export class BandejaController {
    * nunca se alcanzaría. Moverla abajo la rompe en silencio, con un `400` de validación de UUID
    * que no parece un problema de orden de rutas.
    */
+  /**
+   * El catálogo de plantillas aprobadas, para el selector del panel.
+   *
+   * **Declarado antes de `@Get(':id')`**, por la misma razón que `escaladas/pendientes`: Nest
+   * resuelve en orden de declaración y `:id` capturaría `plantillas` como si fuera un UUID.
+   *
+   * ⚠️ **El catálogo es provisional (`N-14` abierto).** Lo sirve el backend en lugar de dejar que
+   * el frontend lo lleve escrito porque entonces habría dos listas y un día divergirían — y el
+   * síntoma sería un envío rechazado por Meta sin causa visible.
+   */
+  @Get('plantillas')
+  @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
+  plantillasDisponibles() {
+    return { plantillas: PLANTILLAS_DE_WHATSAPP, provisional: true, pendiente: 'N-14' };
+  }
+
   @Get('escaladas/pendientes')
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
   async escaladasPendientes(@Query() query: ContarEscaladasDto) {

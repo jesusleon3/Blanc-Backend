@@ -559,4 +559,49 @@ describe('Conversaciones — Webhook de Meta y Bandeja E2E (HTTP) — Fase 4 Par
       await enviarWebhook(payloadDeMensaje('wamid.E2E.PUBLICO')).expect(200);
     });
   });
+
+  describe('`GET /plantillas` — catálogo para el selector del panel', () => {
+    it('200 con los descriptores y la marca de PROVISIONAL (`N-14` abierto)', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .get(`${BANDEJA}/plantillas`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      // `provisional: true` y `pendiente: 'N-14'` viajan en la respuesta a propósito: el panel
+      // tiene que poder advertir que estos nombres aún no están aprobados por Meta. Un nombre que
+      // Meta no reconoce produce un **rechazo del envío**, no un mensaje raro.
+      expect(respuesta.body.provisional).toBe(true);
+      expect(respuesta.body.pendiente).toBe('N-14');
+      expect(respuesta.body.plantillas.length).toBeGreaterThan(0);
+      for (const plantilla of respuesta.body.plantillas) {
+        expect(typeof plantilla.nombre).toBe('string');
+        expect(typeof plantilla.descripcion).toBe('string');
+        expect(Array.isArray(plantilla.parametros)).toBe(true);
+      }
+    });
+
+    it('INCLUYE las dos plantillas que el planificador ya envía', async () => {
+      // Es la razón de que el catálogo viva en el dominio y no en el frontend: si divergieran, el
+      // selector ofrecería un nombre que el adaptador no usa, o al revés.
+      const respuesta = await request(app.getHttpServer())
+        .get(`${BANDEJA}/plantillas`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      const nombres = respuesta.body.plantillas.map((p: { nombre: string }) => p.nombre);
+      expect(nombres).toContain('recordatorio_cita_24h');
+      expect(nombres).toContain('oferta_hueco_lista_espera');
+    });
+
+    it('403 para la MANICURISTA y la RECEPCIONISTA: mismo criterio que el resto de la Bandeja', async () => {
+      for (const autorizacion of [manicurista, recepcionista]) {
+        await request(app.getHttpServer()).get(`${BANDEJA}/plantillas`).set('Authorization', `Bearer ${autorizacion}`).expect(403);
+      }
+    });
+
+    it('NO se confunde con `GET /:id`: la ruta está declarada antes', async () => {
+      // Si `@Get(':id')` fuera primero, capturaría `plantillas` como uuid y esto daría 400/404.
+      await request(app.getHttpServer()).get(`${BANDEJA}/plantillas`).set('Authorization', `Bearer ${dueña}`).expect(200);
+    });
+  });
 });

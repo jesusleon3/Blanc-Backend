@@ -621,9 +621,65 @@ Este proyecto ya usaba varios vocabularios de estado en distintos documentos (`A
 
   **Lo que Fase 4 debe construir:** (a) autenticación propia del principal (token de servicio con rotación), separada de Supabase Auth — el bot no es un usuario de Supabase; (b) un guard que lo contraste contra la lista de operaciones y **nunca** contra `@Roles`; (c) auditoría con el principal como `actor`, distinguible de una persona, porque `RN-AUD-01` exige saber quién hizo qué y *"lo hizo el bot"* es una respuesta distinta de *"lo hizo la Encargada"*.
 
+- **2026-10-16 — ENMIENDA 1: se autorizan escrituras acotadas del flujo conversacional.** Esta decisión fijó la lista de operaciones del bot **toda de lectura**, y dijo por qué con precisión: *"agendar por WhatsApp llegará, pero es una decisión de negocio que no está tomada: cuando se tome, se añade aquí con su propia ADR y no antes"*. **Se tomó.**
+
+  **Lo autorizado:** `agenda:agendar-cita`, `agenda:confirmar-cita` (respuesta a un recordatorio), `agenda:inscribir-lista-espera`, `agenda:aceptar-oferta-lista-espera`, `crm:registrar-clienta` y `anticipos:generar-anticipo`, además de las lecturas que ya estaban.
+
+  **Lo que NO se relaja:** `DEC-040` sigue intacto — **ninguna clienta cancela sola**. Cancelar y reprogramar escalan a una persona siempre. Reprogramar además exige evaluar la ventana de 48 h con anticipo pagado (`RN-ANT-04`) y el tope de 3 reprogramaciones (`DEC-042`), que son reglas, y el bot no evalúa reglas. **La frontera no se movió de sitio, se movió de criterio:** ya no es *"el bot no escribe"*, es **"el bot no decide lo que una persona tiene que mirar"**.
+
+  **Por qué es seguro, y no depende de la buena voluntad del bot:** cada escritura pasa por **el mismo caso de uso que usa el mostrador**. `AgendarCitaUseCase` valida el servicio contra Catálogo, deriva la duración, comprueba capacidad, respeta el horario, rechaza a una clienta bloqueada (`RN-CRM-04`) y —si está en lista roja— hace nacer la cita en `en_espera_pago` con su anticipo del 40 % (`RN-ANT-01`). **No existe una vía paralela para agendar**, así que el bot no puede saltarse ninguna de esas reglas.
+
+  **Dos correcciones de la decisión original que esta enmienda incorpora:**
+  1. El punto *"lo que Fase 4 tiene que construir: (a) autenticación propia del principal (token de servicio con rotación)"* **queda sin objeto**: el bot acabó viviendo **en proceso**, invocando los casos de uso directamente con un actor de sistema identificable en auditoría. No hay superficie HTTP suya que autenticar, así que no hay token que rotar. Lo que sí se cumplió es (c): auditoría con `sistema:bot-conversacional` como actor.
+  2. `crm:registrar-clienta` queda **autorizado pero no implementado**, y a propósito: con **dos clientas en el mismo teléfono** (mamá e hija, `RN-CRM-01` corregido en Fase 3) no se puede elegir, y registrar una tercera "por si acaso" ensuciaría el CRM con duplicados cuyo historial de incidentes quedaría partido. Hoy, si no se puede identificar a la clienta, **el bot escala** y una persona pregunta para quién es la cita. La autorización está disponible para cuando haya una forma no ambigua de resolverlo.
+
+  Lo vigila `shared/auth/principal-de-sistema.spec.ts`: toda operación que no sea `consultar-*` debe declararse además en `ESCRITURAS_AUTORIZADAS_AL_BOT` (dos ediciones deliberadas, no una), y `cancelar`/`reprogramar` fallan el build mediante lista negra. **Es una lista negra y no solo una ausencia porque la ausencia ya falló una vez:** la lista original se declaraba "toda de lectura" y eso se sostenía únicamente en la convención de nombrar `consultar-*`.
+
   🔵 **Lo que deliberadamente NO se construyó, y es revocable:** no se emitió credencial ni se abrió ningún endpoint al bot. El canal de WhatsApp es de Fase 4 y no existe; una vía de autenticación viva, sin consumidor y sin nadie ejercitándola en serio, es superficie de ataque a cambio de nada. **La postura efectiva hoy es denegar**, y `shared/auth/principal-de-sistema.spec.ts` lo verifica junto con el cierre del enum de roles — convierte "el catálogo es cerrado" en algo que falla el build, en vez de un comentario. Si se prefiere construir ya el token de servicio, es una orden de trabajo pequeña y aislada, pero debería justificarse con un consumidor real.
 
 ---
+
+### DEC-045 — `TicketEscalamiento` no se construye: el modo de la conversación es la fuente única
+
+**Estado actual:** `CLOSED` (2026-10-16). Cierra la parte de `P3` que preguntaba por esta máquina de estados.
+
+**Historial:**
+- **2026-10-16:** `01-domain-discovery.md` y `P3` previeron tres máquinas de estado: `Cita`, `Conversación` y `TicketEscalamiento`. Las dos primeras están implementadas. Al llegar a la tercera, la pregunta no era cómo diseñarla sino **si debía existir**.
+
+  **Decisión: no se crea entidad ni tabla.** La función que un ticket cumpliría ya está cubierta, y por datos que son fuente única de verdad:
+
+  | Lo que un ticket aportaría | Quién lo cubre hoy |
+  |---|---|
+  | Que una conversación requiere atención humana | `conversaciones.modo = 'humano'` |
+  | Por qué | `motivo_de_escalamiento` (9 valores, `CHECK` en la base) |
+  | Desde cuándo | `escalada_en` |
+  | Si sigue sin atender | `mensajes_sin_responder > 0` |
+  | La cola de trabajo priorizada | `GET /v1/conversaciones` ordenado por `ultimo_mensaje_en` |
+  | El indicador para quien opera | `GET /v1/conversaciones/escaladas/pendientes` (total, desglose por sucursal, antigüedad del más viejo) |
+
+  **Por qué no construirlo es la decisión correcta y no una omisión:** una tabla aparte introduciría **dos fuentes de verdad para el mismo hecho** —una conversación en `humano` sin ticket, o un ticket abierto sobre una conversación ya devuelta al bot— y mantenerlas sincronizadas sería trabajo permanente a cambio de nada. Además `RN-ESC-03` (*"retorno de control siempre explícito"*) hace que el modo `humano` **no expire solo**, así que el ciclo de vida del hipotético ticket sería exactamente el del modo: el mismo dato con otro nombre.
+
+  **Qué haría reabrir esto:** si hiciera falta asignar una conversación a una persona concreta y responsabilizarla, o medir tiempos de resolución por agente, o escalar algo que **no** sea una conversación de WhatsApp. Ninguna de las tres está pedida hoy; la primera es la más probable si el equipo crece.
+
+  **Efecto documental:** `P3` deja de requerir esta máquina. Queda pendiente **documentar formalmente** la tabla de transiciones de `Conversación` en `01-domain-discovery.md` — está implementada y probada, no escrita.
+
+---
+
+### DEC-046 — El aviso al personal, para el MVP, es el contador activo del panel
+
+**Estado actual:** `CLOSED` para el MVP (2026-10-16), con una limitación declarada y aceptada.
+
+**Historial:**
+- **2026-10-09:** la Dueña lo pidió con estas palabras: *"avisar de algo nuevo sin que haya que estar mirando la pantalla"* (`WHATSAPP_ARQUITECTURA_CANAL.md` §2.1). Con `DEC-043` dejó de ser una comodidad: **al migrar un número a la Cloud API, el celular deja de recibir notificaciones de WhatsApp**, así que la única forma de enterarse de que una clienta escribió es que la plataforma lo diga.
+- **2026-10-16:** `NotificadorEscalamientoPort` existe desde el cierre de Fase 4, y su adaptador solo escribe en el log porque **el canal no estaba decidido** — correo, push del navegador, mensaje a otro número— y elegirlo por cuenta propia habría sido inventar un requisito.
+
+  **Decisión para el MVP: el aviso se materializa como indicador activo en el panel web** — contador global de conversaciones escaladas pendientes en el encabezado, visible en toda la aplicación, más la prioridad visual en la lista de la Bandeja (badge de `mensajes_sin_responder` y motivo del escalamiento).
+
+  ⚠️ **Esto NO cumple literalmente lo que la Dueña pidió, y conviene decirlo sin adornos:** sigue exigiendo tener el panel abierto. Lo que sí resuelve es no tener que **leer conversación por conversación** para saber si algo espera, y hacer que la antigüedad sea visible — porque *cuántas* esperan importa menos que *cuánto llevan esperando*: tres de hace dos minutos son una mañana normal, una de hace dos horas es un fallo de atención.
+
+  **Por qué es aceptable como MVP:** el panel es la herramienta de trabajo de la Encargada durante todo el turno, igual que antes lo era la app de WhatsApp en el celular. El salto de calidad real —enterarse **sin** el panel abierto— exige un canal externo y es una decisión de negocio pendiente, no un problema técnico sin resolver: `NotificadorEscalamientoPort` ya está en su sitio y añadir un adaptador de correo o de push es una orden de trabajo pequeña y aislada.
+
+  **Lo que queda pendiente de la Dueña:** elegir el canal. Las tres opciones con su coste real son (a) correo electrónico — gratis, lento, fácil de ignorar; (b) notificación push del navegador — inmediata, exige permiso del dispositivo y que el navegador esté abierto; (c) mensaje de WhatsApp a un número interno — llega al celular como antes, pero **consume plantillas y cuesta por mensaje** (`Pregunta 8`, presupuesto, sigue abierta).
 
 ---
 
@@ -1152,6 +1208,172 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 ## 16. Handoff / Trabajo Asíncrono
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
+
+### 2026-10-16 (b) — Fase 5 Parte 1: cierre documental de Fase 4, Frontend base, Bandeja Compartida y Anticipos/CRM
+
+**Backend: 1138 pruebas en 74 suites** (+10). **Frontend nuevo: 53 pruebas en 5 suites.** Compilación, lint y build limpios en los dos proyectos.
+
+> **Antes de nada: cuatro cosas que la orden daba por existentes y no existían.** Están resueltas, pero conviene leerlas primero porque dos de ellas cambian lo que se construyó.
+
+| La orden pedía | Realidad | Qué se hizo |
+|---|---|---|
+| Login contra `POST /v1/auth/login` | **No existe, y `ADR-024` rechazó explícitamente** que Blanc emita tokens (su Opción B: *"duplicaría la superficie de emisión de tokens… sin ganar nada"*) | Login contra **Supabase Auth directo** (Opción A, la aceptada). El rol se obtiene de `/yo`, no del token |
+| `GET /v1/conversaciones/:id/plantillas` | No existía | **Creado**, sirviendo el catálogo desde el dominio (fuente única) |
+| `POST /v1/conversaciones/:id/modo` | Las rutas reales son `POST /:id/escalar` y `POST /:id/devolver-al-bot` | Se usan las reales. **El cambio de modo no es simétrico** —entrar exige motivo, salir no— y un `PUT /modo` ocultaría esa asimetría, dejando mandar `humano` sin motivo, que el `CHECK` de la base rechaza |
+| *"el stack elegido"* en los ADRs | **Ningún ADR fijaba stack de frontend.** `P1` cerró backend y plataforma sin mencionar el cliente web | Elegido y documentado en **`ADR-027`** |
+
+---
+
+#### 1. Las cuatro resoluciones de cierre de Fase 4, documentadas
+
+**(a) `DEC-044` Enmienda 1 — el bot SÍ ejecuta escrituras acotadas.** La decisión original fijó la lista *toda de lectura* y dijo con precisión por qué: *"agendar por WhatsApp llegará, pero es una decisión de negocio que no está tomada"*. Se tomó. Autorizado: agendar, confirmar recordatorio, inscribir y aceptar lista de espera, registrar clienta y generar anticipo.
+
+**`DEC-040` sigue intacto: ninguna clienta cancela sola.** La frontera no se movió de sitio, se movió de criterio — ya no es *"el bot no escribe"*, es **"el bot no decide lo que una persona tiene que mirar"**. Y es seguro porque cada escritura pasa por **el mismo caso de uso que usa el mostrador**: no existe vía paralela, así que el bot no puede saltarse ninguna regla.
+
+Dos correcciones que la enmienda incorpora, y la segunda es una limitación real:
+- El *"token de servicio con rotación"* que `DEC-044` encargaba a Fase 4 **queda sin objeto**: el bot acabó viviendo **en proceso**, sin superficie HTTP propia que autenticar.
+- **`crm:registrar-clienta` queda autorizado pero NO implementado**, a propósito: con dos clientas en el mismo teléfono (mamá e hija) no se puede elegir, y registrar una tercera ensuciaría el CRM con duplicados cuyo historial de incidentes quedaría partido. Hoy el bot **escala** y una persona pregunta para quién es la cita.
+
+Lo vigila `principal-de-sistema.spec.ts`: toda operación que no sea `consultar-*` debe declararse además en `ESCRITURAS_AUTORIZADAS_AL_BOT` (dos ediciones deliberadas, no una), y `cancelar`/`reprogramar` fallan el build por lista negra. **Es lista negra y no solo ausencia porque la ausencia ya falló una vez:** la lista original se declaraba "toda de lectura" apoyándose solo en la convención de nombres.
+
+**(b) `DEC-045` — `TicketEscalamiento` no se construye.** La pregunta no era cómo diseñarlo sino **si debía existir**. No: su función ya está cubierta por `modo='humano'` + `motivo_de_escalamiento` + `escalada_en` + `mensajes_sin_responder` + `GET /escaladas/pendientes`, y los datos son fuente única. Una tabla aparte introduciría **dos fuentes de verdad para el mismo hecho** —un ticket abierto sobre una conversación ya devuelta al bot— y sincronizarlas sería trabajo permanente a cambio de nada. Además `RN-ESC-03` hace que el modo `humano` no expire solo, así que el ciclo de vida del ticket sería el del modo: el mismo dato con otro nombre. **Reabrirlo** si hay que asignar una conversación a una persona concreta y medir tiempos por agente.
+
+**(c) `DEC-046` — el aviso al personal es el contador activo del panel.** Contador global en el encabezado, visible en toda la aplicación, más la prioridad visual en la lista. ⚠️ **Esto no cumple literalmente lo que la Dueña pidió** (*"sin que haya que estar mirando la pantalla"*) y no se va a decir que sí: sigue exigiendo el panel abierto. Lo que resuelve es no tener que **leer conversación por conversación**. El canal externo sigue pendiente de decisión suya; `NotificadorEscalamientoPort` ya está en su sitio.
+
+**(d) `ADR-026` — frontera determinista de la IA y provisión de puertos cruzados.** Formaliza dos invariantes que ya estaban implementados y vigilados, y que solo vivían en comentarios:
+1. **La garantía de que la IA no decide es el tipo de retorno, no el prompt.** `Intencion` no tiene campo para precio, duración, hueco ni texto de respuesta: un modelo alucinando o con el prompt comprometido **no puede inventar un precio porque no tiene dónde escribirlo**.
+2. **Si otro módulo provee un puerto, el BC que lo declara no declara un valor por defecto.** `@Global` no sobrescribe a un proveedor local, y creer lo contrario produjo los dos defectos silenciosos de Fase 4.
+
+---
+
+#### 2. Backend: tres añadidos pequeños, y por qué cada uno era necesario
+
+**`GET /v1/identidad-y-accesos/usuarios/yo`** — rol, alcance y vínculo de manicurista. **Sin esto no hay frontend posible:** `DEC-029` establece que el rol **no viaja en el JWT**, se resuelve contra PostgreSQL. El panel tendría que adivinarlo. Va **sin `@Roles`** a propósito: restringirlo por rol sería circular.
+
+**`GET /v1/conversaciones/plantillas`** — el catálogo para el selector. Se sirve desde el backend y no desde una lista en el frontend porque entonces habría **dos listas que un día divergirían**, y el síntoma sería un envío rechazado por Meta sin causa visible. El catálogo se movió de `integracion/notificaciones-whatsapp.adapter.ts` a `conversaciones/domain/plantillas.ts`: al aparecer el segundo consumidor, dejó de ser un detalle del adaptador.
+
+**La enmienda de `DEC-044`** en `principal-de-sistema.ts` y su spec.
+
+---
+
+#### 3. Frontend: estructura
+
+`ADR-027` tiene el razonamiento completo. En corto: **SPA de React con Vite** (no Next: cero pantallas públicas, así que el renderizado en servidor no compra nada y costaría un segundo servicio en Railway), TypeScript estricto con `noUncheckedIndexedAccess` y `exactOptionalPropertyTypes`, Tailwind sobre **los tokens que ya existían en `mockup/css/tokens.css`** —la identidad visual no se inventó: el rosa profundo/burdeos es el que se le enseñó al cliente—, TanStack Query, React Router.
+
+```
+frontend/src/
+  api/          → cliente HTTP + tipos del contrato (uno por recurso)
+  auth/         → Supabase, sesión, roles, guardas
+  componentes/  → Layout, ContadorDeEscaladas, Insignia, Boton, AvisoDeError, etiquetas
+  paginas/      → entrar/ bandeja/ anticipos/ clientas/ agenda/ mi-agenda/
+  pruebas/      → MSW, datos con la forma de los presenters, helper de montaje
+```
+
+**Organización por pantalla, no por tipo de archivo**: es el equivalente de los Vertical Slices del backend — lo que cambia junto vive junto.
+
+**Control de acceso: dos árboles de rutas separados, y la separación ES el control.** El árbol de operación monta `Layout` (navegación + contador) envuelto en `ExigeRol(ROLES_DE_OPERACION)`; la Manicurista **nunca llega a montarlo**, así que no hay forma de que vea un enlace a la Bandeja aunque alguien se equivoque editando el layout. Su `/mi-agenda` tiene marco propio, sin enlaces y **sin el contador** (revelaría actividad de clientas, `DEC-040`). Es más código que un layout con condicionales de rol, y es la razón de hacerlo así: **ocultar enlaces con `if` dentro de un marco común es la forma habitual de que un día se filtre uno.**
+
+⚠️ **Y lo que vale repetir: el rol sirve para dibujar, nunca para autorizar.** Cada endpoint revalida su `@Roles` contra los permisos resueltos en servidor. Una restricción **no** está implementada porque el botón no se vea.
+
+---
+
+#### 4. Pantalla 1 — Bandeja Compartida
+
+**Lista lateral**: pestañas `Esperan a una persona` (`modo=humano`) / `Las lleva el bot`, filtro por sucursal, badge de `mensajesSinResponder` y motivo del escalamiento con severidad. Tres motivos en rojo —clienta bloqueada, queja, pide cancelar— porque son los que cuestan dinero o relación si esperan. *"El bot no entendió"* va **neutro a propósito**: es el más frecuente, y pintarlo de rojo haría que el rojo dejara de significar algo.
+
+**Hilo**: los cuatro emisores (`clienta`, `bot`, `humano`, `sistema`) con distinción clara — confundir un mensaje del bot con uno de una compañera lleva a responder dos veces o a no responder. Un `no_soportado` dice *"la clienta mandó un audio o un archivo"* en vez de aparecer vacío.
+
+**Ventana de 24 h** — el requisito central:
+
+| Estado | Caja de texto | Qué se ofrece |
+|---|---|---|
+| `abierta` | Habilitada | Texto libre |
+| `cerrada` | **Bloqueada** | Explicación de la regla de Meta + selector de plantilla |
+| `nunca_abierta` | **Bloqueada** | Mensaje distinto (*"esta clienta nunca te ha escrito"*) + selector |
+
+**El estado se lee de la respuesta, no se deduce de las marcas de tiempo.** Hay una prueba con un caso incoherente a propósito: `ultimaInteraccionEntranteEn` de hace un minuto y el backend diciendo `cerrada` — la interfaz obedece al backend. Es el escenario de un reloj desfasado o de un cambio de ventana por parte de Meta: si el cliente calculara, habilitaría una caja cuyo envío se rechaza.
+
+Se bloquea en lugar de dejar intentarlo porque el backend lo rechazaría igual, y así nadie **redacta un mensaje para que el sistema lo tire**: con una clienta esperando, perder lo escrito es peor que no haber podido escribir. La explicación va completa junto a la caja, no en un *tooltip* — la primera vez que ocurre, la pregunta es *"¿por qué no puedo escribirle?"*.
+
+**Handoff**: `Tomar conversación` cuando la lleva el bot (manda `motivo: 'intervencion_manual'`, obligatorio por el `CHECK`) y `Devolver al bot` cuando la lleva una persona. No hay temporizador, y esa ausencia es `RN-ESC-03`.
+
+---
+
+#### 5. Pantalla 2 — Anticipos y CRM
+
+**Anticipos**: lista por estado, monto en pesos desde centavos, campo de referencia **obligatorio** (es el único rastro de qué movimiento del banco corresponde a esta cita) y `Expirar` en dos pasos con la advertencia de que no hay devolución.
+
+**El `409 HORARIO_NO_DISPONIBLE` es el caso que justifica medio diseño del cliente HTTP.** No es un error del sistema: significa que **otra clienta tomó el último hueco mientras llegaba la transferencia** (`RN-ANT-03`), el pago **no** quedó confirmado y el dinero ya está transferido. Se muestra con esas palabras —*"hay que hablar con la clienta para reagendar o devolverle el dinero"*— en vez de *"Error 409"*. Por eso `ErrorDeApi` lleva el código de negocio y se ramifica por `code`, nunca por el texto del mensaje.
+
+**CRM**: búsqueda por teléfono que **siempre presenta la lista** (mamá e hija comparten número; el backend nunca elige), historial de incidentes con antelación, y `sugeridaListaRoja` **mostrada como sugerencia y no como estado** — `RN-CRM-06` la enciende sola, `RN-CRM-05` prohíbe que el estado se asigne solo. Fusionarlas sería presentar como hecho lo que es una propuesta.
+
+**Control exclusivo de la Dueña** (`DEC-042`): los botones de riesgo solo para `SUPER_ADMIN`/`ADMINISTRADOR`, y **no se muestran deshabilitados sino que no se muestran** — un botón gris invita a preguntar por qué no funciona. La Encargada ve un aviso de quién toma esa decisión. Marcar pide confirmación explicando la consecuencia económica (*"se le pedirá un anticipo del 40 %"*).
+
+---
+
+#### 6. 🐛 Tres defectos propios que las pruebas destaparon
+
+**(a) `JSON.parse` sin protección perdía el estado HTTP.** Un `502` de la plataforma o un proxy devolviendo HTML hacían estallar el parseo con un `SyntaxError` opaco, y **se perdía el código de estado** — lo único que queda para diagnosticar cuando el error no viene de la aplicación. Lo destapó la prueba escrita para eso.
+
+**(b) y (c) Mal plural en español, en dos sitios.** `` `${n} conversación${n === 1 ? '' : 'es'}` `` produce **«conversaciónes»**: el plural de *conversación* pierde la tilde. Igual en *cancelación* → *cancelaciones*. Era una falta de ortografía visible, y en el contador además iba dentro de un `aria-label`, así que un lector de pantalla lo leería mal. Las dos formas van ahora escritas enteras en lugar de concatenar un sufijo.
+
+---
+
+#### 7. Pruebas del frontend: por qué MSW y no dobles
+
+**53 pruebas en 5 suites**, y la decisión que les da valor es que interceptan **peticiones HTTP** y responden con la forma real del contrato. Doblar `conversacionesApi` probaría que los componentes llaman a una función — sin decir nada sobre si la respuesta tiene la forma que el backend devuelve. Con MSW, **un cambio de forma en el backend rompe estas pruebas**, que es exactamente lo que se quiere mientras `P8` siga abierto y los tipos se escriban a mano.
+
+Supabase sí se dobla, y la frontera es distinta: es un servicio de terceros cuyo comportamiento no estamos probando, y **no hay credenciales** para probarlo de verdad.
+
+| Suite | Cubre |
+|---|---|
+| `api/cliente.spec.ts` (6) | Token, traducción de `ADR-013` con código de negocio, `401` que cierra sesión, estado conservado en errores no conformes, `query` con `false`/`0` |
+| `auth/acceso.spec.tsx` (10) | Destino por rol, Manicurista sin enlaces ni contador, los tres roles sin pantalla, token válido sin registro en Blanc |
+| `paginas/bandeja/bandeja.spec.tsx` (18) | Los tres estados de ventana, que el estado se lee del backend, plantillas con parámetros completos, handoff en ambos sentidos, los cuatro emisores, contador |
+| `paginas/anticipos/anticipos.spec.tsx` (8) | Monto desde centavos, referencia obligatoria, **el `409` explicado**, expirar en dos pasos |
+| `paginas/clientas/clientas.spec.tsx` (11) | Mamá e hija, sugerencia ≠ estado, incidentes, botones solo para la Dueña, confirmación |
+
+---
+
+#### Lo que NO se hizo, y por qué
+
+- **Nada se ha verificado contra Supabase real ni contra Meta.** No hay credenciales en este entorno. El login está construido contra el contrato documentado de `supabase-js` y probado con un doble. Es tarea de verificación de despliegue, no decisión abierta — igual que ya declararon `ADR-024` y `ADR-008`.
+- **Los tipos del contrato están escritos a mano**, duplicados respecto al backend. Es lo honesto mientras `P8` (`05-api-design.md`) esté abierto y no haya OpenAPI del que generarlos. **Cuando `P8` cierre, hay que generarlos.** Está registrado como consecuencia negativa en `ADR-027`.
+- **La Bandeja sondea, no es tiempo real.** Contador cada 20 s, lista cada 15 s, hilo abierto cada 10 s, más refresco al volver a la ventana. Supabase Realtime ya está en el stack y es el camino natural, pero exige decidir qué se expone y cómo se autoriza — decisión de modelo de datos. Para una bandeja atendida por dos o tres personas, unos segundos no cambian la operación.
+- **`/agenda` y `/mi-agenda` son marcadores.** Sus rutas existen para que los enlaces no lleven a un 404 y para que `rutaInicialDe('MANICURISTA')` tenga destino. El backend de las dos ya está construido y probado.
+- **Los nombres de plantillas siguen provisionales** (`N-14`), y el selector lo advierte en pantalla.
+
+---
+
+#### Listo para Fase 5 Parte 2 (cierre de Fase 5)
+
+**Agenda Operativa de mostrador** y **vista de iPad de la Manicurista**. Lo que ya está hecho y no hay que rehacer:
+
+| Pieza | Estado |
+|---|---|
+| Marco del panel, sesión, guardas por rol, cliente HTTP con errores semánticos | ✅ Listo y probado |
+| Tokens visuales, componentes compartidos (`Insignia`, `Boton`, `AvisoDeError`, `Vacio`, `Cargando`) y traducciones de dominio | ✅ `componentes/etiquetas.ts` ya tiene `pesos`, `horaLocal`, `fechaYHoraLocal`, `haceCuanto` |
+| Ruta `/agenda` dentro del árbol de operación y `/mi-agenda` con marco propio | ✅ Solo falta el contenido |
+| Arnés de pruebas con MSW y datos con la forma de los presenters | ✅ Añadir una pantalla es añadir manejadores |
+| Backend de Agenda, Sillas, Lista de Espera, Excepciones de Personal | ✅ Construido, probado y con API HTTP |
+
+Cuatro avisos para quien la tome:
+
+1. **`GET /v1/agenda/citas` toma `inicio` y `fin` en ISO, no `desde`/`hasta`** — lo descubrí con un `400` al escribir el E2E del bot. Y está **paginado y acotado**: hay que mandar `limite`/`desplazamiento`.
+2. **La vista de iPad no debe montar `Layout`.** Ya está así, y el motivo es `DEC-040`: ese marco lleva el contador de escaladas y los enlaces al panel, y ninguno de los dos puede aparecer en el iPad. Mantener el árbol separado es lo que hace que no dependa de ningún `if`.
+3. **El presenter de la agenda ya omite PII y señales de riesgo para la Manicurista.** No hay que filtrar en el cliente: si aparece un dato que no debería, el fallo está en el backend.
+4. **Las sillas son virtuales** (`DEC-031`): la clienta nunca elige silla y la interfaz no debe ofrecerlo. Las elige el motor de disponibilidad.
+
+#### Para decidir con la Dueña
+
+Sigue abierto lo mismo que al cerrar Fase 4, con un punto menos:
+
+1. **Canal del aviso activo al personal** (`DEC-046`): correo, push del navegador, o WhatsApp a un número interno. Es lo único que separa *"hay que mirar el panel"* de lo que pidió.
+2. **Inventario y redacción de las plantillas de Meta** (`N-14`). Bloquea la migración de números tanto como la Bandeja.
+3. **¿OpenAI o el intérprete determinista?** Se puede empezar con el determinista y activar OpenAI con una variable de entorno.
+4. ~~**¿El bot puede agendar?**~~ **Resuelto**: `DEC-044` Enmienda 1.
+
+---
 
 ### 2026-10-16 — Fase 4 Parte 3: Orquestador del Bot IA, escalamiento y saneamiento de mensajería. **🏁 FASE 4 CERRADA**
 

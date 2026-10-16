@@ -1,5 +1,10 @@
 import { Rol } from './rol';
-import { OPERACIONES_PERMITIDAS_AL_BOT, ROLES_DE_PERSONA } from './principal-de-sistema';
+import {
+  ESCRITURAS_AUTORIZADAS_AL_BOT,
+  OPERACIONES_PERMITIDAS_AL_BOT,
+  OPERACIONES_PROHIBIDAS_AL_BOT,
+  ROLES_DE_PERSONA,
+} from './principal-de-sistema';
 
 /**
  * Guardia del **catálogo cerrado de roles** (`RN-SEG-01`, `ADR-024`) y de la decisión de RBAC
@@ -24,16 +29,46 @@ describe('Catálogo cerrado de roles y principal de sistema (deuda 6 de §16)', 
     expect(Object.keys(Rol)).not.toContain('BOT');
   });
 
-  it('las operaciones del bot son TODAS de lectura (`DEC-040`/`DEC-042`)', () => {
-    // Ninguna clienta cancela sola y la finalización no es automática. Un bot que escribiera en
-    // la agenda sin intervención humana contradiría las dos decisiones.
-    const verbosDeEscritura = ['agendar', 'cancelar', 'reprogramar', 'completar', 'confirmar', 'crear', 'eliminar'];
-
+  it('TODA operación que no sea `consultar-*` está declarada como escritura autorizada', () => {
+    /**
+     * **Enmienda 1 de `DEC-044` (2026-10-16):** el bot ya ejecuta escrituras acotadas del flujo
+     * conversacional. La prueba original exigía que **todas** fueran de lectura; ahora exige algo
+     * más útil: que ninguna escritura se cuele sin declararse.
+     *
+     * Sin esto, la única defensa sería la convención de nombrar `consultar-*` a las lecturas, y
+     * una operación mal nombrada pasaría inadvertida. Añadir una escritura tiene que costar dos
+     * ediciones deliberadas, no una.
+     */
     for (const operacion of OPERACIONES_PERMITIDAS_AL_BOT) {
-      expect(operacion).toMatch(/^[a-z-]+:consultar-/);
-      for (const verbo of verbosDeEscritura) {
-        expect(operacion).not.toContain(verbo);
+      const esLectura = /^[a-z-]+:consultar-/.test(operacion);
+      if (!esLectura) {
+        expect(ESCRITURAS_AUTORIZADAS_AL_BOT).toContain(operacion);
       }
+    }
+  });
+
+  it('CANCELAR Y REPROGRAMAR SIGUEN PROHIBIDOS, y lo verifica una lista negra (`DEC-040`)', () => {
+    /**
+     * `DEC-040`: **ninguna clienta cancela sola.** La Enmienda 1 movió el criterio de "el bot no
+     * escribe" a "el bot no decide lo que una persona tiene que mirar", pero **no movió este
+     * límite**. Reprogramar además exige evaluar la ventana de 48 h con anticipo pagado
+     * (`RN-ANT-04`) y el tope de 3 reprogramaciones (`DEC-042`) — reglas, y el bot no evalúa
+     * reglas.
+     *
+     * Es una lista negra y no solo una ausencia porque **la ausencia ya falló una vez**: la lista
+     * original se declaraba "toda de lectura" y eso se sostenía en una convención de nombres.
+     */
+    for (const operacion of OPERACIONES_PERMITIDAS_AL_BOT) {
+      for (const prohibido of OPERACIONES_PROHIBIDAS_AL_BOT) {
+        expect(operacion).not.toContain(prohibido);
+      }
+    }
+  });
+
+  it('las escrituras declaradas EXISTEN en la lista de operaciones permitidas', () => {
+    // La otra mitad: una escritura declarada pero no permitida sería una autorización fantasma.
+    for (const escritura of ESCRITURAS_AUTORIZADAS_AL_BOT) {
+      expect(OPERACIONES_PERMITIDAS_AL_BOT).toContain(escritura);
     }
   });
 

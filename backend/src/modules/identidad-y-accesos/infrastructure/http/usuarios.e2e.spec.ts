@@ -409,4 +409,58 @@ describe('Identidad y Accesos — E2E (HTTP) — FL-SEG-01/03/04/05', () => {
         .expect(204);
     });
   });
+
+  describe('`GET /yo` — quién soy (base del control de acceso del panel web)', () => {
+    /**
+     * Este endpoint existe porque **el panel web no puede deducir el rol del JWT**: `DEC-029`
+     * establece que el rol y el alcance de sucursales **no viajan en el token**, se resuelven
+     * contra PostgreSQL. Sin `/yo`, el frontend tendría que adivinarlos.
+     */
+    const tokenConManicurista = (rol: Rol, sub: string, manicuristaId: string | null) => {
+      permisosPorSub.set(sub, { rol, activa: true, sucursales: 'GLOBAL', manicuristaId });
+      return jwt.sign({ iss: ISSUER, aud: 'authenticated', sub }, SECRETO);
+    };
+
+    it('200 con el rol, el alcance y el vínculo de manicurista RESUELTOS EN EL SERVIDOR', async () => {
+      const vinculo = '44444444-4444-4444-4444-444444444444';
+      const respuesta = await request(app.getHttpServer())
+        .get('/v1/identidad-y-accesos/usuarios/yo')
+        .set('Authorization', `Bearer ${tokenConManicurista(Rol.MANICURISTA, 'ana-ipad', vinculo)}`)
+        .expect(200);
+
+      expect(respuesta.body).toEqual({
+        sub: 'ana-ipad',
+        rol: Rol.MANICURISTA,
+        sucursales: 'GLOBAL',
+        manicuristaId: vinculo,
+      });
+    });
+
+    it('CUALQUIER ROL AUTENTICADO puede preguntar quién es: no lleva `@Roles`', async () => {
+      // Restringirlo por rol sería circular — haría falta conocer el rol para preguntar el rol. Y
+      // es inofensivo: solo devuelve lo que el servidor ya resolvió sobre quien pregunta.
+      for (const rol of [Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE, Rol.RECEPCIONISTA, Rol.MANICURISTA, Rol.ANALISTA, Rol.SOLO_LECTURA]) {
+        const respuesta = await request(app.getHttpServer())
+          .get('/v1/identidad-y-accesos/usuarios/yo')
+          .set('Authorization', `Bearer ${token(rol, `quien-soy-${rol}`)}`)
+          .expect(200);
+        expect(respuesta.body.rol).toBe(rol);
+      }
+    });
+
+    it('401 SIN token: no es un endpoint público', async () => {
+      await request(app.getHttpServer()).get('/v1/identidad-y-accesos/usuarios/yo').expect(401);
+    });
+
+    it('NO devuelve `/yo` como si fuera un id de usuario', async () => {
+      // La ruta `GET /yo` tiene que estar declarada antes de cualquier `GET /:id` futuro. Hoy no
+      // hay ninguno, y esta prueba es lo que lo recordará el día que se añada: si `:id` se
+      // declarara primero, capturaría `yo` y esta prueba fallaría con un 400 o un 404.
+      const respuesta = await request(app.getHttpServer())
+        .get('/v1/identidad-y-accesos/usuarios/yo')
+        .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR, 'no-es-id')}`)
+        .expect(200);
+      expect(respuesta.body.sub).toBe('no-es-id');
+    });
+  });
 });
