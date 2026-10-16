@@ -138,6 +138,25 @@ export class DrizzleCitaRepository implements CitaRepository {
     return filas.map((fila) => this.aEntidad(fila));
   }
 
+  async buscarPendienteDeConfirmacionDeClienta(sucursalId: string, clientaId: string): Promise<Cita | null> {
+    const filas = await this.db
+      .select()
+      .from(citas)
+      .where(
+        and(
+          eq(citas.sucursalId, sucursalId),
+          eq(citas.clientaId, clientaId),
+          eq(citas.estado, 'pendiente_confirmacion'),
+        ),
+      )
+      // La más próxima primero: si hubiera dos esperando confirmación, la inminente es la que el
+      // recordatorio acaba de anunciar y por tanto la que la clienta está contestando.
+      .orderBy(sql`lower(${citas.rangoHorario})`)
+      .limit(1);
+
+    return filas.length === 0 ? null : this.aEntidad(filas[0]);
+  }
+
   async listarActivasYaTerminadas(ahora: Date, limite: number): Promise<Cita[]> {
     const filas = await this.db
       .select()

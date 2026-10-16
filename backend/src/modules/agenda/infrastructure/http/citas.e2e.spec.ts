@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { AgendaModule } from '../../agenda.module';
 import { SucursalesYPersonalModule } from '../../../sucursales-y-personal/sucursales-y-personal.module';
 import { IntegracionModule } from '../../../integracion/integracion.module';
+import { AgenteModule } from '../../../agente/agente.module';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
 import { Database } from '../../../../database/connection';
 import { AUDITORIA_PORT } from '../../../../shared/auditoria/auditoria.port';
@@ -104,7 +105,15 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       // `IntegracionModule` es parte del montaje real: sin él no hay `CONTEXTO_PERSONAL_PORT` y el
       // motor de disponibilidad no arranca. Que este E2E lo exija es la prueba de que el cableado
       // entre Bounded Contexts funciona de verdad.
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule, IntegracionModule, PlanificadorModule],
+      /**
+       * `AgenteModule` entra porque **`IntegracionModule` arrastra `ConversacionesModule`**, y ese
+       * módulo declara `ORQUESTADOR_DE_BOT_PORT` sin proveerlo: lo provee `AgenteModule`, igual
+       * que `AppModule`. Sin él, el contenedor no arranca — ruidosamente, que es lo que se quiere:
+       * la alternativa (un valor por defecto local en `ConversacionesModule`) hacía que el bot
+       * quedara inerte **en silencio**, y ese fue un defecto real. Ver
+       * `integracion/sin-defaults-locales.spec.ts`.
+       */
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule, IntegracionModule, PlanificadorModule, AgenteModule],
       providers: [
         {
           provide: APP_GUARD,

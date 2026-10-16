@@ -10,6 +10,8 @@ import { ConversacionesModule } from '../../conversaciones.module';
 import { CrmYClientasModule } from '../../../crm-y-clientas/crm-y-clientas.module';
 import { CONTEXTO_CLIENTA_DE_CONVERSACION_PORT } from '../../domain/ports/contexto-clienta-de-conversacion.port';
 import { ContextoClientaDeConversacionAdapter } from '../../../integracion/contexto-clienta-de-conversacion.adapter';
+import { ORQUESTADOR_DE_BOT_PORT } from '../../domain/ports/orquestador-de-bot.port';
+import { OrquestadorInactivoAdapter } from '../../infrastructure/orquestador-inactivo.adapter';
 import { TOKEN_VERIFICACION_META } from '../meta/webhook-meta.controller';
 import { VerificadorDeFirmaMeta } from '../meta/verificador-de-firma';
 import { Clienta } from '../../../crm-y-clientas/domain/entities/clienta.entity';
@@ -70,8 +72,18 @@ let dbDePrueba: Database;
       useFactory: (db: Database) => new ContextoClientaDeConversacionAdapter(new DrizzleClientaRepository(db)),
       inject: [DATABASE_CONNECTION],
     },
+    /**
+     * **El bot, inerte**, por la misma razón que el puerto de arriba: `ConversacionesModule`
+     * declara `ORQUESTADOR_DE_BOT_PORT` y no lo provee — lo provee `AgenteModule`, que este
+     * archivo no monta a propósito.
+     *
+     * Y es deliberado que no lo monte: **lo que este archivo prueba es el canal sin bot**, que es
+     * un estado de operación real (`BOT_ACTIVO=false`) y el que estuvo vigente toda la Parte 2. El
+     * bot tiene su propio E2E con el grafo completo, en `agente/bot.e2e.spec.ts`.
+     */
+    { provide: ORQUESTADOR_DE_BOT_PORT, useClass: OrquestadorInactivoAdapter },
   ],
-  exports: [DATABASE_CONNECTION, AUDITORIA_PORT, UNIT_OF_WORK, CONTEXTO_CLIENTA_DE_CONVERSACION_PORT],
+  exports: [DATABASE_CONNECTION, AUDITORIA_PORT, UNIT_OF_WORK, CONTEXTO_CLIENTA_DE_CONVERSACION_PORT, ORQUESTADOR_DE_BOT_PORT],
 })
 class TestInfraModule {}
 

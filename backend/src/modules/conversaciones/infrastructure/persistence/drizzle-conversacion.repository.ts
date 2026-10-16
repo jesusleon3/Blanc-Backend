@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gt } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, min } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { Database, DATABASE_CONNECTION } from '../../../../database/connection';
 import { TransactionContext } from '../../../../shared/persistence/transaction-context';
@@ -17,6 +17,7 @@ import {
 import { Conversacion } from '../../domain/entities/conversacion.entity';
 import {
   ConversacionRepository,
+  EscaladasPendientes,
   MensajeRegistrado,
   NuevoMensaje,
   PaginaDeConversaciones,
@@ -105,6 +106,39 @@ export class DrizzleConversacionRepository implements ConversacionRepository {
     return {
       conversaciones: filas.slice(0, filtros.limite).map((fila) => this.aEntidad(fila)),
       hayMas: filas.length > filtros.limite,
+    };
+  }
+
+  async contarEscaladasPendientes(filtros: { sucursalId?: string }): Promise<EscaladasPendientes> {
+    const condiciones = [
+      eq(conversaciones.modo, 'humano'),
+      gt(conversaciones.mensajesSinResponder, 0),
+      ...(filtros.sucursalId ? [eq(conversaciones.sucursalId, filtros.sucursalId)] : []),
+    ];
+
+    // Agrupado en la base, no en memoria: el contador se sondea cada pocos segundos desde el panel
+    // y traerse las filas para contarlas en Node haría crecer el coste con la bandeja.
+    const filas = await this.db
+      .select({
+        sucursalId: conversaciones.sucursalId,
+        total: count(),
+        masAntiguaEn: min(conversaciones.ultimaInteraccionEntranteEn),
+      })
+      .from(conversaciones)
+      .where(and(...condiciones))
+      .groupBy(conversaciones.sucursalId)
+      .orderBy(asc(conversaciones.sucursalId));
+
+    // `min()` sobre una columna `timestamptz` vuelve como cadena en `postgres-js`, así que se
+    // normaliza aquí: el dominio recibe `Date` o `null`, nunca una cadena que parezca una fecha.
+    const instantes = filas
+      .map((fila) => (fila.masAntiguaEn === null ? null : new Date(fila.masAntiguaEn as unknown as string)))
+      .filter((instante): instante is Date => instante !== null);
+
+    return {
+      total: filas.reduce((suma, fila) => suma + Number(fila.total), 0),
+      porSucursal: filas.map((fila) => ({ sucursalId: fila.sucursalId, total: Number(fila.total) })),
+      masAntiguaEn: instantes.length > 0 ? new Date(Math.min(...instantes.map((i) => i.getTime()))) : null,
     };
   }
 

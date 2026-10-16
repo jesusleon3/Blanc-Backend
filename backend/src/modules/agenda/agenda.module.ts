@@ -15,8 +15,6 @@ import { MotorDisponibilidad } from './domain/services/motor-disponibilidad';
 import { ResolutorDeServicio } from './domain/services/resolutor-de-servicio';
 import { TransicionarCitaPorAnticipoUseCase } from './application/use-cases/transicionar-cita-por-anticipo.use-case';
 import { CerrarCitasTerminadasUseCase, SolicitarRecordatoriosUseCase } from './application/use-cases/barridos-de-agenda.use-cases';
-import { NOTIFICADOR_RECORDATORIO_PORT } from './domain/ports/notificador-recordatorio.port';
-import { RecordatorioSoloLogAdapter } from './infrastructure/notificacion/recordatorio-solo-log.adapter';
 import { ConsultarDisponibilidadUseCase } from './application/use-cases/consultar-disponibilidad.use-case';
 import { ConsultarAgendaUseCase } from './application/use-cases/consultar-agenda.use-case';
 import { GestionarSillasUseCase } from './application/use-cases/gestionar-sillas.use-case';
@@ -24,8 +22,6 @@ import { CitasController } from './infrastructure/http/citas.controller';
 import { ListaEsperaController } from './infrastructure/http/lista-espera.controller';
 import { LISTA_ESPERA_REPOSITORY } from './domain/ports/lista-espera.repository';
 import { DrizzleListaEsperaRepository } from './infrastructure/persistence/drizzle-lista-espera.repository';
-import { NOTIFICACION_LISTA_ESPERA_PORT } from './domain/ports/notificacion-lista-espera.port';
-import { ListaEsperaSoloLogAdapter } from './infrastructure/notificacion/lista-espera-solo-log.adapter';
 import {
   AceptarOfertaListaEsperaUseCase,
   AvanzarTurnoListaEsperaUseCase,
@@ -52,10 +48,24 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     { provide: SILLA_REPOSITORY, useClass: DrizzleSillaRepository },
     { provide: CITA_REPOSITORY, useClass: DrizzleCitaRepository },
     { provide: LISTA_ESPERA_REPOSITORY, useClass: DrizzleListaEsperaRepository },
-    // Provisional y a la vista: NO envía mensajes. Fase 4 sustituye solo este proveedor.
-    { provide: NOTIFICACION_LISTA_ESPERA_PORT, useClass: ListaEsperaSoloLogAdapter },
-    // Provisional y a la vista: NO envía mensajes. Fase 4 Parte 2 sustituye solo este proveedor.
-    { provide: NOTIFICADOR_RECORDATORIO_PORT, useClass: RecordatorioSoloLogAdapter },
+    /**
+     * `NOTIFICADOR_RECORDATORIO_PORT` y `NOTIFICACION_LISTA_ESPERA_PORT` **NO se proveen aquí**:
+     * los provee `IntegracionModule`, porque su adaptador necesita ver Conversaciones.
+     *
+     * ## ESTO FUE UN DEFECTO REAL, NO UNA PREFERENCIA DE ESTILO
+     *
+     * Hasta el cierre de Fase 4 este módulo proveía aquí los adaptadores de solo-log, y
+     * `IntegracionModule` —que es `@Global`— pretendía sobrescribirlos con el que manda plantillas
+     * de WhatsApp. **No funcionaba.** `@Global` solo hace que las exportaciones de un módulo estén
+     * disponibles sin importarlo; **un proveedor local siempre gana sobre uno global**, así que
+     * los casos de uso de este módulo seguían recibiendo el adaptador que no envía nada. Durante
+     * la Parte 2 el canal de WhatsApp quedó construido y conectado, y ni un recordatorio ni una
+     * oferta de hueco salieron nunca por él, con todas las pruebas en verde.
+     *
+     * La regla, ya sin excepciones: **si otro módulo tiene que proveer un puerto, este no declara
+     * un valor por defecto para él.** Es la misma regla que cerró `P5`, y la vigila
+     * `src/modules/integracion/sin-defaults-locales.spec.ts`.
+     */
     AgendarCitaUseCase,
     AsignarManicuristaEnSucursalUseCase,
     SolicitarConfirmacionCitaUseCase,
@@ -88,6 +98,16 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     AvanzarTurnoListaEsperaUseCase,
     CerrarCitasTerminadasUseCase,
     SolicitarRecordatoriosUseCase,
+    // Los consume `AgenteModule` (Bot IA): son las herramientas con las que el bot obtiene
+    // disponibilidad real y agenda citas reales. Exportar el caso de uso —y no un atajo al
+    // repositorio— es lo que mantiene `RN-CONV-01` como propiedad estructural: el bot pasa por las
+    // mismas validaciones que la Encargada.
+    LISTA_ESPERA_REPOSITORY,
+    ConsultarDisponibilidadUseCase,
+    AgendarCitaUseCase,
+    ConfirmarCitaUseCase,
+    InscribirEnListaEsperaUseCase,
+    AceptarOfertaListaEsperaUseCase,
   ],
 })
 export class AgendaModule {}

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { Database, DATABASE_CONNECTION } from '../../../../database/connection';
 import { TransactionContext } from '../../../../shared/persistence/transaction-context';
 import { ESTADOS_LISTA_ESPERA_ACTIVOS, EstadoListaEspera, listaEspera } from '../../../../database/schema';
@@ -106,6 +106,19 @@ export class DrizzleListaEsperaRepository implements ListaEsperaRepository {
       .select()
       .from(listaEspera)
       .where(and(eq(listaEspera.sucursalId, sucursalId), eq(listaEspera.fecha, fecha), eq(listaEspera.estado, 'notificada')))
+      .limit(1);
+
+    return filas.length === 0 ? null : this.aEntidad(filas[0]);
+  }
+
+  async buscarOfertaAbiertaDeClienta(sucursalId: string, clientaId: string): Promise<SolicitudListaEspera | null> {
+    const filas = await this.db
+      .select()
+      .from(listaEspera)
+      .where(and(eq(listaEspera.sucursalId, sucursalId), eq(listaEspera.clientaId, clientaId), eq(listaEspera.estado, 'notificada')))
+      // La más reciente: si hubiera dos (filas de fechas distintas), la última ofrecida es la que
+      // la clienta acaba de leer, y por tanto la que está contestando.
+      .orderBy(desc(listaEspera.notificadaEn))
       .limit(1);
 
     return filas.length === 0 ? null : this.aEntidad(filas[0]);

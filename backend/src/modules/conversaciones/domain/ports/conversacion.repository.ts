@@ -27,6 +27,15 @@ export interface NuevoMensaje {
   ocurridoEn: Date;
 }
 
+export interface EscaladasPendientes {
+  /** Conversaciones en modo `humano` con al menos un mensaje de la clienta sin responder. */
+  total: number;
+  /** Desglose por sucursal, para que el panel diga *dónde* hace falta atender. */
+  porSucursal: { sucursalId: string; total: number }[];
+  /** Instante del mensaje sin responder más antiguo. `null` si no hay ninguno. */
+  masAntiguaEn: Date | null;
+}
+
 export interface PaginaDeConversaciones {
   conversaciones: Conversacion[];
   hayMas: boolean;
@@ -50,6 +59,19 @@ export interface ConversacionRepository {
     limite: number;
     desplazamiento: number;
   }): Promise<PaginaDeConversaciones>;
+
+  /**
+   * El contador de conversaciones escaladas y **sin atender**.
+   *
+   * Es el sustituto honesto del aviso al personal mientras el canal de notificación siga sin
+   * decidir (ver `NotificadorEscalamientoPort`): un número que el panel puede sondear y mostrar en
+   * un badge, en lugar de obligar a leer la bandeja entera para saber si algo espera.
+   *
+   * El criterio es `modo = 'humano' AND mensajes_sin_responder > 0`, y los dos términos importan:
+   * sin el segundo, una conversación atendida y resuelta seguiría contando para siempre, porque
+   * `RN-ESC-03` hace que el modo `humano` no expire por sí solo.
+   */
+  contarEscaladasPendientes(filtros: { sucursalId?: string }): Promise<EscaladasPendientes>;
 
   /** El hilo completo, en orden cronológico. */
   listarMensajes(conversacionId: string, opciones: { limite: number; desplazamiento: number }): Promise<MensajeRegistrado[]>;

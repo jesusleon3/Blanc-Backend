@@ -49,6 +49,23 @@ export interface CitaRepository {
   ): Promise<Cita[]>;
 
   /**
+   * La cita de una clienta que está esperando su confirmación, si hay alguna.
+   *
+   * ## POR QUÉ ES UNA CONSULTA Y NO UN FILTRO EN MEMORIA
+   *
+   * La escribió el bot para cerrar el ciclo del recordatorio: recibe un *"sí"* y tiene que saber
+   * qué cita confirma. La primera versión barría `listarParaConsulta` con un rango de 30 días y
+   * filtraba por clienta y estado en Node, y eso **falla de tres formas distintas**: no ve citas
+   * más allá del rango, descarta en silencio lo que pase del límite de página, y trae cien filas
+   * para quedarse con una. Un recordatorio se manda 24 h antes, sí — pero la cita puede haberse
+   * reprogramado a un mes, y entonces el "sí" de la clienta no confirmaría nada.
+   *
+   * Se acota a la sucursal porque la conversación pertenece a un número, y ese número es de una
+   * sucursal: confirmar la cita que la clienta tiene en otra sucursal sería confirmar otra cosa.
+   */
+  buscarPendienteDeConfirmacionDeClienta(sucursalId: string, clientaId: string): Promise<Cita | null>;
+
+  /**
    * Citas activas cuyo horario **ya terminó** — las que el barrido de cierre pasa a `completada`
    * (`DEC-030`, `ADR-025`).
    *

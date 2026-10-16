@@ -82,17 +82,23 @@ import { NotificacionesWhatsAppAdapter } from './notificaciones-whatsapp.adapter
     { provide: TRANSICION_DE_CITA_PORT, useClass: TransicionDeCitaAdapter },
     { provide: CONTEXTO_CLIENTA_DE_CONVERSACION_PORT, useClass: ContextoClientaDeConversacionAdapter },
     /**
-     * **Los notificadores de Agenda pasan a salir por WhatsApp.**
+     * **Los notificadores de Agenda salen por WhatsApp.**
      *
-     * `AgendaModule` seguía proveyendo `RecordatorioSoloLogAdapter` y `ListaEsperaSoloLogAdapter`,
-     * que no enviaban nada. Aquí se sobrescriben con el adaptador real, que manda **plantillas**
-     * (`N-14`): las dos notificaciones las dispara el planificador, así que la ventana de 24 h
-     * estará cerrada y el texto libre se rechazaría.
+     * Manda **plantillas** (`N-14`), no texto libre: las dos notificaciones las dispara el
+     * planificador, así que la ventana de 24 h estará cerrada y el texto libre se rechazaría.
      *
-     * Esto es posible porque `IntegracionModule` es `@Global()` y se registra **después** de
-     * `AgendaModule` en `AppModule`: su proveedor gana. Es el mismo mecanismo con el que ya
-     * sustituye los puertos entre contextos, y por eso Agenda no necesita saber que WhatsApp
-     * existe.
+     * ## CORRECCIÓN: ESTO NO FUNCIONABA, Y EL COMENTARIO ANTERIOR AFIRMABA QUE SÍ
+     *
+     * Hasta el cierre de Fase 4, `AgendaModule` proveía aquí sus propios adaptadores de solo-log y
+     * este comentario decía que `IntegracionModule`, al ser `@Global()` y registrarse después, los
+     * sobrescribía. **Es falso:** `@Global` solo hace que las exportaciones estén disponibles sin
+     * importar el módulo; **un proveedor local gana siempre sobre uno global**. Los casos de uso de
+     * Agenda seguían recibiendo el adaptador que no envía nada, y el canal de WhatsApp quedó
+     * conectado sin que saliera ni un recordatorio, con toda la suite en verde.
+     *
+     * La corrección fue quitar los proveedores locales de `AgendaModule`. Lo vigila
+     * `sin-defaults-locales.spec.ts`, y lo verifica de extremo a extremo
+     * `agente/bot.e2e.spec.ts` ("EL BARRIDO REAL de recordatorios sale por WhatsApp").
      */
     { provide: NOTIFICADOR_RECORDATORIO_PORT, useClass: NotificacionesWhatsAppAdapter },
     { provide: NOTIFICACION_LISTA_ESPERA_PORT, useClass: NotificacionesWhatsAppAdapter },

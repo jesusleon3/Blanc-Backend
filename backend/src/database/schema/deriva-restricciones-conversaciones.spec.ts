@@ -35,6 +35,31 @@ describe('Deriva de restricciones de `conversaciones`', () => {
     expect([...enLaBase].sort()).toEqual([...(esperados as readonly string[])].sort());
   });
 
+  it('EL CATÁLOGO DE MOTIVOS CUBRE LAS CINCO CAUSAS DE ESCALAMIENTO OBLIGATORIO', () => {
+    /**
+     * `DEC-040` y `RN-ESC-01` fijan qué obliga a pasar una conversación a una persona, y cada
+     * causa necesita **su propio** motivo: el desglose por motivo es lo que la Dueña mira para
+     * saber qué se le escapa al bot. Si dos causas compartieran motivo, esa estadística la
+     * engañaría — ver "cotizaciones complejas" donde en realidad solo hubo notas de voz.
+     *
+     * `medio_no_soportado` se añadió en la migración `0014`, escrita a mano porque el único cambio
+     * es un `CHECK` y `drizzle-kit generate` respondía "No schema changes". Esta prueba es lo que
+     * verifica que esa migración a mano llegó a la base.
+     */
+    const enLaBase = literales(definiciones.get('conversaciones_motivo_valido')!);
+    expect(enLaBase).toEqual(
+      expect.arrayContaining([
+        'cancelacion_solicitada', // la clienta pide cancelar
+        'solicitud_humana', // pide hablar con una persona
+        'queja_o_reclamo', // se queja
+        'baja_confianza_ia', // el modelo no está seguro (`RN-CONV-05`)
+        'medio_no_soportado', // nota de voz o documento (`RN-CONV-06`)
+        'cotizacion_compleja', // foto de un diseño (`DEC-033`)
+        'clienta_bloqueada', // `RN-CRM-04`
+      ]),
+    );
+  });
+
   it('EL MODO Y SU MOTIVO VAN JUNTOS', () => {
     // `humano` sin motivo sería una conversación escalada que nadie sabe por qué — y la categoría
     // es justo lo que la Dueña mira para saber qué se le escapa al bot. Un motivo con modo `bot`

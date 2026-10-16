@@ -7,11 +7,15 @@ import { WhatsAppSoloLogAdapter } from './infrastructure/meta/whatsapp-solo-log.
 import { VerificadorDeFirmaMeta } from './infrastructure/meta/verificador-de-firma';
 import { TOKEN_VERIFICACION_META, WebhookMetaController } from './infrastructure/meta/webhook-meta.controller';
 import { BandejaController } from './infrastructure/http/bandeja.controller';
+import { NOTIFICADOR_ESCALAMIENTO_PORT } from './domain/ports/notificador-escalamiento.port';
+import { EscalamientoSoloLogAdapter } from './infrastructure/notificacion/escalamiento-solo-log.adapter';
+import { EnviarMensajeDelBotUseCase } from './application/use-cases/enviar-mensaje-del-bot.use-case';
 import { ActualizarEstadoDeEntregaUseCase, RecibirMensajeUseCase } from './application/use-cases/recibir-mensaje.use-case';
 import {
   CambiarModoConversacionUseCase,
   ConsultarBandejaUseCase,
   ConsultarHiloUseCase,
+  ContarEscaladasPendientesUseCase,
   EnviarMensajeManualUseCase,
   EnviarPlantillaUseCase,
   RegistrarNumeroDeSucursalUseCase,
@@ -60,10 +64,25 @@ import {
       // registrase nuestra URL en su propia app de Meta.
       useFactory: () => process.env.META_VERIFY_TOKEN ?? '',
     },
+    { provide: NOTIFICADOR_ESCALAMIENTO_PORT, useClass: EscalamientoSoloLogAdapter },
+    /**
+     * `ORQUESTADOR_DE_BOT_PORT` **NO se provee aquí**, igual que
+     * `CONTEXTO_CLIENTA_DE_CONVERSACION_PORT`: lo provee `AgenteModule`, que es quien puede ver
+     * los cinco Bounded Contexts que el bot necesita.
+     *
+     * La primera versión sí declaraba aquí el adaptador inerte, con la idea de que `AgenteModule`
+     * —`@Global` y registrado después— lo sobrescribiera. **No funciona:** un proveedor local gana
+     * siempre sobre uno global, así que el bot quedaba inerte con todo el cableado en verde. Lo
+     * destapó `agente/bot.e2e.spec.ts`, que es el único sitio donde se monta el grafo completo.
+     *
+     * Apagar el bot es ahora `BOT_ACTIVO=false` (ver `AgenteModule`), no quitar un módulo.
+     */
+    EnviarMensajeDelBotUseCase,
     RecibirMensajeUseCase,
     ActualizarEstadoDeEntregaUseCase,
     ConsultarBandejaUseCase,
     ConsultarHiloUseCase,
+    ContarEscaladasPendientesUseCase,
     EnviarMensajeManualUseCase,
     EnviarPlantillaUseCase,
     CambiarModoConversacionUseCase,
@@ -71,6 +90,14 @@ import {
   ],
   // Los exporta para que `IntegracionModule` construya los adaptadores de notificación que hoy
   // solo escriben en el log (recordatorios y lista de espera).
-  exports: [CONVERSACION_REPOSITORY, PROVEEDOR_WHATSAPP_PORT, EnviarPlantillaUseCase],
+  exports: [
+    CONVERSACION_REPOSITORY,
+    PROVEEDOR_WHATSAPP_PORT,
+    EnviarPlantillaUseCase,
+    // Los consume `AgenteModule`: el bot responde y escala a través de los mismos casos de uso que
+    // la Bandeja, no por una vía paralela.
+    EnviarMensajeDelBotUseCase,
+    CambiarModoConversacionUseCase,
+  ],
 })
 export class ConversacionesModule {}

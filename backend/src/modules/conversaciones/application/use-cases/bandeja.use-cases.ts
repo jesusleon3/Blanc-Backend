@@ -3,6 +3,7 @@ import { Conversacion, EstadoDeVentana } from '../../domain/entities/conversacio
 import {
   CONVERSACION_REPOSITORY,
   ConversacionRepository,
+  EscaladasPendientes,
   MensajeRegistrado,
   PaginaDeConversaciones,
 } from '../../domain/ports/conversacion.repository';
@@ -37,6 +38,33 @@ export class ConsultarBandejaUseCase {
       limite: Math.min(filtros.limite ?? CONVERSACIONES_POR_PAGINA_POR_DEFECTO, MAXIMO_CONVERSACIONES_POR_PAGINA),
       desplazamiento: filtros.desplazamiento ?? 0,
     });
+  }
+}
+
+/**
+ * El contador de conversaciones escaladas **sin atender** — tercera deuda de la Parte 2.
+ *
+ * ## QUÉ PROBLEMA RESUELVE, Y CUÁL NO
+ *
+ * Con la Cloud API el celular deja de recibir notificaciones de WhatsApp, así que **la única
+ * forma de saber que una clienta escribió es que la plataforma lo diga**. El aviso activo
+ * (`NotificadorEscalamientoPort`) es lo que la Dueña pidió, pero su canal —correo, push, otro
+ * número— sigue sin decidir y elegirlo aquí sería inventar un requisito.
+ *
+ * Este contador es el sustituto honesto: **no resuelve "sin mirar la pantalla"**, sigue exigiendo
+ * el panel abierto. Lo que sí resuelve es no tener que leer conversación por conversación para
+ * saber si algo espera, y da el dato que un badge necesita en una sola consulta agregada.
+ *
+ * `masAntiguaEn` va en la respuesta porque *cuántas* esperan importa menos que *cuánto llevan
+ * esperando*: tres conversaciones de hace dos minutos son una mañana normal; una de hace dos
+ * horas es un fallo de atención.
+ */
+@Injectable()
+export class ContarEscaladasPendientesUseCase {
+  constructor(@Inject(CONVERSACION_REPOSITORY) private readonly conversaciones: ConversacionRepository) {}
+
+  ejecutar(filtros: { sucursalId?: string } = {}): Promise<EscaladasPendientes> {
+    return this.conversaciones.contarEscaladasPendientes(filtros);
   }
 }
 
@@ -131,7 +159,8 @@ export class EnviarMensajeManualUseCase {
 
     // Escribir es tomar la conversación: ver la nota de la cabecera.
     conversacion.escalarAHumano('intervencion_manual', ahora);
-    conversacion.registrarSaliente(ahora);
+    // Una persona respondió de verdad: la conversación sale de pendientes.
+    conversacion.registrarRespuesta(ahora);
 
     await this.unitOfWork.ejecutar(async () => {
       await this.conversaciones.registrarMensaje({
@@ -214,8 +243,20 @@ export class EnviarPlantillaUseCase {
      * media agenda cada noche, dejando a la Encargada con cien conversaciones "tomadas" que nadie
      * tomó.
      */
-    if (input.comoHumano) conversacion.escalarAHumano('intervencion_manual', ahora);
-    conversacion.registrarSaliente(ahora);
+    /**
+     * Y la misma distinción decide si la conversación sale de "pendientes".
+     *
+     * Una plantilla enviada **por una persona** es una respuesta; una enviada **por el
+     * planificador** (recordatorio, oferta de hueco) no lo es. Tratarlas igual era el defecto que
+     * hacía que un recordatorio nocturno limpiara el contador de una conversación que nadie había
+     * atendido, sacándola de la cola de trabajo de la Encargada sin que nadie la leyera.
+     */
+    if (input.comoHumano) {
+      conversacion.escalarAHumano('intervencion_manual', ahora);
+      conversacion.registrarRespuesta(ahora);
+    } else {
+      conversacion.registrarNotificacionDeSistema(ahora);
+    }
 
     await this.unitOfWork.ejecutar(async () => {
       await this.conversaciones.registrarMensaje({

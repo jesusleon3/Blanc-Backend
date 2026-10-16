@@ -33,6 +33,14 @@ export const MOTIVOS_DE_ESCALAMIENTO = [
   'intervencion_manual',
   'baja_confianza_ia',
   'fuera_de_alcance',
+  /**
+   * La clienta mandó audio, documento o un medio que el bot no puede leer (`RN-CONV-06`).
+   *
+   * Añadido en Fase 4 Parte 3: antes esos mensajes dejaban la conversación **en silencio** — se
+   * guardaban en la bandeja y nadie respondía ni escalaba, así que la clienta se quedaba
+   * esperando a un bot que no podía oírla.
+   */
+  'medio_no_soportado',
 ] as const;
 export type MotivoDeEscalamiento = (typeof MOTIVOS_DE_ESCALAMIENTO)[number];
 

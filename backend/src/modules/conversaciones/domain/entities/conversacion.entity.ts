@@ -93,10 +93,31 @@ export class Conversacion {
     this.props.mensajesSinResponder += 1;
   }
 
-  /** El salón respondió: la conversación deja de estar pendiente. No toca la ventana. */
-  registrarSaliente(ocurridoEn: Date): void {
+  /**
+   * **Alguien respondió de verdad**: la conversación deja de estar pendiente.
+   *
+   * Lo invoca una persona desde la bandeja o el bot contestando a un turno entrante. No toca la
+   * ventana de 24 h: responder no la extiende, solo la mueve un mensaje de la clienta.
+   */
+  registrarRespuesta(ocurridoEn: Date): void {
     this.props.ultimoMensajeEn = ocurridoEn;
     this.props.mensajesSinResponder = 0;
+  }
+
+  /**
+   * Notificación automática saliente (recordatorio de cita, oferta de hueco).
+   *
+   * ⚠️ **NO PONE A CERO `mensajesSinResponder`, y esa es toda la diferencia.** Era un defecto real:
+   * `registrarSaliente` lo limpiaba para cualquier saliente, así que un recordatorio nocturno
+   * **sacaba de "pendientes" una conversación que nadie había atendido**. La Encargada abría la
+   * bandeja por la mañana y el mensaje de la clienta había desaparecido de su cola de trabajo sin
+   * que nadie lo hubiera leído.
+   *
+   * Una notificación automática no es una respuesta: el salón no contestó a lo que la clienta
+   * preguntó, solo le mandó un aviso que nada tiene que ver.
+   */
+  registrarNotificacionDeSistema(ocurridoEn: Date): void {
+    this.props.ultimoMensajeEn = ocurridoEn;
   }
 
   /**
@@ -172,6 +193,14 @@ export class Conversacion {
     // Se limpian juntos: el `CHECK` de la migración exige que modo y motivo sean coherentes.
     this.props.motivoDeEscalamiento = null;
     this.props.escaladaEn = null;
+  }
+
+  /**
+   * `true` si hay mensajes de la clienta esperando respuesta. Lo usa el contador de escaladas sin
+   * atender de la bandeja.
+   */
+  get estaPendienteDeRespuesta(): boolean {
+    return this.props.mensajesSinResponder > 0;
   }
 
   /** Vincula la conversación a una clienta de CRM cuando se identifica. */

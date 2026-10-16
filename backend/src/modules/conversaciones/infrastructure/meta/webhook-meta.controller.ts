@@ -172,6 +172,11 @@ export class WebhookMetaController {
       // contenido: `RN-CONV-06` establece que **no se procesan notas de voz**, y guardar un
       // marcador deja constancia de que la clienta mandó algo que el bot no puede leer.
       contenido: mensaje.type === 'text' ? (mensaje.text?.body ?? null) : null,
+      // El tipo **crudo** de Meta viaja junto al normalizado porque el dominio distingue entre
+      // *imagen* y *lo demás*: una foto suele ser una clienta pidiendo cotización de un diseño
+      // (`cotizacion_compleja`), mientras que una nota de voz o un documento son `medio_no_soportado`.
+      // `TipoMensaje` colapsa ambos en `no_soportado`, así que esa distinción se perdería aquí.
+      tipoCrudoDeMeta: mensaje.type,
       ocurridoEn: this.instanteDe(mensaje.timestamp),
     });
 

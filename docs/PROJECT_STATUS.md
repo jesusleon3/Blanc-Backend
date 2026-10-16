@@ -1153,6 +1153,170 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-16 — Fase 4 Parte 3: Orquestador del Bot IA, escalamiento y saneamiento de mensajería. **🏁 FASE 4 CERRADA**
+
+**1128 pruebas en 74 suites** (+60). Los seis controles en verde: `tsc --noEmit`, `tsc -p tsconfig.eslint.json`, `lint`, `build`, `drizzle-kit check` y `madge --circular`.
+
+> **Lo más importante de esta sesión no es el bot: es que montar el grafo completo de módulos destapó que dos cableados que reporté como terminados nunca habían funcionado.** Está en el punto 5, y conviene leerlo antes que el resto.
+
+#### 1. Las tres deudas de la Parte 2, cerradas
+
+**(a) `mensajesSinResponder` se borraba con cualquier saliente.** `registrarSaliente` se partió en dos actos que la mecánica confundía:
+
+| Método | Quién lo usa | Contador |
+|---|---|---|
+| `registrarRespuesta` | Una persona desde la bandeja, o el bot contestando | → `0` |
+| `registrarNotificacionDeSistema` | Recordatorio, oferta de hueco, **y todo acuse** | **intacto** |
+
+El caso que lo hacía urgente no era el recordatorio nocturno, sino uno que apareció al construir el bot: la clienta pide cancelar → el bot escala a `humano` → el bot avisa *"una encargada te atiende en breve"* → **ese aviso ponía el contador a 0** → la conversación desaparecía del contador de escaladas pendientes y nadie se enteraba de que había que atenderla. El acuse borraba la única señal de que hacía falta atención. De ahí el parámetro `esAcuse` en `EnviarMensajeDelBotUseCase`: **informar no es atender**.
+
+**(b) Los medios no procesables ya escalan y acusan recibo.** Con el motivo correcto, y la distinción no es cosmética:
+
+| Lo que manda la clienta | Motivo | Por qué |
+|---|---|---|
+| Imagen | `cotizacion_compleja` | Casi siempre es una foto de referencia para cotizar un diseño (`DEC-033`) |
+| Audio, documento, otros | `medio_no_soportado` *(nuevo)* | El bot no puede leerlo (`RN-CONV-06`) |
+
+La Dueña mira el desglose por motivo para saber qué se le escapa al bot; ver *"cotizaciones complejas"* donde solo hubo notas de voz falsearía esa estadística. Para que la distinción llegue al dominio, el webhook pasa ahora el `type` **crudo** de Meta (`tipoCrudoDeMeta`): `TipoMensaje` colapsa imagen y audio en `no_soportado` y ahí se perdía.
+
+> **Migración `0014_motivo_medio_no_soportado.sql`, escrita a mano** y registrada a mano en `meta/_journal.json`: el único cambio es un `CHECK`, y `drizzle-kit generate` responde *"No schema changes"* porque los `CHECK` no están en su snapshot. Lo que verifica que esa migración llegó a la base es el detector de deriva, ampliado con una prueba que exige los siete motivos de escalamiento obligatorio.
+
+**(c) `NotificadorEscalamientoPort` + contador de escaladas pendientes.** El aviso activo que pidió la Dueña (*"avisar de algo nuevo sin que haya que estar mirando la pantalla"*) **sigue sin canal decidido** —correo, push del navegador, mensaje a otro número— y elegirlo por cuenta propia sería inventar un requisito. El puerto existe y su adaptador por defecto solo escribe en el log.
+
+El sustituto honesto es `GET /v1/conversaciones/escaladas/pendientes`: total, desglose por sucursal e instante del más antiguo. **No resuelve "sin mirar la pantalla"** —sigue exigiendo el panel abierto—, pero ya no hay que leer conversación por conversación. `masAntiguaEn` va en la respuesta porque *cuántas* esperan importa menos que *cuánto llevan*: tres de hace dos minutos son una mañana normal, una de hace dos horas es un fallo de atención.
+
+El criterio es `modo = 'humano' AND mensajes_sin_responder > 0`, y los dos términos importan: sin el segundo, una conversación ya atendida contaría para siempre, porque `RN-ESC-03` hace que el modo `humano` no expire solo.
+
+#### 2. El Orquestador del Bot IA: tres capas, y el tipo es la frontera
+
+`modules/agente/` — módulo nuevo, **adaptador conductor y no Bounded Context**, igual que `PlanificadorModule`: lo que decide no es dominio propio, sino *cuándo invocar a quién*.
+
+```
+Mensaje entrante
+   ↓
+CAPA 1 · Filtro determinista de frases  ──acierta──► escala (el modelo NO se invoca)
+   ↓ no acierta
+CAPA 2 · El modelo clasifica → Intencion {tipo, fecha?, hora?, servicio?, confianza}
+   ↓ confianza ≥ 0,6 y la intención es atendible
+CAPA 3 · HerramientasDelBot → casos de uso REALES (Catálogo, Agenda, CRM, Anticipos)
+```
+
+**`RN-CONV-01` (*la IA interpreta, nunca decide*) no depende de que el prompt se respete: depende del tipo de dato que el modelo puede devolver.** `Intencion` no tiene campo para un precio, ni para una duración, ni para un hueco, ni para el texto de la respuesta. **Un modelo alucinando, con el prompt comprometido o con la API cambiada no puede inventar un precio porque no tiene dónde escribirlo.** Y la única vía para obtener uno es `HerramientasDelBot`, que envuelve los mismos casos de uso que usa el mostrador.
+
+**La capa 1 corre antes del modelo** porque equivocarse en cancelar, pedir una persona o quejarse es caro y no se delega a un clasificador probabilístico. Hay una prueba que verifica que el intérprete **no se llegó a invocar** cuando el filtro acierta.
+
+Matriz de escalamiento:
+
+| Disparador | Motivo | Capa |
+|---|---|---|
+| Clienta bloqueada | `clienta_bloqueada` | Antes de todo — y **silencio absoluto**: ni acuse |
+| "cancelar", "ya no voy"… | `cancelacion_solicitada` | 1 (determinista) |
+| "hablar con una persona"… | `solicitud_humana` | 1 |
+| "pésimo", "me quejo"… | `queja_o_reclamo` | 1 |
+| Comprobante de pago | `intervencion_manual` | 1 |
+| Confianza < 0,6 | `baja_confianza_ia` | 2 (`RN-CONV-05`) |
+| Reprogramar | `intervencion_manual` | 2 — `RN-ANT-04` (ventana 48 h) y `DEC-042` (tope de 3) son reglas, no las evalúa el bot |
+| Servicio de cotización manual | `cotizacion_compleja` | 3 (`DEC-033`) |
+| Lista roja → anticipo | `intervencion_manual` | 3 — validar una transferencia exige acceso al banco |
+| Oferta de hueco ya tomada | `intervencion_manual` | 3 (`RN-AGE-13`: la oferta nunca retuvo nada) |
+| Cualquier otra cosa | `fuera_de_alcance` | por defecto |
+
+> **Escalar no siempre es callarse.** El escalamiento por lista roja manda el monto del anticipo antes de derivar: si se tragara con el mensaje genérico, la clienta esperaría una respuesta sin saber que su cita depende de una transferencia suya, y nadie sabría por qué nunca se activó.
+
+**El intérprete por defecto NO es OpenAI.** `AgenteDeterministicoAdapter` clasifica por patrones, con confianza **binaria** (1 si acierta, 0 si no — no se finge un 0,7 que no tiene; el 0 activa `RN-CONV-05` y escala). No es un simulacro de pruebas: es un modo de operación desplegable en el que el bot atiende saludos, precios y disponibilidad y escala el resto. **Si OpenAI resulta caro, impreciso o inaceptable para la Dueña, apagarlo no deja el sistema sin bot: lo deja con este.** Y las pruebas no dependen de un modelo probabilístico, que es la clase de intermitencia que la Parte 1 acabó de erradicar.
+
+**`OpenAiAgenteAdapter` está escrito y NO está verificado**, igual que Meta y Supabase: no hay credenciales. Usa salida estructurada (`json_schema`, `strict: true`) y, con credenciales o sin ellas, **todo lo que devuelva pasa por `interpretarRespuesta`**, que descarta lo que no encaje en `Intencion` y degrada a `desconocida` con confianza 0 — lo que escala. Cualquier fallo (caída, timeout, límite de tasa) **degrada, nunca propaga**: si lanzara, Meta recibiría un 500 y reintentaría el mismo mensaje en bucle.
+
+#### 3. Los dos ciclos cerrados
+
+**Recordatorio:** el barrido deja la cita en `pendiente_confirmacion` y manda la plantilla; la clienta contesta *"sí"* y el bot la pasa a `confirmada`. **Un "sí" a secas solo confirma si hay algo que confirmar** — con contexto resuelto desde la base, no desde el modelo. Sin cita pendiente, un "sí" escala: el riesgo concreto era responder *"¡listo, confirmada!"* a una clienta que estaba contestando a otra cosa.
+
+**Lista de espera:** se ofrece el hueco, la clienta dice *"sí lo quiero"* y `AceptarOfertaListaEsperaUseCase` agenda a la hora del hueco ofrecido.
+
+#### 4. 🐛 Cuatro defectos propios que las pruebas destaparon
+
+**(a) El "hola" se tragaba la petición.** `PATRONES` se recorre en orden y `saludo` estaba primero, así que *"Hola, ¿qué precios tienen?"* se clasificaba como saludo y el bot contestaba *"¿qué servicio te interesa?"* a quien acababa de preguntar los precios. **No es un caso teórico: es cómo escribe literalmente todo el mundo en WhatsApp.** `saludo` es ahora el último recurso, por ser la señal más débil.
+
+**(b) El contexto se buscaba por barrido en memoria.** `citaPendienteDe` traía 30 días de citas con límite de 100 y filtraba en Node; `ofertaAbiertaDe` miraba **solo la fila de hoy**. Falla de tres formas: no ve lo que queda fuera del rango, descarta en silencio lo que pase del límite, y trae cien filas para quedarse con una. El caso real que lo destapó: se cancela una cita del jueves y el hueco se ofrece el martes — la clienta decía *"sí lo quiero"* y no se encontraba ninguna oferta. Se añadieron dos consultas acotadas: `buscarPendienteDeConfirmacionDeClienta` y `buscarOfertaAbiertaDeClienta`.
+
+**(c) El aviso al personal reportaba siempre `fuera_de_alcance`.** La `Conversacion` que `RecibirMensaje` tiene en memoria se cargó *antes* de que el bot corriera, así que su `motivoDeEscalamiento` seguía en `null` y caía al valor por defecto. La Dueña habría visto *"fuera de alcance"* donde una clienta pidió cancelar. El motivo viaja ahora en `ResultadoDelTurno`.
+
+**(d) El acuse de escalamiento borraba el contador.** Ver el punto 1(a).
+
+> Las tres primeras se verificaron **por mutación**: revertidas una a una, fallan exactamente las pruebas que las cubren.
+
+#### 5. ⚠️ EL HALLAZGO GRAVE: `@Global` no sobrescribe un proveedor local
+
+Montar el grafo completo de módulos en `bot.e2e.spec.ts` dejó el bot **inerte, con todas las pruebas en verde**. La causa:
+
+> **`@Global` solo evita tener que importar un módulo. NO da prioridad sobre nada: un proveedor local gana siempre sobre uno global.**
+
+Lo comprobé aislado antes de aceptarlo. Y entonces el mismo patrón apareció **retroactivamente en la Parte 2**, que reporté como terminada:
+
+| Dónde | Qué creía | Qué pasaba de verdad |
+|---|---|---|
+| `AgenteModule` → `ORQUESTADOR_DE_BOT_PORT` | Sobrescribía el adaptador inerte de `ConversacionesModule` | El bot no contestaba a nadie |
+| `IntegracionModule` → `NOTIFICADOR_RECORDATORIO_PORT` y `NOTIFICACION_LISTA_ESPERA_PORT` | Sobrescribía los de solo-log de `AgendaModule` | **Ni un recordatorio ni una oferta de hueco salieron nunca por WhatsApp** |
+
+**El segundo es el que importa.** Durante toda la Parte 2 el canal quedó construido, probado y conectado, y las dos notificaciones del planificador seguían escribiendo en el log. El comentario de `IntegracionModule` afirmaba explícitamente lo contrario. No lo detectó ninguna prueba porque ninguna montaba Agenda y Conversaciones juntas por los módulos reales: las de Agenda inyectaban el notificador a mano.
+
+**La regla, ya sin excepciones:** si otro módulo tiene que proveer un puerto, el BC que lo declara **no declara un valor por defecto para él**. Es la misma regla que cerró `P5`, aplicada también a los defaults.
+
+**Tres cosas la vigilan ahora:**
+
+1. **`integracion/sin-defaults-locales.spec.ts`** — detector mecánico: para cada puerto que un módulo `@Global` provee, verifica que el BC que lo declara **no** tenga un `provide:` para él, y que el proveedor de fuera sí. Es una prueba de texto y no de contenedor a propósito: un contenedor solo detecta el caso en el grafo que esa prueba monte, y el defecto vive precisamente en las composiciones que nadie monta.
+2. **`agente/bot.e2e.spec.ts`** — el único sitio donde se monta el grafo completo en el orden de `AppModule`. Incluye la prueba *"EL BARRIDO REAL de recordatorios sale por WhatsApp"*, que verifica la corrección del punto 2 de extremo a extremo.
+3. **El arranque falla ruidosamente.** Sin proveedor, el contenedor no arranca. Es mejor que lo anterior, que fallaba en silencio: los dos E2E que montaban `IntegracionModule` sin `AgenteModule` dejaron de compilar y se alinearon con la composición real.
+
+#### 6. Apagar el bot es `BOT_ACTIVO=false`, no quitar un módulo
+
+Corolario del punto 5: el plan de rollback que había documentado (*"quitar `AgenteModule` de `AppModule`"*) ya no vale, porque entonces nadie provee el puerto y la aplicación no arranca. `AgenteModule` provee siempre el puerto y elige entre el orquestador real y `OrquestadorInactivoAdapter` según la variable — mismo mecanismo que `PLANIFICADOR_ACTIVO` (`ADR-025`) y por la misma razón: **la vuelta atrás tiene que ser un cambio de configuración verificable en un despliegue, no un cambio de código.**
+
+Verificado: con `BOT_ACTIVO=false`, de las 13 pruebas del E2E del bot fallan las 9 que exigen bot y **pasan las 4 del canal, la bandeja y el recordatorio**. Eso es exactamente la propiedad buscada.
+
+#### Lo que NO se hizo, y por qué
+
+- **El canal del aviso activo al personal sigue sin decidir.** Es una pregunta para la Dueña, no una decisión técnica. El puerto está, el adaptador solo registra en el log y el contador es el sustituto.
+- **`OpenAiAgenteAdapter` no se ha ejecutado nunca contra OpenAI.** Sin `OPENAI_API_KEY` no se instancia.
+- **Los nombres de plantillas de Meta siguen siendo provisionales** (`N-14` abierto): el inventario y la redacción los aprueba Meta y la Dueña no los ha definido.
+- **No redacté una ADR para el Bot IA.** La orden no la pedía y la decisión de fondo ya está tomada en `P1` (*OpenAI exclusivamente como intérprete con salida estructurada*) y en `RN-CONV-01`. Pero hay dos cosas aquí que son arquitectura y merecen tu criterio sobre si formalizarlas: **el tipo `Intencion` como frontera determinista** (que es lo que hace a `RN-CONV-01` verificable en vez de aspiracional) y **la regla de los proveedores por defecto del punto 5**. Las he dejado en `CLAUDE.md` y vigiladas por pruebas; elevarlas a ADR es decisión tuya.
+- **El bot no cancela ni reprograma, y no se le amplió la lista de operaciones de `DEC-044`.** Agendar por WhatsApp sí está construido, y eso **excede** la lista de solo-lectura que `DEC-044` fijó: queda señalado abajo como punto para la Dueña, porque es una decisión de negocio, no de arquitectura.
+
+#### 🏁 Cierre de Fase 4 — WhatsApp Cloud API, Planificador y Bot IA
+
+| Parte | Qué entregó |
+|---|---|
+| 1 | Saneamiento del arnés (≈12 % → ≈1,6 % de corridas con fallo, **no erradicado**) y Planificador con los 4 barridos (`ADR-025`) |
+| 2 | Canal Cloud API: webhook con HMAC, idempotencia por `wamid`, ventana de 24 h, Conversaciones, handoff y Bandeja Compartida |
+| 3 | Bot IA con frontera determinista, matriz de escalamiento, cierre de los dos ciclos y las tres deudas |
+
+**Lo que sigue pendiente de Fase 4 y no se puede cerrar con código:** el trámite de alta con Meta (camino crítico), el inventario de plantillas (`N-14`), el canal del aviso al personal y las credenciales de OpenAI.
+
+#### Listo para el Kick-off de Fase 5 (Frontend Web)
+
+Los tres consumidores que la Fase 5 tiene que construir ya tienen su API completa y probada por E2E:
+
+| Pantalla | Endpoints | Estado |
+|---|---|---|
+| **Bandeja Compartida** | `GET /v1/conversaciones`, `GET /:id` (con `estadoDeVentana`), `POST /:id/mensajes`, `POST /:id/plantilla`, `POST /:id/escalar`, `POST /:id/devolver-al-bot`, `GET /escaladas/pendientes` | ✅ |
+| **Panel de Encargada / Dueña** | Agenda, catálogo, sillas, excepciones de personal, lista de espera, anticipos, CRM, planificador | ✅ |
+| **Vista iPad de Manicurista** | Agenda filtrada por su vínculo (`P9`), sin PII ni señales de riesgo | ✅ |
+
+Tres avisos para quien tome la Fase 5:
+
+1. **`GET /:id` devuelve `estadoDeVentana` y `ventanaAbierta` a propósito.** La interfaz tiene que decidir **antes** de que la Encargada escriba si puede mandar texto libre o necesita plantilla: descubrirlo al pulsar enviar es redactar un mensaje para que el sistema lo rechace.
+2. **La Manicurista recibe `403` en toda la Bandeja**, incluido el contador. No es una omisión: un hilo contiene el teléfono de la clienta, lo que escribió y, por inferencia, su relación con el salón — la clase de dato que su vista de iPad está construida para no transportar (`DEC-040`).
+3. **El contador de escaladas está pensado para sondearse** (un badge). Es una sola consulta agregada en la base, no un `GET` de la bandeja filtrado en el cliente.
+
+#### Para decidir con la Dueña
+
+1. **Canal del aviso activo al personal.** Es lo único que separa *"hay que mirar el panel"* de lo que ella pidió. Al migrar un número a la Cloud API, el celular **deja de recibir notificaciones de WhatsApp**.
+2. **El bot agenda citas, y `DEC-044` solo le había autorizado operaciones de lectura.** Funciona y está probado contra la base real, con todas las reglas aplicadas porque usa el mismo caso de uso que el mostrador. Pero la autorización explícita de que **una clienta pueda cerrar una cita sin que intervenga una persona** es decisión suya, no mía. Si la respuesta es no, el cambio es de una línea: `agendar` pasa a la lista de intenciones que escalan.
+3. **Inventario y redacción de las plantillas de Meta** (`N-14`).
+4. **¿OpenAI o el intérprete determinista?** El determinista no tiene coste por mensaje y escala todo lo que no reconoce; OpenAI entiende más y cuesta por mensaje. Se puede empezar con el determinista y activar OpenAI con una variable de entorno.
+
+---
+
 ### 2026-10-15 (e) — Fase 4 Parte 2: canal WhatsApp Cloud API, Conversaciones, Handoff y Bandeja Compartida
 
 **1068 pruebas en 71 suites** (+78). Superada la barrera de las 1.000.
@@ -1306,11 +1470,17 @@ Es la misma situación que con Supabase: el diseño se cierra sin credenciales, 
 - **Lo que falta de `P3`:** las máquinas de estado de `Conversación` —parcialmente cubierta ahora por `modo` + motivos— y `TicketEscalamiento`, que no existe. Más `P6`.
 - **`RN-CONV-06`**: las notas de voz no se procesan. El webhook ya las guarda como `no_soportado` sin contenido, para que quede constancia de que la clienta mandó algo que el bot no puede leer.
 
-#### Deuda nueva
+#### Deuda nueva — **las tres cerradas en la Parte 3** (2026-10-16)
 
-1. **Los mensajes `no_soportado` no avisan a nadie.** Una clienta que manda una nota de voz recibe silencio del bot: el mensaje queda en la bandeja, pero nada escala la conversación ni le responde *"no puedo oír audios"*. Candidato claro para la Parte 3.
-2. **No hay notificación al personal de que llegó algo nuevo.** La bandeja hay que mirarla. `WHATSAPP_ARQUITECTURA_CANAL.md` §2.1 lo pide explícitamente (*"avisar de algo nuevo sin que haya que estar mirando la pantalla"*) y no está construido.
-3. **El contador `mensajesSinResponder` se pone a 0 con cualquier saliente**, incluido un recordatorio automático. Si el planificador manda un recordatorio a una conversación con un mensaje pendiente, esta deja de aparecer en "pendientes" sin que nadie la haya atendido.
+1. ~~**Los mensajes `no_soportado` no avisan a nadie.**~~ Cerrada: escalan con `cotizacion_compleja` (imagen) o `medio_no_soportado` (audio/documento) y reciben acuse.
+2. ~~**No hay notificación al personal de que llegó algo nuevo.**~~ Parcialmente cerrada: existe `NotificadorEscalamientoPort` y el contador `GET /escaladas/pendientes`. **El canal del aviso activo sigue sin decidir** — es una pregunta para la Dueña.
+3. ~~**El contador `mensajesSinResponder` se pone a 0 con cualquier saliente.**~~ Cerrada: `registrarRespuesta` frente a `registrarNotificacionDeSistema`.
+
+#### ⚠️ Corrección retroactiva (2026-10-16): el canal quedó conectado y NO enviaba las notificaciones
+
+Esta entrada afirma que los notificadores de Agenda *"pasan a salir por WhatsApp"* porque `IntegracionModule`, al ser `@Global()` y registrarse después, sobrescribía los adaptadores de solo-log de `AgendaModule`. **Es falso.** `@Global` solo evita tener que importar el módulo; **un proveedor local gana siempre sobre uno global**, así que los casos de uso de Agenda siguieron recibiendo el adaptador que no envía nada.
+
+Consecuencia real: durante toda la Parte 2, **ni un recordatorio ni una oferta de hueco salieron por WhatsApp**, con toda la suite en verde. Lo destapó la Parte 3 al montar el grafo completo de módulos. Ver el punto 5 de la entrada del 2026-10-16.
 
 ---
 

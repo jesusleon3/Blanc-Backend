@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { AgendaModule } from '../../../agenda/agenda.module';
 import { SucursalesYPersonalModule } from '../../sucursales-y-personal.module';
 import { IntegracionModule } from '../../../integracion/integracion.module';
+import { AnticiposModule } from '../../../anticipos/anticipos.module';
+import { AgenteModule } from '../../../agente/agente.module';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
 import { Database } from '../../../../database/connection';
 import { AUDITORIA_PORT } from '../../../../shared/auditoria/auditoria.port';
@@ -84,7 +86,15 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
     dbDePrueba = await crearBaseDeDatosDePrueba();
 
     const moduleRef = await Test.createTestingModule({
-      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, IntegracionModule],
+      /**
+       * `AgenteModule` entra porque **`IntegracionModule` arrastra `ConversacionesModule`**, y ese
+       * módulo declara `ORQUESTADOR_DE_BOT_PORT` sin proveerlo: lo provee `AgenteModule`, igual
+       * que `AppModule`. Sin él, el contenedor no arranca — ruidosamente, que es lo que se quiere:
+       * la alternativa (un valor por defecto local en `ConversacionesModule`) hacía que el bot
+       * quedara inerte **en silencio**, y ese fue un defecto real. Ver
+       * `integracion/sin-defaults-locales.spec.ts`.
+       */
+      imports: [TestInfraModule, AgendaModule, SucursalesYPersonalModule, CatalogoYCotizacionModule, CrmYClientasModule, AnticiposModule, IntegracionModule, AgenteModule],
       providers: [
         {
           provide: APP_GUARD,

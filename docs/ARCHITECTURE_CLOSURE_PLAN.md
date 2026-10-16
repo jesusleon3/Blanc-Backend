@@ -59,6 +59,13 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
   - 1.22 confirma que la identidad de `Conversación` es **persistente por clienta** (no por hilo); la gestión de `modo` en cierre/reapertura (`PA-15`) sigue sin resolver.
   Ninguno de estos tres puntos se traduce aquí en una tabla de transiciones ni en un nuevo estado formal — eso sigue siendo diseño de arquitectura pendiente de ejecución, no de insumo. P3 permanece `Abierto`.
 
+- **Avance de implementación (2026-10-16, cierre de Fase 4):** la máquina de `Conversación` quedó **implementada y probada**, y los dos puntos que seguían sin resolver arriba ya tienen respuesta en código:
+  - **1.22 / `PA-15` (gestión de `modo` en cierre/reapertura):** no hay cierre ni reapertura de conversación. La identidad es `(sucursal_id, telefono_clienta)` y el hilo es perpetuo; `modo` va de `bot` a `humano` por escalamiento y vuelve **solo por acto explícito** (`RN-ESC-03`). **Esa ausencia de retorno automático es la regla**, y un detector de deriva verifica que no exista ninguna columna de caducidad de modo.
+  - **1.23 (confirmación interactiva):** el estado intermedio de `Cita` es `pendiente_confirmacion`, ya en `TRANSICIONES_LEGALES`, y el ciclo completo (barrido → plantilla → respuesta de la clienta → `confirmada`) está probado de extremo a extremo.
+  - **`TicketEscalamiento` sigue sin existir, y hay que decidir si debe.** Su función la cumplen hoy `modo` + `motivo_de_escalamiento` + `escalada_en` + el contador `GET /v1/conversaciones/escaladas/pendientes`. Crear la entidad sin un requisito que la pida sería inventarlo; lo que falta es la decisión, no el diseño.
+
+  Queda pendiente **documentar formalmente** la tabla de transiciones de `Conversación` en `01-domain-discovery.md`. P3 sigue `Abierto` por eso y por `TicketEscalamiento`.
+
 ### P4 — Invariante de capacidad para citas sin manicurista asignada
 
 - **¿Por qué sigue abierto?** `DOMAIN_MODEL_REVIEW.md` (DM-11) identificó el vacío y lo revirtió explícitamente por falta de base textual para elegir entre 5+ modelos igualmente válidos — nunca se resolvió, solo se descartó una incorporación apresurada.
@@ -205,7 +212,7 @@ Este documento se escribió el 2026-07-16, antes de que existieran `PLATFORM_ARC
 |---|---|---|---|---|---|
 | P1 — Conjunto Supabase / BD / ORM / Auth | Desarrollo | `03-technical-architecture.md` | ~~Fase 1 completa~~ Ninguna | **Resuelto (2026-08-04)** | Ninguna — Supabase (BD/Auth/Storage/Realtime) + Drizzle + Railway. Validación en producción de Auth/Railway pendiente como tarea de Fase 1 |
 | P2 — `PA-19` (alcance RBAC) | Cliente | `RN-SEG-03`, `99-open-questions.md` | ~~Fase 1 (modelo de permisos), `05-api-design.md`~~ Ninguna | **Resuelto (2026-08-04)** | Ninguna — `RN-SEG-03: Aprobada`, transcrito a `99-open-questions.md` en Paso 11 |
-| P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | ~~Fase 2~~ Fase 4 | **Abierto — `Cita` CERRADA (2026-10-14)**: máquina formal implementada y probada (`TRANSICIONES_LEGALES`, 9 estados, `ESTADOS_INICIALES`, transición administrativa `completada → no_show` de `N-02`). `Conversación` y `TicketEscalamiento` siguen intactas | Solo quedan las dos de Fase 4 — ya no bloquea Fase 2 |
+| P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | ~~Fase 2~~ Fase 4 | **Abierto — `Cita` CERRADA (2026-10-14); `Conversación` CERRADA DE FACTO (2026-10-16)**: la máquina de `Conversación` quedó implementada y probada como `modo` (`bot` ⇄ `humano`) + catálogo de 9 motivos de escalamiento + estado de ventana de 24 h de tres valores, con el retorno de control siempre explícito (`RN-ESC-03`) vigilado por detector de deriva. **Falta documentarla formalmente** en `01-domain-discovery.md` y **`TicketEscalamiento` sigue intacta** — y hay que decidir si existe: su función la cumplen hoy `modo` + `motivo_de_escalamiento` + el contador de escaladas pendientes, y crear la entidad sin un requisito que la pida sería inventarlo | Solo queda documentar `Conversación` y decidir sobre `TicketEscalamiento` |
 | P4 — Invariante de capacidad sin manicurista | Cliente + Arquitectura | `01-domain-discovery.md`, `decision-flows-catalogo-diseno.md` | ~~Fase 2~~ Ninguna | **Resuelto (2026-09-30)** | Ninguna — límite físico por sucursal (Zibatá 5, Lomas 3, Álamos 1) + patrón de Sillas Virtuales, `DEC-031` |
 | P5 — Circular Agenda↔Anticipos | Arquitectura | `decision-flows-catalogo-diseno.md` | ~~Fase 2/3~~ Ninguna | **Resuelto (2026-10-15)** | Ninguna — patrón `IntegracionModule` con 6 puertos y `madge` en 0 ciclos; el Outbox deja de ser condición de cierre |
 | P6 — Ratificar F-27 y F-14 | Arquitectura + Cliente | ADR nuevo + enmienda ADR-007/017/022 | Fase 4 | Abierto | Redactar y aprobar |
@@ -286,7 +293,7 @@ Cuando los quince puntos están en verde, el proyecto puede empezar a programars
 
 ## Riesgos que NO deben aceptarse
 
-Los pendientes que siguen abiertos en la Sección 1/2. **Actualizado 2026-10-14:** ya están resueltos `P1`, `P2`, `P4`, `P7` y `P9`; `P3` está cerrado para `Cita` y solo le quedan las dos máquinas de Fase 4. **Siguen abiertos: `P5`, `P6`, `P8` y `P10`** (más la parte de Fase 4 de `P3`).
+Los pendientes que siguen abiertos en la Sección 1/2. **Actualizado 2026-10-16 (cierre de Fase 4):** resueltos `P1`, `P2`, `P4`, `P5`, `P7` y `P9`; de `P3` están cerradas las máquinas de `Cita` y —de facto, implementada y probada pero sin documentar— la de `Conversación`, y queda decidir si `TicketEscalamiento` debe existir. **Siguen abiertos: `P6`, `P8` y `P10`**, más la documentación formal de `P3`.
 
 Ninguno se pospone a "durante desarrollo" sin las salvedades ya indicadas explícitamente en cada uno. De los tres que este documento señalaba como bloqueadores no negociables antes de escribir el primer módulo de dominio real (Fase 2, Agenda) —**`P3`, `P4` y `P5`**—, `P3` y `P4` están resueltos y el invariante central (no-doble-booking) **está implementado y probado contra PostgreSQL real** mediante el patrón de Sillas Virtuales y dos restricciones `EXCLUDE USING gist`. **`P5` (circularidad Agenda↔Anticipos) sigue abierto y es el único de los tres que falta**; no ha bloqueado hasta ahora porque Anticipos no se ha construido, pero bloquea Fase 3.
 

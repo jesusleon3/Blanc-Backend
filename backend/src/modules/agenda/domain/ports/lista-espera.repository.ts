@@ -25,6 +25,20 @@ export interface ListaEsperaRepository {
   buscarOfertaAbierta(sucursalId: string, fecha: string): Promise<SolicitudListaEspera | null>;
 
   /**
+   * La oferta abierta **de una clienta concreta**, en cualquier fecha de esa sucursal.
+   *
+   * ## POR QUÉ NO BASTA `buscarOfertaAbierta`
+   *
+   * Esa consulta pide la fecha, y **quien pregunta aquí no la sabe**: el bot recibe un *"sí, lo
+   * quiero"* y tiene que averiguar a qué se refiere. Buscar solo en la fila de hoy fallaría en el
+   * caso normal — se cancela una cita del jueves y se ofrece el hueco el martes.
+   *
+   * Se consulta por `clienta_id` y estado `notificada` en la base, no filtrando en memoria sobre
+   * la fila del día: una clienta puede estar en varias filas y la oferta viva es una sola.
+   */
+  buscarOfertaAbiertaDeClienta(sucursalId: string, clientaId: string): Promise<SolicitudListaEspera | null>;
+
+  /**
    * Todas las solicitudes `notificada` cuyo turno ya venció, de cualquier sucursal y fecha.
    *
    * Alimenta a `AvanzarTurnoListaEsperaUseCase` cuando se invoca sin acotar: es lo que un job

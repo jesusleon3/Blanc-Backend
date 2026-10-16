@@ -19,6 +19,10 @@ import { Clienta } from '../crm-y-clientas/domain/entities/clienta.entity';
 import { AuditoriaPort } from '../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { DrizzleUnitOfWork } from '../../shared/persistence/drizzle-unit-of-work';
+import { EnviarMensajeDelBotUseCase } from './application/use-cases/enviar-mensaje-del-bot.use-case';
+import { OrquestadorInactivoAdapter } from './infrastructure/orquestador-inactivo.adapter';
+import { NotificadorEscalamientoPort } from './domain/ports/notificador-escalamiento.port';
+import { OrquestadorDeBotPort } from './domain/ports/orquestador-de-bot.port';
 
 const ENCARGADA: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL_LOMAS = '11111111-1111-4111-8111-111111111111';
@@ -44,6 +48,16 @@ async function preparar() {
 
   const contextoClienta = new ContextoClientaDeConversacionAdapter(clientaRepo);
 
+  // El aviso al personal se espía en lugar de simularse a medias: estas pruebas verifican **que se
+  // avisa**, no por qué canal — el canal sigue sin decidir.
+  const notificador: jest.Mocked<NotificadorEscalamientoPort> = { conversacionNecesitaHumano: jest.fn() };
+  // Orquestador inactivo: en este spec se prueba el **canal**, no el bot. El bot tiene su propio
+  // spec (`agente/bot.spec.ts`), y mezclarlos haría que un cambio en la clasificación de
+  // intenciones rompiera pruebas de enrutamiento multi-sucursal.
+  const orquestador: OrquestadorDeBotPort = new OrquestadorInactivoAdapter();
+  const espiaOrquestador = jest.spyOn(orquestador, 'atenderTurno');
+  const enviarDelBot = new EnviarMensajeDelBotUseCase(repo, whatsapp, uow);
+
   // Las dos sucursales con número: el enrutamiento multi-sucursal es parte de lo que se prueba.
   await repo.registrarNumeroDeSucursal({ phoneNumberId: NUMERO_LOMAS, sucursalId: SUCURSAL_LOMAS, telefonoVisible: '4420000001' });
   await repo.registrarNumeroDeSucursal({ phoneNumberId: NUMERO_ZIBATA, sucursalId: SUCURSAL_ZIBATA, telefonoVisible: '4420000002' });
@@ -62,7 +76,9 @@ async function preparar() {
     espiaTexto,
     espiaPlantilla,
     crearClienta,
-    recibir: new RecibirMensajeUseCase(repo, contextoClienta, auditoria, uow),
+    notificador,
+    espiaOrquestador,
+    recibir: new RecibirMensajeUseCase(repo, contextoClienta, notificador, enviarDelBot, orquestador, auditoria, uow),
     estados: new ActualizarEstadoDeEntregaUseCase(repo),
     bandeja: new ConsultarBandejaUseCase(repo),
     hilo: new ConsultarHiloUseCase(repo),

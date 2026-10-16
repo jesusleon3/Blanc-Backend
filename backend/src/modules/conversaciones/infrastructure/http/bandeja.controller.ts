@@ -5,12 +5,14 @@ import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
 import {
   CambiarModoConversacionUseCase,
   ConsultarBandejaUseCase,
+  ContarEscaladasPendientesUseCase,
   ConsultarHiloUseCase,
   EnviarMensajeManualUseCase,
   EnviarPlantillaUseCase,
   RegistrarNumeroDeSucursalUseCase,
 } from '../../application/use-cases/bandeja.use-cases';
 import {
+  ContarEscaladasDto,
   EnviarMensajeDto,
   EnviarPlantillaDto,
   EscalarDto,
@@ -64,6 +66,7 @@ export class BandejaController {
     private readonly enviarPlantilla: EnviarPlantillaUseCase,
     private readonly cambiarModo: CambiarModoConversacionUseCase,
     private readonly registrarNumero: RegistrarNumeroDeSucursalUseCase,
+    private readonly contarEscaladas: ContarEscaladasPendientesUseCase,
   ) {}
 
   /** La cola de trabajo. Filtros por sucursal, modo y pendientes de responder. */
@@ -81,6 +84,25 @@ export class BandejaController {
    * **antes de escribir** si puede mandar texto libre o necesita plantilla. Descubrirlo al pulsar
    * enviar sería redactar un mensaje para que el sistema lo rechace.
    */
+  /**
+   * Contador de conversaciones escaladas y sin atender, para el badge del panel.
+   *
+   * **Declarado antes de `@Get(':id')` a propósito.** Nest resuelve las rutas en orden de
+   * declaración: si `:id` fuera primero, capturaría `escaladas` como si fuera un UUID y esta ruta
+   * nunca se alcanzaría. Moverla abajo la rompe en silencio, con un `400` de validación de UUID
+   * que no parece un problema de orden de rutas.
+   */
+  @Get('escaladas/pendientes')
+  @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
+  async escaladasPendientes(@Query() query: ContarEscaladasDto) {
+    const resumen = await this.contarEscaladas.ejecutar({ sucursalId: query.sucursalId });
+    return {
+      total: resumen.total,
+      porSucursal: resumen.porSucursal,
+      masAntiguaEn: resumen.masAntiguaEn?.toISOString() ?? null,
+    };
+  }
+
   @Get(':id')
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
   async hilo(@Param('id') id: string, @Query() query: ListarMensajesDto) {

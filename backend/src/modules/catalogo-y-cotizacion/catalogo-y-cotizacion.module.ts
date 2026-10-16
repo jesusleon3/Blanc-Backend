@@ -47,6 +47,8 @@ import { ObtenerModificadoresDeServicioUseCase } from './application/use-cases/o
   ],
   // Lo exporta para que `IntegracionModule` pueda construir `ContextoCatalogoAdapter`. Agenda
   // NO importa este módulo: el adaptador vive en la integración (`ADR-005`, sin ciclos).
-  exports: [SERVICIO_REPOSITORY],
+  // `ObtenerServiciosUseCase` lo consume `AgenteModule`: el bot lee precios y duraciones del
+  // catálogo real, nunca de su propio texto.
+  exports: [SERVICIO_REPOSITORY, ObtenerServiciosUseCase],
 })
 export class CatalogoYCotizacionModule {}

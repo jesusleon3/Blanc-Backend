@@ -92,3 +92,10 @@ export class RegistrarNumeroDto {
   @MaxLength(25)
   telefonoVisible!: string;
 }
+
+/** Filtro del contador de escaladas pendientes. La sucursal es opcional: sin ella, cuenta todas. */
+export class ContarEscaladasDto {
+  @IsOptional()
+  @IsUUID()
+  sucursalId?: string;
+}

@@ -1,11 +1,17 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Conversacion } from '../../domain/entities/conversacion.entity';
+import { EnviarMensajeDelBotUseCase } from './enviar-mensaje-del-bot.use-case';
 import { CONVERSACION_REPOSITORY, ConversacionRepository } from '../../domain/ports/conversacion.repository';
 import {
   CONTEXTO_CLIENTA_DE_CONVERSACION_PORT,
   ContextoClientaDeConversacionPort,
 } from '../../domain/ports/contexto-clienta-de-conversacion.port';
-import { TipoMensaje } from '../../../../database/schema';
+import { MotivoDeEscalamiento, TipoMensaje } from '../../../../database/schema';
+import {
+  NOTIFICADOR_ESCALAMIENTO_PORT,
+  NotificadorEscalamientoPort,
+} from '../../domain/ports/notificador-escalamiento.port';
+import { ORQUESTADOR_DE_BOT_PORT, OrquestadorDeBotPort } from '../../domain/ports/orquestador-de-bot.port';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { UNIT_OF_WORK, UnitOfWork } from '../../../../shared/persistence/unit-of-work.port';
 
@@ -16,7 +22,44 @@ export interface MensajeEntrante {
   wamid: string;
   tipo: TipoMensaje;
   contenido: string | null;
+  /**
+   * Tipo crudo que mandó Meta (`image`, `audio`, `document`, `sticker`…). Se conserva porque la
+   * **razón** del escalamiento depende de él: una imagen es casi siempre una foto de referencia
+   * para cotizar (`cotizacion_compleja`), y un audio es un medio que el bot no puede leer
+   * (`medio_no_soportado`). Tratarlos igual mandaría a la Encargada el motivo equivocado.
+   */
+  tipoCrudoDeMeta?: string;
   ocurridoEn: Date;
+}
+
+/**
+ * Acuse que se manda cuando llega un medio que el bot no puede procesar.
+ *
+ * ⚠️ **La conversación NO puede quedarse en silencio.** Era un defecto real: una clienta mandaba
+ * una foto de la manicura que quería y recibía nada — el mensaje quedaba en la bandeja y, hasta
+ * que alguien la abriera, para ella el salón simplemente no contestaba. El acuse no resuelve su
+ * petición, pero le dice que llegó y que alguien la va a ver.
+ *
+ * Es texto fijo y corto a propósito: va por **texto libre**, así que solo puede enviarse con la
+ * ventana de 24 h abierta — y acaba de escribir, así que lo está.
+ */
+export const ACUSE_DE_MEDIO_NO_PROCESABLE =
+  'Recibimos tu mensaje. Una encargada lo revisa en breve y te responde por aquí.';
+
+/**
+ * Resultado de la parte transaccional, con lo que hace falta para los efectos posteriores.
+ *
+ * Existe porque la decisión se toma **dentro** de la transacción (necesita la conversación
+ * actualizada) pero los envíos ocurren **fuera** (son llamadas de red). Este tipo es lo que cruza
+ * esa frontera.
+ */
+interface ResultadoInterno extends ResultadoDeRecepcion {
+  pendiente: {
+    conversacion: Conversacion;
+    motivoForzado: MotivoDeEscalamiento | null;
+    yaEstabaEscalada: boolean;
+    bloqueada: boolean;
+  };
 }
 
 export interface ResultadoDeRecepcion {
@@ -30,6 +73,10 @@ export interface ResultadoDeRecepcion {
    * sin respuesta automática.
    */
   enSilencioPorBloqueo: boolean;
+  /** Motivo con el que quedó escalada, o `null` si la sigue llevando el bot. */
+  motivo: MotivoDeEscalamiento | null;
+  /** `true` si el bot atendió el turno y respondió. */
+  atendidaPorElBot: boolean;
 }
 
 /**
@@ -62,6 +109,9 @@ export class RecibirMensajeUseCase {
   constructor(
     @Inject(CONVERSACION_REPOSITORY) private readonly conversaciones: ConversacionRepository,
     @Inject(CONTEXTO_CLIENTA_DE_CONVERSACION_PORT) private readonly clientas: ContextoClientaDeConversacionPort,
+    @Inject(NOTIFICADOR_ESCALAMIENTO_PORT) private readonly avisoAlPersonal: NotificadorEscalamientoPort,
+    private readonly enviarAcuse: EnviarMensajeDelBotUseCase,
+    @Inject(ORQUESTADOR_DE_BOT_PORT) private readonly orquestador: OrquestadorDeBotPort,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
   ) {}
@@ -81,10 +131,10 @@ export class RecibirMensajeUseCase {
         `Webhook de un phone_number_id no mapeado a ninguna sucursal: ${entrante.phoneNumberId}. ` +
           'El mensaje se descarta. Da de alta el número en `conversaciones.numeros_de_sucursal`.',
       );
-      return { procesado: false, conversacionId: null, escalada: false, enSilencioPorBloqueo: false };
+      return { procesado: false, conversacionId: null, escalada: false, enSilencioPorBloqueo: false, motivo: null, atendidaPorElBot: false };
     }
 
-    return this.unitOfWork.ejecutar(async () => {
+    const resultado = await this.unitOfWork.ejecutar(async (): Promise<ResultadoInterno | null> => {
       const conversacion =
         (await this.conversaciones.buscarPorSucursalYTelefono(sucursalId, entrante.telefonoClienta)) ??
         Conversacion.abrir({ sucursalId, telefonoClienta: entrante.telefonoClienta });
@@ -115,16 +165,28 @@ export class RecibirMensajeUseCase {
 
       if (!esNuevo) {
         this.logger.log(`Reintento de Meta con wamid ya procesado (${entrante.wamid}): se ignora sin efectos.`);
-        return { procesado: false, conversacionId: conversacion.id, escalada: false, enSilencioPorBloqueo: false };
+        // `null` = nada que hacer fuera de la transacción. Un reintento no envía acuses, no avisa
+        // al personal y no invoca al bot: es exactamente lo que la idempotencia promete.
+        return null;
       }
 
       // El mensaje era nuevo: ahora sí se mueve la ventana de 24 h y el contador.
       conversacion.registrarEntrante(entrante.ocurridoEn);
 
+      const yaEstabaEscalada = !conversacion.laLlevaElBot;
       const bloqueada = await this.vincularYDetectarBloqueo(conversacion);
-      if (bloqueada) {
-        conversacion.escalarAHumano('clienta_bloqueada', entrante.ocurridoEn);
-      }
+
+      /**
+       * Orden de decisión, y cada paso excluye al siguiente:
+       *
+       * 1. **Clienta bloqueada** → `humano` en silencio. Gana sobre todo lo demás: el bot no debe
+       *    atenderla y no se le dice por qué.
+       * 2. **Medio que el bot no puede leer** → `humano` con acuse. No puede quedarse en silencio.
+       * 3. **Ya estaba en `humano`** → el bot no interviene (`RN-ESC-03`, cero interferencia).
+       * 4. **Modo `bot` y texto** → lo atiende el orquestador.
+       */
+      const motivoForzado = this.motivoForzadoDe(entrante, bloqueada);
+      if (motivoForzado) conversacion.escalarAHumano(motivoForzado, entrante.ocurridoEn);
 
       await this.conversaciones.guardar(conversacion);
 
@@ -140,7 +202,7 @@ export class RecibirMensajeUseCase {
           accion: 'recibir_mensaje_entrante',
           wamid: entrante.wamid,
           tipo: entrante.tipo,
-          escaladaPorBloqueo: bloqueada,
+          motivoForzado,
           modo: conversacion.modo,
         },
       });
@@ -148,10 +210,138 @@ export class RecibirMensajeUseCase {
       return {
         procesado: true,
         conversacionId: conversacion.id,
-        escalada: conversacion.modo === 'humano',
+        escalada: !conversacion.laLlevaElBot,
         enSilencioPorBloqueo: bloqueada,
+        motivo: conversacion.motivoDeEscalamiento,
+        atendidaPorElBot: false,
+        // Lo que queda por hacer FUERA de la transacción: ver `efectosPosteriores`.
+        pendiente: { conversacion, motivoForzado, yaEstabaEscalada, bloqueada },
       };
     });
+
+    if (!resultado) {
+      return { procesado: false, conversacionId: null, escalada: false, enSilencioPorBloqueo: false, motivo: null, atendidaPorElBot: false };
+    }
+
+    return this.efectosPosteriores(resultado, entrante);
+  }
+
+  /**
+   * Lo que ocurre **después de cerrar la transacción**: enviar el acuse, avisar al personal y
+   * delegar en el bot.
+   *
+   * POR QUÉ FUERA. Las tres cosas son llamadas de red (WhatsApp, el futuro canal de avisos, y el
+   * LLM). Una transacción abierta esperando a un tercero mantiene bloqueos sobre la conversación,
+   * y ninguna de las tres se deshace con un `ROLLBACK`: un mensaje enviado ya está enviado. Si
+   * fallan, el mensaje entrante **ya está guardado y la conversación ya está escalada**, que es lo
+   * que no se puede perder.
+   */
+  private async efectosPosteriores(resultado: ResultadoInterno, entrante: MensajeEntrante): Promise<ResultadoDeRecepcion> {
+    const { conversacion, motivoForzado, yaEstabaEscalada, bloqueada } = resultado.pendiente;
+    const base = {
+      procesado: resultado.procesado,
+      conversacionId: resultado.conversacionId,
+      escalada: resultado.escalada,
+      enSilencioPorBloqueo: resultado.enSilencioPorBloqueo,
+      motivo: resultado.motivo,
+      atendidaPorElBot: false,
+    };
+
+    // (1) Bloqueada: silencio absoluto. Ni acuse, ni bot. Solo el aviso al personal.
+    if (bloqueada) {
+      await this.avisar(conversacion, 'clienta_bloqueada', yaEstabaEscalada);
+      return base;
+    }
+
+    // (2) Medio no procesable: acuse para que no se quede en silencio.
+    if (motivoForzado === 'cotizacion_compleja' || motivoForzado === 'medio_no_soportado') {
+      await this.acusarRecibo(conversacion, entrante.ocurridoEn);
+      await this.avisar(conversacion, motivoForzado, yaEstabaEscalada);
+      return base;
+    }
+
+    // (3) Ya la llevaba una persona: el bot NO interviene (`RN-ESC-03`). Solo se avisa de que
+    // llegó algo nuevo, que es justo lo que el personal necesita saber.
+    if (yaEstabaEscalada) {
+      await this.avisar(conversacion, conversacion.motivoDeEscalamiento ?? 'intervencion_manual', true);
+      return base;
+    }
+
+    // (4) Modo `bot`: lo atiende el orquestador.
+    const turno = await this.atenderConElBot(conversacion, entrante);
+    if (turno.escalo) {
+      // El motivo viene del resultado del turno, no de `conversacion`: esa copia se cargó antes de
+      // que el bot escalara sobre la suya. Ver la nota de `ResultadoDelTurno.motivo`.
+      await this.avisar(conversacion, turno.motivo ?? 'fuera_de_alcance', false);
+    }
+
+    return { ...base, escalada: turno.escalo || base.escalada, atendidaPorElBot: turno.respondio };
+  }
+
+  /**
+   * Motivo que **obliga** a escalar sin consultar al bot, o `null` si el bot puede atenderlo.
+   *
+   * La distinción entre imagen y audio no es cosmética: una imagen es casi siempre una foto de
+   * referencia para cotizar un diseño (`DEC-033` → `cotizacion_compleja`, que es lo que la
+   * Encargada necesita leer en la bandeja para saber que hay que poner precio), y un audio es
+   * simplemente algo que el bot no puede oír (`RN-CONV-06` → `medio_no_soportado`). Mandar el
+   * motivo equivocado haría que la Dueña viera "cotizaciones complejas" donde solo hubo notas de
+   * voz, y esa estadística es la que usa para saber qué se le escapa al bot.
+   */
+  private motivoForzadoDe(entrante: MensajeEntrante, bloqueada: boolean): MotivoDeEscalamiento | null {
+    if (bloqueada) return 'clienta_bloqueada';
+    if (entrante.tipo === 'texto' && entrante.contenido !== null) return null;
+    return entrante.tipoCrudoDeMeta === 'image' ? 'cotizacion_compleja' : 'medio_no_soportado';
+  }
+
+  /** El acuse va por texto libre, posible porque la clienta acaba de escribir. */
+  private async acusarRecibo(conversacion: Conversacion, ocurridoEn: Date): Promise<void> {
+    try {
+      await this.enviarAcuse.ejecutar(
+        // `esAcuse: true`: decirle *"no puedo leer notas de voz"* **no atiende** su nota de voz. Si
+        // esto limpiara `mensajes_sin_responder`, la conversación saldría del contador de
+        // escaladas pendientes y el audio se quedaría sin escuchar.
+        { conversacionId: conversacion.id, texto: ACUSE_DE_MEDIO_NO_PROCESABLE, esAcuse: true },
+        ocurridoEn,
+      );
+    } catch (error) {
+      // No propaga: el mensaje ya está guardado y la conversación ya está escalada. Perder el
+      // acuse deja a la clienta sin confirmación, pero no pierde su mensaje.
+      this.logger.error(
+        `No se pudo enviar el acuse de recibo en la conversación ${conversacion.id}.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  private async avisar(conversacion: Conversacion, motivo: MotivoDeEscalamiento, yaEstabaEscalada: boolean): Promise<void> {
+    try {
+      await this.avisoAlPersonal.conversacionNecesitaHumano({
+        conversacionId: conversacion.id,
+        sucursalId: conversacion.sucursalId,
+        motivo,
+        yaEstabaEscalada,
+        mensajesSinResponder: conversacion.mensajesSinResponder,
+      });
+    } catch (error) {
+      // Nunca propaga: la conversación ya necesita a una persona. Perder el aviso es peor
+      // atendido, no incorrecto.
+      this.logger.error('No se pudo avisar al personal del escalamiento.', error instanceof Error ? error.stack : String(error));
+    }
+  }
+
+  private async atenderConElBot(conversacion: Conversacion, entrante: MensajeEntrante) {
+    try {
+      return await this.orquestador.atenderTurno({ conversacion, texto: entrante.contenido, ocurridoEn: entrante.ocurridoEn });
+    } catch (error) {
+      // Un fallo del bot **no pierde el mensaje**: ya está en la bandeja. Lo que se pierde es la
+      // respuesta automática, y eso lo cubre una persona.
+      this.logger.error(
+        `El orquestador del bot falló en la conversación ${conversacion.id}; el mensaje queda en la bandeja.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return { respondio: false, escalo: false };
+    }
   }
 
   /**
