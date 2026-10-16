@@ -5,6 +5,20 @@ import { Intencion, TipoDeIntencion } from '../../domain/intencion';
 /** Modelo por defecto. Explícito: dejarlo implícito haría que cambiara sin aviso. */
 export const MODELO_POR_DEFECTO = 'gpt-4o-mini';
 
+/**
+ * Tope de espera de la llamada al modelo. **No es una optimización: es una mitigación de `F-27`.**
+ *
+ * El procesamiento del webhook de Meta es **síncrono** (`ADR-028`), así que esta llamada ocurre
+ * dentro del ciclo de petición del webhook. Un `fetch` sin timeout puede quedarse colgado hasta el
+ * timeout de TCP —decenas de segundos—, y durante todo ese tiempo Meta ya habría desistido y
+ * estaría reintentando el mismo evento.
+ *
+ * Con 8 segundos, lo peor que pasa es que el turno degrade a `desconocida` y la conversación pase
+ * a una persona, que es el comportamiento seguro que el adaptador ya tiene para cualquier fallo.
+ * **Es preferible escalar a tiempo que responder tarde.**
+ */
+export const TIMEOUT_DE_OPENAI_MS = 8_000;
+
 const TIPOS_VALIDOS: readonly TipoDeIntencion[] = [
   'saludo',
   'consultar_servicios',
@@ -85,6 +99,8 @@ export class OpenAiAgenteAdapter implements AgenteConversacionalPort {
     try {
       const respuesta = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
+        // Ver `TIMEOUT_DE_OPENAI_MS`: sin esto, un cuelgue de red bloquea el webhook de Meta.
+        signal: AbortSignal.timeout(TIMEOUT_DE_OPENAI_MS),
         headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: this.modelo,
@@ -124,7 +140,16 @@ export class OpenAiAgenteAdapter implements AgenteConversacionalPort {
        * `desconocida` + confianza 0, la conversación pasa a una persona — exactamente lo que debe
        * pasar cuando el intérprete no está disponible.
        */
-      this.logger.error('Fallo al consultar OpenAI; la conversación se escalará.', error instanceof Error ? error.stack : String(error));
+      // Un `AbortError` por timeout llega por aquí igual que una caída: el tratamiento es el mismo
+      // y es el correcto — escalar. Se distingue en el log porque la causa y la acción difieren:
+      // un timeout recurrente pide revisar el modelo o encolar; una caída, esperar.
+      const esTimeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+      this.logger.error(
+        esTimeout
+          ? `OpenAI no respondió en ${TIMEOUT_DE_OPENAI_MS} ms; la conversación se escalará. Si se repite, revisar ADR-028.`
+          : 'Fallo al consultar OpenAI; la conversación se escalará.',
+        error instanceof Error ? error.stack : String(error),
+      );
       return { tipo: 'desconocida', confianza: 0 };
     }
   }

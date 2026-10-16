@@ -2,10 +2,62 @@ import 'reflect-metadata';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { json, urlencoded } from 'express';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './shared/errors/http-exception.filter';
 import { correlationIdMiddleware } from './shared/correlation-id.middleware';
+
+/**
+ * CORS **por lista explícita de orígenes**, nunca abierto.
+ *
+ * ## POR QUÉ NO BASTA `app.enableCors()`
+ *
+ * Esa llamada sin argumentos responde `Access-Control-Allow-Origin: *`, y aquí eso sería un
+ * problema concreto: la API se autentica con un JWT que el frontend manda en una cabecera, así que
+ * **cualquier página web podría pedirle datos a Blanc usando el token de una Encargada que tuviera
+ * el panel abierto**. No es un riesgo teórico — es el ataque que CORS existe para impedir.
+ *
+ * ## CÓMO SE COMPORTA SEGÚN EL ENTORNO
+ *
+ * - **Con `CORS_ORIGIN`**: lista separada por comas. Es lo que se configura en Railway.
+ * - **Sin `CORS_ORIGIN` y en desarrollo**: se permite el Vite local (`localhost:5173`), porque es
+ *   el único caso en que frontend y backend están en puertos distintos.
+ * - **Sin `CORS_ORIGIN` y en producción**: **CORS queda desactivado por completo**, y es
+ *   deliberado. El despliegue previsto sirve los estáticos del frontend **desde el mismo origen**
+ *   que la API (`ADR-027`), así que no hace falta ningún CORS: si el panel funciona, es que el
+ *   origen es el mismo. Y si algún día se separan, lo que falla es la petición del navegador con
+ *   un mensaje de CORS claro — **no una API abierta al mundo en silencio**. Fallar cerrado.
+ *
+ * El webhook de Meta no se ve afectado: es una petición servidor-a-servidor, y CORS solo aplica a
+ * navegadores.
+ */
+function configurarCors(app: Awaited<ReturnType<typeof NestFactory.create>>): void {
+  const configurados = (process.env.CORS_ORIGIN ?? '')
+    .split(',')
+    .map((origen) => origen.trim())
+    .filter((origen) => origen.length > 0);
+
+  const esProduccion = process.env.NODE_ENV === 'production';
+  const origenes = configurados.length > 0 ? configurados : esProduccion ? [] : ['http://localhost:5173'];
+
+  if (origenes.length === 0) {
+    new Logger('Bootstrap').log('CORS desactivado: se asume el frontend servido desde el mismo origen. Usa CORS_ORIGIN si no es el caso.');
+    return;
+  }
+
+  app.enableCors({
+    origin: origenes,
+    // `Authorization` porque el JWT va ahí; `x-correlation-id` porque el frontend puede
+    // propagarlo para que un fallo sea rastreable entre las dos mitades.
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    // `false` a propósito: no se usan cookies, el token viaja en la cabecera. Ponerlo en `true`
+    // ampliaría la superficie sin que nada lo necesite.
+    credentials: false,
+    maxAge: 86_400,
+  });
+  new Logger('Bootstrap').log(`CORS activo para: ${origenes.join(', ')}`);
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -27,6 +79,8 @@ async function bootstrap() {
   };
   app.use(json({ verify: capturarCuerpoCrudo }));
   app.use(urlencoded({ extended: true, verify: capturarCuerpoCrudo }));
+
+  configurarCors(app);
 
   app.use(correlationIdMiddleware);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));

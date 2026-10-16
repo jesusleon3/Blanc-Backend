@@ -17,7 +17,7 @@ import {
 } from './dto/anticipo.dto';
 import { Anticipo } from '../../domain/entities/anticipo.entity';
 
-const anticipoAJson = (anticipo: Anticipo) => ({
+export const anticipoAJson = (anticipo: Anticipo) => ({
   id: anticipo.id,
   citaId: anticipo.citaId,
   clientaId: anticipo.clientaId,

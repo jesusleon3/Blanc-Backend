@@ -7,7 +7,7 @@ import { ConsultarDisponibilidadUseCase } from '../../application/use-cases/cons
 import { CrearSillaDto } from './dto/agendar-cita.dto';
 import { Silla } from '../../domain/entities/silla.entity';
 
-const sillaAJson = (silla: Silla) => ({
+export const sillaAJson = (silla: Silla) => ({
   id: silla.id,
   sucursalId: silla.sucursalId,
   nombre: silla.nombre,

@@ -6,7 +6,7 @@ Este archivo guía a Claude Code (claude.ai/code) al trabajar en este repositori
 
 Blanc es una plataforma de agendamiento de citas para un salón de uñas de 3 sucursales (próximamente 4), impulsada por WhatsApp y asistida por IA. El diseño de dominio está hecho y **la implementación está en curso**: existe un backend real en `backend/` y un frontend real en `frontend/` (ver las secciones *Trabajar en el código* más abajo). `mockup/` es un prototipo visual comercial **sin backend**, se puede borrar entero, y es la fuente de los tokens de diseño que usa el frontend. La documentación de `docs/` sigue siendo autoritativa sobre el código en materia de reglas de negocio y decisiones de arquitectura.
 
-**Arquitectura:** propuesta y en gran parte congelada, pero **no cerrada formalmente todavía**. `docs/ARCHITECTURE_CLOSURE_PLAN.md` define los pendientes exactos (P1-P10) que faltan para el cierre — a la fecha (2026-10-16) están `Resueltos` `P1`, `P2`, **`P3`**, `P4`, `P5`, `P7` y `P9`; siguen `Abierto` solo `P6`, `P8` y `P10`. **Los tres bloqueadores no negociables del plan (`P3`, `P4`, `P5`) están resueltos.** No debe iniciarse implementación (Fase 1) hasta que ese documento lo autorice (su propia "Definition of Ready" es la autorización formal, no se requiere un documento adicional).
+**Arquitectura:** propuesta y en gran parte congelada, pero **no cerrada formalmente todavía**. **Arquitectura CERRADA (2026-10-16):** los diez puntos de `docs/ARCHITECTURE_CLOSURE_PLAN.md` están cerrados. Tres se cerraron de forma que conviene leer antes de asumir nada: `P6` con `ADR-028` **aceptando una desviación declarada** del hallazgo `F-27` (el webhook procesa síncrono, no con cola) y `ADR-029`; `P8` **generando el contrato del código** en vez de escribirlo a mano; y `P10` **diferido post-MVP, no resuelto**. Siguen abiertos, y no son técnicos: el valor de retención conversacional (`ADR-029`), el tope de gasto de IA (`F-07`) y las plantillas de Meta aprobadas (`N-14` documentado). **Los tres bloqueadores no negociables del plan (`P3`, `P4`, `P5`) están resueltos.** No debe iniciarse implementación (Fase 1) hasta que ese documento lo autorice (su propia "Definition of Ready" es la autorización formal, no se requiere un documento adicional).
 
 **Propagación de Discovery Checklist:** el proyecto completó una ronda de validación con la Dueña (`DISCOVERY_CHECKLIST.md`, 2026-08-03/04) que respondió 31 preguntas de negocio pendientes. Esas respuestas se están propagando sistemáticamente hacia el resto de la documentación siguiendo `docs/MASTER_PROPAGATION_PLAN.md` (documento de trabajo temporal, no funcional) — 11 de 12 pasos de ese roadmap ya están completos.
 
@@ -37,6 +37,9 @@ NestJS + TypeScript, Modular Monolith (`ADR-001`), Hexagonal + Clean + Vertical 
 | **Una prueba** | `npx jest ruta/al/archivo.spec.ts -t "fragmento del nombre"` |
 | Generar migración | `npm run db:generate` |
 | Verificar migraciones | `npx drizzle-kit check` |
+| **Seed idempotente** | `npm run db:seed` (ver variables en `.env.example`) |
+| **Regenerar el contrato de API** | `npm run contrato:actualizar` |
+| Arranque de producción | `npm run start:prod` |
 | Ciclos de dependencias | `npx madge --circular --extensions ts src/` |
 
 **Las pruebas necesitan Docker.** No hay base en memoria: `pg-mem` se eliminó tras comprobar que no soporta `tstzrange`, `EXCLUDE USING gist` ni `btree_gist` — es decir, no puede ejecutar el invariante central del sistema. Se usan **Testcontainers** con `postgres:16-alpine`: un contenedor por corrida, **una base por worker de Jest**, y **las migraciones son el DDL**. Si Docker no corre, las pruebas fallan con *"Could not find a working container runtime strategy"*; `test/global-setup.js` sondea los sockets de OrbStack/Colima/Rancher/Docker Desktop además de `/var/run/docker.sock`.
@@ -57,12 +60,29 @@ NestJS + TypeScript, Modular Monolith (`ADR-001`), Hexagonal + Clean + Vertical 
 - **El dinero son `Centavos`**, un *branded type* (`RN-COT-07`). Nunca un `number` suelto ni coma flotante.
 - `jose` está fijado en `^5.10.0` **a propósito**: la v6 es solo ESM y rompe el runtime CommonJS.
 
+### El contrato de API está verificado entre los dos proyectos (`P8`)
+
+`contratos/api-v1.json` se **deriva del código** (80 rutas con sus roles desde los metadatos de Nest, 12 formas de respuesta invocando los presenters reales) y lo verifican los **dos** proyectos.
+
+- **Si cambias un presenter, un DTO, una ruta o un `@Roles`, la prueba falla** hasta que corras `npm run contrato:actualizar`. Eso es deliberado: así el cambio aparece en el diff de un commit en vez de inadvertido.
+- **Un campo que desaparezca del backend rompe el build del frontend**, porque `tsc` allí obliga a que `claves-del-contrato.ts` coincida con las interfaces, y una prueba compara esos arreglos con este JSON.
+- Verifica además tres invariantes que ninguna prueba de módulo puede ver: que **toda ruta declara sus roles** (sin `@Roles`, `RolesGuard` deja pasar a cualquier autenticado), que **ninguna escritura está abierta a `MANICURISTA` ni `SOLO_LECTURA`**, y que la forma de `Cita` del iPad es un **subconjunto estricto** de la de operación.
+
+### Despliegue y operación
+
+- **El seed es idempotente, y eso incluye NO reimponer valores de fábrica**: no pisa un horario ajustado a mano ni reactiva una silla desactivada. *Idempotente* significa "no cambia el resultado", no "reescribe el valor por defecto".
+- **CORS nunca responde `*`.** Sin `CORS_ORIGIN` en producción queda desactivado, asumiendo el mismo origen (`ADR-027`). Falla cerrado.
+- **Dos interruptores de rollback por entorno**: `PLANIFICADOR_ACTIVO=false` y `BOT_ACTIVO=false`. **Ninguno se apaga quitando su módulo** — el contenedor no arrancaría (`ADR-026`).
+- **El orden de puesta en marcha no es negociable**: `docs/operations/GO_LIVE_RUNBOOK.md`. Migrar un número a la Cloud API **lo desconecta de la app de WhatsApp Business inmediatamente**; si la Bandeja no está viva, el salón se queda incomunicado.
+- **Nada está verificado contra Supabase, Meta, OpenAI ni Railway reales.** No hay credenciales en este entorno; está declarado en `ADR-024`, `ADR-008`, `ADR-027` y `ADR-028`.
+
 ### Canal de WhatsApp (`DEC-043`, `ADR-008` Enmienda 1)
 
 Cloud API oficial de Meta en exclusiva. Lo que hay que saber antes de tocarlo:
 
 - **El webhook es `@Public()` y se autentica por firma HMAC** (`X-Hub-Signature-256`). El HMAC se calcula sobre el **cuerpo crudo** que captura `main.ts`; reserializar el JSON parseado rompe la firma. Si falta `rawBody`, se trata como firma inválida — nunca como "no se pudo comprobar".
 - **El webhook responde siempre `200` salvo firma inválida.** Meta reintenta ante cualquier no-2xx: un `500` convierte un evento defectuoso en un bucle.
+- **El webhook procesa SÍNCRONO, incluida la llamada al modelo** (`ADR-028`). Es una desviación aceptada del hallazgo `F-27` (`Critical`), no un descuido: la duplicación —el daño más grave previsto— es imposible por el índice único sobre `wamid`, y el trabajo que no puede perderse va por el Planificador. **Tiene tres criterios de reapertura medibles**; si los logs muestran reintentos de Meta sobre mensajes ya procesados, hay que leer esa ADR antes de tocar nada.
 - **Idempotencia por `wamid`**, impuesta por índice único parcial. Para insertar de forma idempotente **dentro de una transacción** usa `ON CONFLICT DO NOTHING`, **no** `try/catch` sobre el `23505`: un statement que falla aborta la transacción entera (`25P02`) y el error sale igual en el `COMMIT`.
 - **Ventana de 24 h de Meta** (`N-14`): pasadas 24 h desde el último mensaje de la clienta solo se puede enviar una **plantilla aprobada**. Se valida en el dominio **antes** de llamar a Meta.
 - **El webhook pasa el `type` CRUDO de Meta** (`tipoCrudoDeMeta`) además del normalizado: `TipoMensaje` colapsa imagen y audio en `no_soportado`, y el dominio necesita distinguirlos (una foto es `cotizacion_compleja`, una nota de voz `medio_no_soportado`). El desglose por motivo es lo que la Dueña mira para saber qué se le escapa al bot.

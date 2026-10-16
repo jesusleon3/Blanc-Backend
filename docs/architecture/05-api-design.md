@@ -14,6 +14,38 @@
 
 ---
 
+## 0 bis. Cierre de `P8` (2026-10-16) — los contratos concretos están DERIVADOS DEL CÓDIGO, no escritos aquí
+
+Este documento se escribió con alcance deliberadamente parcial: las convenciones transversales sí, los contratos de cada endpoint no. `P8` quedó abierto por eso, con este criterio de cierre: *"existe, con contratos versionados por URI, formato de error consistente y contrato de autenticación acorde a P1/P2… los contratos concretos de cada módulo, no"*.
+
+**Se cierra de una forma distinta a la prevista, y conviene explicar por qué.**
+
+La previsión era redactar aquí, módulo por módulo, el contrato de cada endpoint. El problema de hacerlo así es conocido y se materializó en este proyecto: un documento con 80 endpoints escritos a mano **se desactualiza en el primer cambio que nadie recuerde reflejar**, y entonces es peor que no tenerlo, porque alguien lo lee y le cree. `ADR-027` ya había registrado la misma deuda desde el otro lado: *"los tipos del contrato están duplicados a mano, backend y frontend… el riesgo es deriva silenciosa"*.
+
+**El contrato concreto vive en `contratos/api-v1.json`, y se genera del código:**
+
+| Qué contiene | De dónde sale |
+|---|---|
+| Las **80 rutas** con su método, su ruta completa y **los roles que declara cada una** | Los metadatos de Nest (`PATH_METADATA`, `METHOD_METADATA`) y el decorador `@Roles`, leídos de los controladores reales |
+| Las **12 formas de respuesta**, campo por campo | **Invocando los presenters reales** sobre entidades reales |
+
+Y está verificado por los dos lados:
+
+- `backend/src/contrato/contrato-de-api.spec.ts` — compara el contrato derivado del código con el archivo versionado. Cualquier cambio de ruta, de rol o de campo **falla** hasta que alguien regenere el archivo con `npm run contrato:actualizar`. Entonces el cambio aparece en el diff de un commit, revisable.
+- `frontend/src/api/contrato.spec.ts` — lee **ese mismo archivo** y lo compara con los tipos del frontend, que `tsc` a su vez obliga a coincidir con los arreglos de claves declarados. **Un campo que desaparezca del backend rompe el build del frontend.**
+
+Tres invariantes transversales que ninguna prueba de módulo podía verificar y que ahora sí se verifican:
+
+1. **Toda ruta declara sus roles**, salvo una lista corta de exenciones enumeradas. Sin `@Roles`, `RolesGuard` deja pasar a cualquier autenticado: una ruta nueva sin decorador no falla, no avisa, y queda abierta a los 7 roles. Es el descuido de seguridad más fácil de cometer aquí.
+2. **Ninguna ruta de escritura es accesible a `MANICURISTA` ni a `SOLO_LECTURA`.** Cada E2E verifica su propio `403`; nadie verificaba que *no exista ninguna*.
+3. **La forma de `Cita` para la vista de iPad es un subconjunto estricto** de la de operación, y `clientaId` y `enListaRoja` siguen fuera (`DEC-040`).
+
+**Lo que este documento sigue siendo:** la fuente de las **convenciones** (versionado, formato de error, autenticación, RBAC, claims, idempotencia, validación, códigos HTTP, nombres, compatibilidad). Son decisiones que no se pueden derivar del código porque son anteriores a él. **Lo que ya no pretende ser** es el inventario de endpoints: ese se genera.
+
+> **Camino natural si hiciera falta OpenAPI:** el generador (`backend/src/contrato/`) ya recorre controladores y presenters. Emitir OpenAPI en vez de —o además de— este JSON es una ampliación de ese generador, no un documento nuevo que mantener a mano. Y entonces los tipos del frontend se generarían de ahí, cerrando del todo la deuda que `ADR-027` declaró.
+
+---
+
 ## 1. Versionado de API
 
 **Firme — heredado de `ADR-014`, sin reabrir.** Toda la API (interna y, en el futuro, pública) se versiona por URI desde el primer endpoint: prefijo `/v1`. `ADR-014` ya establece que la API interna (consumida por el frontend/plataforma) y una futura API pública son contratos distintos aunque compartan implementación al inicio — este documento no diseña la API pública, solo dejar el prefijo de versión ya presente evita una migración de ruta después.

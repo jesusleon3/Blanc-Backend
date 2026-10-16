@@ -1,0 +1,787 @@
+{
+  "descripcion": "Contrato de la API /v1 de Blanc, DERIVADO DEL CÓDIGO por `src/contrato/construir-contrato.ts`. No se edita a mano: se regenera con `npm run contrato:actualizar` cuando un cambio de ruta, de rol o de campo es intencionado. Lo verifican `backend/src/contrato/contrato-de-api.spec.ts` y `frontend/src/api/contrato.spec.ts`.",
+  "version": "v1",
+  "rutas": [
+    {
+      "metodo": "GET",
+      "ruta": "/health",
+      "roles": null
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/agenda/citas",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "MANICURISTA",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/:id/cancelar",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/:id/completar",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/:id/confirmar",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/:id/manicurista",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/:id/no-show",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/:id/reprogramar",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/:id/solicitar-confirmacion",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/agenda/disponibilidad",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/agenda/lista-espera",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/lista-espera",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "DELETE",
+      "ruta": "/v1/agenda/lista-espera/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/lista-espera/:id/aceptar",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/lista-espera/avanzar-turno",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/agenda/sillas",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/sillas",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/sillas/:id/desactivar",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/anticipos",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/anticipos",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/anticipos/:id/confirmar-pago",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/anticipos/:id/expirar",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/anticipos/de-cita/:citaId",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/catalogo-y-cotizacion/modificadores-diseno",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "RECEPCIONISTA",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/catalogo-y-cotizacion/modificadores-diseno",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "PATCH",
+      "ruta": "/v1/catalogo-y-cotizacion/modificadores-diseno/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/catalogo-y-cotizacion/modificadores-diseno/:id/desactivar",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "RECEPCIONISTA",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "PATCH",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios/:id/desactivar",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios/:id/modificadores",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "RECEPCIONISTA",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "DELETE",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios/:id/modificadores/:modificadorId",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios/:id/modificadores/:modificadorId",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/conversaciones",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/conversaciones/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/conversaciones/:id/devolver-al-bot",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/conversaciones/:id/escalar",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/conversaciones/:id/mensajes",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/conversaciones/:id/plantilla",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/conversaciones/escaladas/pendientes",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/conversaciones/numeros",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/conversaciones/plantillas",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/crm/clientas",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/crm/clientas",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/crm/clientas/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/crm/clientas/:id/estado-de-riesgo",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/crm/clientas/:id/telefono",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/crm/clientas/por-telefono-anterior",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/identidad-y-accesos/usuarios",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "PATCH",
+      "ruta": "/v1/identidad-y-accesos/usuarios/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/identidad-y-accesos/usuarios/:id/desactivar",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/identidad-y-accesos/usuarios/:id/provisionar",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "DELETE",
+      "ruta": "/v1/identidad-y-accesos/usuarios/:id/sucursales/:sucursalId",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/identidad-y-accesos/usuarios/:id/sucursales/:sucursalId",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/identidad-y-accesos/usuarios/yo",
+      "roles": null
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/planificador",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/planificador/barridos/:nombre",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/sucursales-y-personal/excepciones",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "DELETE",
+      "ruta": "/v1/sucursales-y-personal/excepciones/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/excepciones/ausencias",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/excepciones/coberturas",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/sucursales-y-personal/manicuristas",
+      "roles": null
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/manicuristas",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/manicuristas/:id/desactivar",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "DELETE",
+      "ruta": "/v1/sucursales-y-personal/manicuristas/:id/sucursales/:sucursalId",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/manicuristas/:id/sucursales/:sucursalId",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/mantenimiento/activar-global",
+      "roles": [
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/mantenimiento/desactivar-global",
+      "roles": [
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/sucursales-y-personal/sucursales",
+      "roles": null
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/sucursales",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/sucursales-y-personal/sucursales/:id",
+      "roles": null
+    },
+    {
+      "metodo": "PATCH",
+      "ruta": "/v1/sucursales-y-personal/sucursales/:id",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/sucursales/:id/activar-mantenimiento",
+      "roles": [
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/sucursales/:id/desactivar-mantenimiento",
+      "roles": [
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/sucursales-y-personal/sucursales/:id/dias-festivos",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "DELETE",
+      "ruta": "/v1/sucursales-y-personal/sucursales/dias-festivos/:diaFestivoId",
+      "roles": [
+        "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/webhooks/meta",
+      "roles": null
+    },
+    {
+      "metodo": "POST",
+      "ruta": "/v1/webhooks/meta",
+      "roles": null
+    }
+  ],
+  "respuestas": {
+    "Cita (roles de operación)": [
+      "citaOrigenId",
+      "clientaId",
+      "clientaNombre",
+      "cotizacionSnapshot",
+      "enListaRoja",
+      "estado",
+      "fin",
+      "id",
+      "inicio",
+      "manicuristaId",
+      "numeroDeReprogramaciones",
+      "servicioId",
+      "sillaId",
+      "sucursalId"
+    ],
+    "Cita (MANICURISTA / iPad)": [
+      "clientaNombre",
+      "cotizacionSnapshot",
+      "estado",
+      "fin",
+      "id",
+      "inicio",
+      "manicuristaId",
+      "servicioId",
+      "sillaId",
+      "sucursalId"
+    ],
+    "Silla": [
+      "activa",
+      "id",
+      "nombre",
+      "sucursalId"
+    ],
+    "SolicitudListaEspera": [
+      "citaId",
+      "clientaId",
+      "creadoEn",
+      "estado",
+      "expiraEn",
+      "fecha",
+      "id",
+      "notificadaEn",
+      "servicioId",
+      "sucursalId"
+    ],
+    "Anticipo": [
+      "citaId",
+      "clientaId",
+      "confirmadoEn",
+      "confirmadoPor",
+      "creadoEn",
+      "estado",
+      "id",
+      "montoCentavos",
+      "porcentajeAplicado",
+      "referenciaPago"
+    ],
+    "Clienta": [
+      "cancelacionesOrdinarias",
+      "creadoEn",
+      "estadoDeRiesgo",
+      "id",
+      "nombre",
+      "sugeridaListaRoja",
+      "telefono",
+      "telefonoAnterior"
+    ],
+    "Conversacion": [
+      "clientaId",
+      "creadoEn",
+      "escaladaEn",
+      "id",
+      "mensajesSinResponder",
+      "modo",
+      "motivoDeEscalamiento",
+      "sucursalId",
+      "telefonoClienta",
+      "ultimaInteraccionEntranteEn",
+      "ultimoMensajeEn"
+    ],
+    "ExcepcionPersonal": [
+      "fin",
+      "id",
+      "inicio",
+      "manicuristaId",
+      "motivo",
+      "sucursalId",
+      "tipo"
+    ],
+    "Servicio": [
+      "activo",
+      "categoria",
+      "duracionBaseMinutos",
+      "id",
+      "nombre",
+      "precioBaseCentavos",
+      "requiereCotizacionManual"
+    ],
+    "Sucursal": [
+      "descansos",
+      "enMantenimiento",
+      "horarioSemanal",
+      "id",
+      "nombre",
+      "numeroWhatsappAlias"
+    ],
+    "Manicurista": [
+      "activa",
+      "id",
+      "nombre"
+    ],
+    "Usuario": [
+      "activa",
+      "email",
+      "id",
+      "nombre",
+      "rol"
+    ]
+  }
+}

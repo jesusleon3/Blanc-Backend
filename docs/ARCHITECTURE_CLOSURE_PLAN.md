@@ -122,7 +122,14 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 
 - **Documento que cambia:** `decision-flows-catalogo-diseno.md` queda con su fila pendiente de reescritura al construir Anticipos (Fase 3 Parte 2), **sin bloquear**: el patrón que la sustituye ya está construido y probado.
 
-### P6 — Ratificar F-27 (patrón de ingesta de webhook) y F-14 (retención diferenciada de IA) como ADR/enmienda formal
+### P6 — Ratificar F-27 (patrón de ingesta de webhook) y F-14 (retención diferenciada de IA) como ADR/enmienda formal — **✅ RESUELTO (2026-10-16)**
+
+> **Cerrado con `ADR-028` (F-27) y `ADR-029` (F-14), los dos `Accepted`**, que es exactamente el criterio de cierre que este punto fijaba. Dos advertencias sobre **cómo** se cerraron, porque ninguna de las dos ratifica la recomendación tal cual:
+>
+> - **`F-27` se cerró ACEPTANDO una desviación, no implementando la recomendación.** `03-technical-architecture.md` §4.4 recomendó la Opción (b) —ack inmediato + cola durable— y **el canal se construyó síncrono**: `WebhookMetaController` procesa cada mensaje dentro del ciclo de petición, incluida la llamada al modelo. `ADR-028` lo ratifica como riesgo aceptado para el MVP con tres argumentos verificables (la duplicación, que era el daño más grave previsto, **es imposible** por el índice único sobre `wamid`; el trabajo que no puede perderse no pasa por el webhook sino por el Planificador; y `ADR-018` no está implementado, así que la cola sería infraestructura especulativa para un solo consumidor), **una mitigación añadida** (timeout de 8 s en la llamada a OpenAI, que antes no existía) y **tres criterios de reapertura medibles**. El riesgo residual —reintentos de Meta por latencia— queda declarado, no resuelto.
+> - **`F-14` se cerró por una vía MÁS FUERTE que la recomendada.** La Opción (c) pedía dos retenciones dentro del mismo registro de auditoría; la implementación **nunca mete el texto en la auditoría** (`RN-AUD-01`, con prueba que lo verifica serializando los registros de un turno completo), así que las dos capas están en tablas distintas. `ADR-029` ratifica eso y explica por qué es preferible. **Lo que sigue abierto es el valor de "retención corta"**, que depende de la Pregunta Abierta #12 (marco legal de datos personales) y que deliberadamente no se inventa: hoy no hay purga y los mensajes se conservan.
+>
+> **El vacío de cobertura de los otros cinco candidatos a ADR sigue siendo real** — ver la nota de trazabilidad al final de esta ficha, actualizada con la disposición de cada uno.
 
 - **¿Por qué sigue abierto?** Ambos tienen recomendación de alta confianza ya escrita en `03-technical-architecture.md` (§4.4, §6.4), pero `ARCHITECTURE_REVIEW.md` los clasificó Critical/High y pidió explícitamente que se ratifiquen como decisión formal, no que se asuman silenciosamente.
 - **¿Quién debe resolverlo?** Arquitectura (redactar) + Cliente (aprobar, dado que F-14 es una enmienda conjunta a tres ADRs ya aceptados en la práctica).
@@ -132,7 +139,19 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 - **Fase que bloquea:** Fase 4 (Conversación) — no bloquea Fase 1/2/3.
 - **¿Puede resolverse durante desarrollo?** No sin riesgo: `ARCHITECTURE_REVIEW.md` califica F-27 como "no negociable" antes de escribir código de integración con WhatsApp.
 
-**Nota de trazabilidad (2026-08-04) — alcance de `P6` incompleto respecto a su propia fuente.** `03-technical-architecture.md` §11 ("ADRs candidatos identificados") lista **7** candidatos a ADR o enmienda, no 2. Además de F-27 y F-14 (ya cubiertos arriba), los otros cinco son: **F-03** (mecanismo de reclamo exclusivo de filas del Outbox, `FOR UPDATE SKIP LOCKED` — enmienda a `ADR-004`), **F-07** (mecanismo técnico de límite de gasto de IA — enmienda conjunta a `ADR-007`/`ADR-011`), **F-11** (canal de transporte y autenticación del panel de handoff humano — ADR nuevo), **F-13** (segregación de secretos de WhatsApp por sucursal — aclaración a `ADR-010`), y **F-17** (pruebas de fallo inyectado sobre Outbox y cola de jobs — anexo a `ADR-019`). Ninguno de estos cinco está rastreado en ningún `P` de este documento. Se deja constancia del vacío de cobertura — **no se crea ningún ADR aquí, no se ratifica ninguno, no se decide si `P6` debe ampliarse para cubrirlos o si merecen su(s) propio(s) punto(s) nuevo(s)** — esa es una decisión de gobernanza pendiente de autorización explícita, igual que la formalización de los Hallazgos A/B/C ya registrada más abajo en este documento.
+**Nota de trazabilidad (2026-08-04) — alcance de `P6` incompleto respecto a su propia fuente.** `03-technical-architecture.md` §11 ("ADRs candidatos identificados") lista **7** candidatos a ADR o enmienda, no 2. Además de F-27 y F-14 (ya cubiertos arriba), los otros cinco son: **F-03** (mecanismo de reclamo exclusivo de filas del Outbox, `FOR UPDATE SKIP LOCKED` — enmienda a `ADR-004`), **F-07** (mecanismo técnico de límite de gasto de IA — enmienda conjunta a `ADR-007`/`ADR-011`), **F-11** (canal de transporte y autenticación del panel de handoff humano — ADR nuevo), **F-13** (segregación de secretos de WhatsApp por sucursal — aclaración a `ADR-010`), y **F-17** (pruebas de fallo inyectado sobre Outbox y cola de jobs — anexo a `ADR-019`). Ninguno de estos cinco estaba rastreado en ningún `P` de este documento.
+
+**Disposición al cierre del MVP (2026-10-16).** Se revisan los cinco contra lo que se construyó, **sin crear ADRs nuevos**: tres dejaron de aplicar y dos siguen abiertos. La decisión de gobernanza sobre si merecen su propio punto sigue sin tomarse, pero ya no sobre un vacío sino sobre esta lista:
+
+| Hallazgo | Estado real al cierre del MVP |
+|---|---|
+| **F-03** — reclamo exclusivo de filas del Outbox (`FOR UPDATE SKIP LOCKED`) | **No aplica todavía: el Outbox NO se construyó.** `P5` se cerró con `IntegracionModule` y dejó el Outbox compatible pero no construido, porque la circularidad resultó ser la forma normal de los bordes de este dominio y un Outbox resolvía una dirección de un par. El problema de exclusión mutua **sí apareció** en el Planificador y se resolvió con `pg_try_advisory_lock` sobre conexión reservada (`ADR-025`) — es la misma familia de problema con otra solución. Si el Outbox se construye, `F-03` vuelve a aplicar. |
+| **F-07** — mecanismo de límite de gasto de IA | **Sigue abierto, y es el más relevante de los cinco.** No hay ningún límite de gasto implementado. Lo que sí existe y acota el riesgo: el bot **solo invoca al modelo cuando el filtro determinista no acierta** y el intérprete determinista es un modo de operación completo sin coste por mensaje (`ADR-026`), así que `OPENAI_API_KEY` vacía es un apagado total con el canal operando. Ligado a `Pregunta 8` (presupuesto), también abierta. |
+| **F-11** — canal y autenticación del panel de handoff humano | **Resuelto de hecho, sin ADR dedicado.** Es la Bandeja Compartida: HTTPS, JWT de Supabase Auth (`ADR-024`), RBAC por `@Roles` con revalidación en servidor y la asimetría de la vista de iPad (`DEC-040`). Lo cubren `ADR-024`, `ADR-027` y el verificador de contrato de `P8`. No se crea ADR porque no quedó ninguna decisión sin tomar. |
+| **F-13** — segregación de secretos de WhatsApp por sucursal | **Dejó de aplicar por `DEC-043`.** Con la Cloud API hay **un WABA y un token** para los tres números; lo que se segrega por sucursal es el `phone_number_id`, que **no es un secreto** (es un identificador público) y vive en `numeros_de_sucursal`. El escenario que `F-13` anticipaba —un secreto por sucursal— era el de las integraciones no oficiales que `ADR-008` Enmienda 1 descartó. |
+| **F-17** — pruebas de fallo inyectado sobre Outbox y cola de jobs | **Parcialmente cubierto, y lo que falta es por lo mismo que `F-03`.** No hay Outbox ni cola, así que no hay nada que inyectar ahí. Sí existen pruebas de fallo sobre el Planificador: aislamiento por elemento (`procesarLote`), el cerrojo entre instancias y la atomicidad real con `DrizzleUnitOfWork`. Lo que no existe es inyección de fallos sobre infraestructura que no se construyó. |
+
+**Conclusión honesta:** de los cinco, **solo `F-07` sigue siendo un vacío con consecuencia práctica** (gasto de IA sin tope). Dos (`F-03`, `F-17`) están condicionados a construir el Outbox, y dos (`F-11`, `F-13`) dejaron de aplicar por decisiones posteriores. Se recomienda que `F-07` se formalice como punto propio antes de encender OpenAI en producción, no antes.
 
 ### P7 — Sign-off formal de ADR-008 (WhatsApp oficial vs. Evolution API)
 
@@ -144,7 +163,19 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 - **Fase que bloquea:** Fase 4 — y además dispara el trámite de verificación de negocio ante Meta, que el propio `ADR-008` pide iniciar "en paralelo a las primeras fases de desarrollo, no al final".
 - **¿Puede resolverse durante desarrollo?** No debería posponerse — cuanto más tarde se firme, más tarde puede iniciar el trámite de Meta, que es de plazo largo.
 
-### P8 — Redactar `05-api-design.md` — Abierto, **parcialmente iniciado (2026-08-04)**
+### P8 — Redactar `05-api-design.md` — **✅ RESUELTO (2026-10-16)**
+
+> **Cerrado, pero de una forma distinta a la prevista, y eso es el punto.** El criterio pedía *"los contratos concretos de cada módulo"* escritos en el documento. Se cerró **generándolos del código** en `contratos/api-v1.json`: 80 rutas con sus roles, derivadas de los metadatos de Nest, y 12 formas de respuesta, derivadas de **invocar los presenters reales**.
+>
+> **Por qué no se escribieron a mano:** un documento con 80 endpoints se desactualiza en el primer cambio que nadie recuerde reflejar, y entonces es peor que no tenerlo, porque alguien lo lee y le cree. `ADR-027` ya había registrado la misma deuda desde el otro lado (*"los tipos del contrato están duplicados a mano… el riesgo es deriva silenciosa"*).
+>
+> **Está verificado por los dos proyectos**, y de ahí viene el valor: `backend/src/contrato/contrato-de-api.spec.ts` compara el contrato derivado contra el archivo versionado —cualquier cambio falla hasta regenerarlo **deliberadamente** con `npm run contrato:actualizar`, y entonces aparece en el diff de un commit—, y `frontend/src/api/contrato.spec.ts` lee **ese mismo archivo** contra sus tipos. **Un campo que desaparezca del backend rompe el build del frontend.** Verificado por mutación en las dos direcciones.
+>
+> Añade además tres invariantes transversales que ninguna prueba de módulo podía ver: que **toda ruta declara sus roles** (sin `@Roles`, `RolesGuard` deja pasar a cualquier autenticado), que **ninguna escritura está abierta a `MANICURISTA` ni `SOLO_LECTURA`**, y que la forma de `Cita` del iPad es un **subconjunto estricto** de la de operación.
+>
+> `05-api-design.md` **sigue siendo la fuente de las convenciones** —las que no se pueden derivar del código porque son anteriores a él— y deja de pretender ser el inventario de endpoints. Ver su §0 bis.
+
+#### Ficha original (para trazabilidad)
 
 - **¿Por qué sigue abierto?** ~~Nunca se escribió~~ **→ Ya existe (`05-api-design.md`), pero con alcance deliberadamente parcial**: solo las convenciones transversales (versionado, formato de error, autenticación, RBAC, claims, idempotencia, validación, códigos HTTP, nombres, compatibilidad) necesarias para el arranque parcial controlado de Sucursales, Identidad y Catálogo (`IMPLEMENTATION_MASTER_PLAN.md`, Enmienda 2026-08-04). No contiene ningún contrato de endpoint específico de ningún módulo — sigue sin cerrar en ese sentido.
 - **¿Quién debe resolverlo?** Arquitectura.
@@ -166,7 +197,19 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 - **Fase que bloquea:** Solo esa funcionalidad puntual dentro de Fase 1/2 — no bloquea el resto del módulo.
 - **¿Puede resolverse durante desarrollo?** Sí, sin riesgo real — es una columna aditiva sin dependencias.
 
-### P10 — Formalización del Bounded Context de Garantías
+### P10 — Formalización del Bounded Context de Garantías — **✅ CERRADO COMO DIFERIDO POST-MVP (2026-10-16)**
+
+> **No se formaliza, y no formalizarlo es la decisión correcta.** Este punto fija su propio alcance con una frase que decide la cuestión: *"resolver únicamente antes de implementar el módulo de Garantías — **no antes**"*. Garantías **no está en el MVP**: el MVP cierra con la Fase 7 y su alcance es Agenda, Catálogo, CRM, Anticipos, Conversaciones/WhatsApp, Bot IA, Planificador y el Frontend operativo.
+>
+> Inventar aquí un Bounded Context, sus aggregates, sus eventos y su modelo de datos sería exactamente la **infraestructura especulativa** que `IMPLEMENTATION_MASTER_PLAN.md` §2 prohíbe — y se diseñaría sin el insumo que lo condiciona: `FL-GAR-01` establece que el canal de reporte de una garantía **es la conversación de WhatsApp**, así que el diseño depende de cómo se comporte el canal con clientas reales, que es información que todavía no existe.
+>
+> **Lo que ya está hecho y no se pierde:** las seis reglas de negocio (`RN-GAR-01..06`) están **`Aprobada`** y la Domain Policy `PoliticaDeGarantia` está aceptada en `ADR-023`. El vacío es de modelado, no de requisitos.
+>
+> **Qué lo reabre:** que se autorice construir el módulo. Entonces su Definition of Ready original sigue vigente tal cual (Bounded Context, aggregates, entidades, value objects, domain events y modelo de persistencia), con la ventaja de que ya existirá el `CitaCompletada` del que depende y el canal por el que se reporta. **Su Definition of Done también: `01-domain-discovery.md` y `04-data-model.md`.**
+>
+> Se marca cerrado **como diferido**, no resuelto: la distinción importa para que nadie lo lea como "Garantías ya está diseñado".
+
+#### Ficha original (vigente para cuando se reabra)
 
 - **Problema:** Garantías tiene Business Rules ya aprobadas (`RN-GAR-01..06`) y una Domain Policy ya aceptada en `ADR-023` (`PoliticaDeGarantia`), pero actualmente no existe: Bounded Context, subdominio definido, aggregate, entidades, value objects, eventos de dominio, ni modelo de datos asociado.
 - **Evidencia:**
@@ -215,10 +258,11 @@ Este documento se escribió el 2026-07-16, antes de que existieran `PLATFORM_ARC
 | P3 — 3 máquinas de estado | Arquitectura (+ negocio para 2 disparadores) | `01-domain-discovery.md`, `RN-AGE-14`, `04-data-model.md` | ~~Fase 2~~ Fase 4 | **✅ RESUELTO (2026-10-16).** `Cita`: máquina formal implementada y probada (`TRANSICIONES_LEGALES`, 9 estados, `ESTADOS_INICIALES`, corrección administrativa `completada → no_show` de `N-02`). `Conversacion`: documentada formalmente en `01-domain-discovery.md` §5.3 — **no hay estado `activa/cerrada`** (identidad persistente, `DISCOVERY_CHECKLIST` 1.22) y la máquina es `modo` `bot` ⇄ `humano` con **retorno siempre explícito**; resuelve la Pregunta Abierta #16 y el pendiente de `PA-15`. `TicketEscalamiento`: **descartado** (`DEC-045`) — su función la cubren `modo` + motivo + contador, que son fuente única | Cerrado |
 | P4 — Invariante de capacidad sin manicurista | Cliente + Arquitectura | `01-domain-discovery.md`, `decision-flows-catalogo-diseno.md` | ~~Fase 2~~ Ninguna | **Resuelto (2026-09-30)** | Ninguna — límite físico por sucursal (Zibatá 5, Lomas 3, Álamos 1) + patrón de Sillas Virtuales, `DEC-031` |
 | P5 — Circular Agenda↔Anticipos | Arquitectura | `decision-flows-catalogo-diseno.md` | ~~Fase 2/3~~ Ninguna | **Resuelto (2026-10-15)** | Ninguna — patrón `IntegracionModule` con 6 puertos y `madge` en 0 ciclos; el Outbox deja de ser condición de cierre |
-| P6 — Ratificar F-27 y F-14 | Arquitectura + Cliente | ADR nuevo + enmienda ADR-007/017/022 | Fase 4 | Abierto | Redactar y aprobar |
+| P6 — Ratificar F-27 y F-14 | Arquitectura + Cliente | ADR nuevo + enmienda ADR-007/017/022 | Fase 4 | **✅ RESUELTO (2026-10-16).** `ADR-028` (F-27) y `ADR-029` (F-14), los dos `Accepted`. **`F-27` se cerró aceptando una desviación**: el webhook procesa síncrono, no con cola; la duplicación —el daño más grave previsto— es imposible por el índice único sobre `wamid`, se añadió un timeout de 8 s a OpenAI y quedan 3 criterios de reapertura medibles. **`F-14` se cerró por una vía más fuerte**: la auditoría nunca contiene el texto, así que las capas están en tablas distintas; falta el VALOR de retención (Pregunta Abierta #12). De los 5 candidatos sin cubrir, **solo `F-07` (tope de gasto de IA) sigue siendo un vacío con consecuencia práctica** | Redactar y aprobar |
 | P7 — Sign-off ADR-008 | Cliente | `ADR-008-*.md` | ~~Fase 4 + trámite Meta~~ Ninguna | **Resuelto (2026-10-09)** | Ninguna — API oficial en exclusiva (`DEC-043`); `ADR-008` pasa a `Accepted` con Enmienda 1. Revierte la petición de doble adaptador de 1.29. **Dispara el trámite de Meta: ahora es camino crítico** |
-| P8 — `05-api-design.md` | Arquitectura | `05-api-design.md` (ya existe, parcial) | Módulos sin contrato específico todavía | Abierto (parcialmente iniciado) | Redactar contratos módulo por módulo |
+| P8 — `05-api-design.md` | Arquitectura | `05-api-design.md` (ya existe, parcial) | Módulos sin contrato específico todavía | **✅ RESUELTO (2026-10-16).** Los contratos concretos están **derivados del código** en `contratos/api-v1.json` (80 rutas con sus roles + 12 formas de respuesta, invocando los presenters reales), verificados por los **dos** proyectos: un campo que desaparezca del backend **rompe el build del frontend**. Verificado por mutación en ambas direcciones. `05-api-design.md` sigue siendo la fuente de las convenciones (§0 bis) | Redactar contratos módulo por módulo |
 | P9 — `usuarios↔manicuristas_recurso` | Arquitectura | `04-data-model.md` | Rol Manicurista (Fase 1/2) | **Resuelto (2026-10-14)** | Columna `usuarios.manicurista_id`, migración `0009` |
+| P10 — Bounded Context de Garantías | Arquitectura + Negocio | `01-domain-discovery.md`, `04-data-model.md` | Módulo Garantías (post-MVP) | **Cerrado como DIFERIDO post-MVP (2026-10-16)** — su propio alcance lo decide: *"resolver únicamente antes de implementar el módulo — no antes"*, y Garantías no está en el MVP. `RN-GAR-01..06` siguen `Aprobada` y `PoliticaDeGarantia` aceptada en `ADR-023`: el vacío es de modelado, no de requisitos | Se añade a esta matriz ahora: la ficha de `P10` (Sección 1) existía desde 2026-08-04 pero **nunca se incorporó aquí**, como el propio documento dejó constancia. Diferido, no resuelto |
 
 ---
 
@@ -293,7 +337,19 @@ Cuando los quince puntos están en verde, el proyecto puede empezar a programars
 
 ## Riesgos que NO deben aceptarse
 
-Los pendientes que siguen abiertos en la Sección 1/2. **Actualizado 2026-10-16 (cierre de Fase 5):** resueltos `P1`, `P2`, **`P3`**, `P4`, `P5`, `P7` y `P9`. **Siguen abiertos solo `P6`, `P8` y `P10`.** Los tres bloqueadores no negociables del plan (`P3`, `P4`, `P5`) están los tres resueltos.
+**Actualizado 2026-10-16 (cierre del MVP, Fase 7): los diez puntos están cerrados.**
+
+| Punto | Cómo quedó |
+|---|---|
+| `P1`, `P2`, `P4`, `P5`, `P7`, `P9` | Resueltos (2026-08/10) |
+| `P3` | Resuelto — las tres máquinas: `Cita` y `Conversacion` documentadas, `TicketEscalamiento` descartado (`DEC-045`) |
+| `P6` | Resuelto — `ADR-028` y `ADR-029`. **`F-27` aceptando una desviación declarada** |
+| `P8` | Resuelto — contrato derivado del código y verificado por los dos proyectos |
+| `P10` | **Cerrado como diferido post-MVP**, por su propio criterio de alcance |
+
+**Los tres bloqueadores no negociables (`P3`, `P4`, `P5`) están resueltos.**
+
+⚠️ **Cerrado no significa "sin pendientes".** Tres cosas siguen abiertas y conviene no perderlas al leer la tabla de arriba: el **valor** de retención del contenido conversacional (`ADR-029`, depende de la Pregunta Abierta #12), el **tope de gasto de IA** (`F-07`, recomendado formalizar antes de encender OpenAI en producción) y los **tres criterios de reapertura de `ADR-028`** (reintentos de Meta, timeouts de OpenAI, cuarta sucursal).
 
 Ninguno se pospone a "durante desarrollo" sin las salvedades ya indicadas explícitamente en cada uno. De los tres que este documento señalaba como bloqueadores no negociables antes de escribir el primer módulo de dominio real (Fase 2, Agenda) —**`P3`, `P4` y `P5`**—, `P3` y `P4` están resueltos y el invariante central (no-doble-booking) **está implementado y probado contra PostgreSQL real** mediante el patrón de Sillas Virtuales y dos restricciones `EXCLUDE USING gist`. **`P5` (circularidad Agenda↔Anticipos) sigue abierto y es el único de los tres que falta**; no ha bloqueado hasta ahora porque Anticipos no se ha construido, pero bloquea Fase 3.
 

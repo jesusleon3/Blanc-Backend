@@ -1209,6 +1209,193 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-16 (d) — Fase 7: alistamiento de producción, cierre de `P6`/`P8`/`P10` y `N-14`. **🏁 MVP CERRADO · ARQUITECTURA CERRADA**
+
+**Backend: 1165 pruebas en 76 suites** (+16). **Frontend: 152 pruebas en 10 suites** (+51). Los seis controles del backend y los cuatro del frontend en verde.
+
+> **Los diez puntos del `ARCHITECTURE_CLOSURE_PLAN.md` están cerrados.** Pero *cerrado* no es *sin pendientes*, y tres cosas se cerraron de una forma que conviene leer antes de la tabla: `F-27` **aceptando una desviación de su propia recomendación**, `F-14` **por una vía mejor que la recomendada**, y `P10` **diferido, no resuelto**.
+
+---
+
+#### 1. `P6` — los dos ADRs, y por qué ninguno ratifica la recomendación tal cual
+
+**`ADR-028` (cierra `F-27`, severidad `Critical`) acepta una desviación.** `03-technical-architecture.md` §4.4 recomendó la Opción (b): ack inmediato del webhook y cola durable. Al revisar el código, **el canal construido en Fase 4 no hace eso**: `WebhookMetaController` procesa cada mensaje dentro del ciclo de petición, **incluida la llamada al modelo**. Es exactamente lo que la review llamó *"el error más común y mejor documentado en integraciones de este tipo"*.
+
+No lo documenté como si hubiéramos hecho lo recomendado. La ADR decide aceptarlo, con tres argumentos verificables:
+
+| Lo que `F-27` temía | Por qué ya no es ese riesgo |
+|---|---|
+| Mensajes duplicados desde el primer día | **Imposibles.** `mensajes_wamid_unq` + `ON CONFLICT DO NOTHING`: un reintento no duplica, no suma pendiente, no mueve la ventana y **no reinvoca al bot** |
+| Pérdida de trabajo diferido | **No hay trabajo diferido que perder.** Recordatorios, lista de espera, anticipos y cierre de citas van por el Planificador (`ADR-025`), no por el webhook |
+| Timeouts y reintentos de Meta por latencia | **Sigue vigente. Es el riesgo residual, declarado** |
+
+Y una mitigación que **sí añadí**: `TIMEOUT_DE_OPENAI_MS = 8_000`. El adaptador usaba `fetch` sin timeout, así que un cuelgue de red podía bloquear el webhook decenas de segundos mientras Meta ya reintentaba. Al vencer, el turno degrada a escalamiento — **es preferible escalar a tiempo que responder tarde**.
+
+Lo que **no sé** y queda declarado: el timeout exacto del webhook de Meta no está verificado, y la latencia real del camino completo no está medida (no hay credenciales). La decisión se sostiene en que **el daño está acotado**, no en que el riesgo sea bajo. Tres criterios de reapertura medibles: reintentos sobre mensajes ya procesados >1/100 en una semana, timeouts de OpenAI más de una vez al día, o la cuarta sucursal.
+
+**`ADR-029` (cierra `F-14`, severidad `High`) ratifica algo mejor que lo recomendado.** La Opción (c) pedía dos retenciones dentro del mismo registro de auditoría. La implementación **nunca mete el texto en la auditoría** (`RN-AUD-01`, con una prueba que serializa los registros de un turno completo del bot y verifica que ni el mensaje ni el teléfono aparecen), así que las dos capas están en **tablas distintas**. Eso es mejor por tres razones: una purga no puede equivocarse si no hay nada que purgar, el borrado del contenido no toca la auditoría, y es verificable **hoy** en vez de cuando exista el proceso de purga.
+
+⚠️ **Lo que NO cierra:** el **valor** de "retención corta". Depende de la Pregunta Abierta #12 (marco legal de datos personales), sin confirmar. Inventar "90 días" parecería una decisión informada sobre obligaciones legales cuando sería una suposición. Hoy **no hay purga y los mensajes se conservan** — no es una decisión de retención indefinida, es la ausencia del insumo para decidirla.
+
+**Los otros cinco candidatos a ADR que la nota de trazabilidad de `P6` señalaba sin cobertura:** los revisé uno por uno contra lo construido. **Tres dejaron de aplicar** (`F-03` y `F-17` dependen del Outbox, que `P5` dejó compatible pero sin construir; `F-13` dejó de aplicar con `DEC-043` — con la Cloud API hay un token para los tres números y el `phone_number_id` no es un secreto), **uno está resuelto de hecho** (`F-11`, el panel de handoff: es la Bandeja, cubierta por `ADR-024`/`ADR-027`), y **uno sigue siendo un vacío real**: `F-07`, el tope de gasto de IA. No hay ninguno implementado. Recomiendo formalizarlo **antes de encender OpenAI en producción**, no antes.
+
+---
+
+#### 2. `P8` — el contrato se genera del código, y lo verifican los dos proyectos
+
+El criterio pedía *"los contratos concretos de cada módulo"* escritos en `05-api-design.md`. No los escribí a mano, y la razón es la que ya había registrado `ADR-027` desde el otro lado: *"los tipos del contrato están duplicados a mano, backend y frontend… el riesgo es deriva silenciosa"*. Un documento con 80 endpoints se desactualiza en el primer cambio que nadie recuerde reflejar, y entonces es **peor que no tenerlo**, porque alguien lo lee y le cree.
+
+`contratos/api-v1.json` se **deriva del código**: 80 rutas con su método, ruta y **roles declarados**, leídas de los metadatos de Nest; y 12 formas de respuesta **invocando los presenters reales** sobre entidades reales.
+
+La cadena de verificación tiene tres eslabones y ninguno confía en la disciplina:
+
+1. `backend/src/contrato/contrato-de-api.spec.ts` compara lo derivado contra el archivo versionado. Cualquier cambio **falla** hasta que alguien regenere con `npm run contrato:actualizar` — y entonces aparece en el diff de un commit.
+2. `tsc` del frontend obliga a que los arreglos de `claves-del-contrato.ts` coincidan **exactamente** con sus interfaces (`satisfies` + un tipo `ClavesCompletas` que rechaza claves faltantes).
+3. `frontend/src/api/contrato.spec.ts` lee **ese mismo archivo** y lo compara con esos arreglos.
+
+De 1+2+3 se sigue lo que importa: **un campo que desaparezca del backend rompe el build del frontend.** Lo verifiqué por mutación en las dos direcciones: quité `sillaId` de un presenter y falló el backend; lo quité del contrato y falló el frontend.
+
+Tres invariantes transversales que **ninguna prueba de módulo podía ver**:
+
+- **Toda ruta declara sus roles**, salvo 7 exenciones enumeradas. Sin `@Roles`, `RolesGuard` deja pasar a cualquier autenticado: una ruta nueva sin decorador no falla, no avisa, y queda abierta a los 7 roles. Es el descuido de seguridad más fácil de cometer aquí.
+- **Ninguna escritura está abierta a `MANICURISTA` ni `SOLO_LECTURA`.** Cada E2E verifica su propio `403`; nadie verificaba que *no exista ninguna*.
+- **La forma de `Cita` del iPad es un subconjunto estricto** de la de operación, con `clientaId` y `enListaRoja` fuera y `clientaNombre` dentro (`DEC-040`).
+
+---
+
+#### 3. `P10` — diferido, no resuelto
+
+Su propio alcance decide la cuestión: *"resolver únicamente antes de implementar el módulo de Garantías — **no antes**"*. Garantías no está en el MVP.
+
+Inventar un Bounded Context con sus aggregates y su modelo de datos sería la infraestructura especulativa que el plan prohíbe, y se diseñaría **sin el insumo que lo condiciona**: `FL-GAR-01` establece que el canal de reporte de una garantía **es la conversación de WhatsApp**, así que el diseño depende de cómo se comporte el canal con clientas reales — información que todavía no existe.
+
+Lo que ya está hecho no se pierde: `RN-GAR-01..06` siguen `Aprobada` y `PoliticaDeGarantia` aceptada en `ADR-023`. **El vacío es de modelado, no de requisitos.** Y de paso añadí `P10` a la matriz de cierre, donde nunca se había incorporado — el propio documento lo dejaba constar.
+
+---
+
+#### 4. El seed idempotente
+
+```bash
+cd backend
+SUPER_ADMIN_EMAIL=duena@blanc.mx \
+SUPER_ADMIN_NOMBRE="Dueña de Blanc" \
+SUPER_ADMIN_SUPABASE_SUB=<uuid de Supabase → Authentication → Users → UID> \
+npm run db:seed
+```
+
+Deja listo: **las 3 sucursales** con el horario real (**L-V 9:00–12:00 y 15:00–18:00, sábado 9:00–15:00, domingo cerrado**, `RN-AGE-12`), **las sillas** (Zibatá 5, Lomas 3, **Álamos 1**, `DEC-031`) y **el Super Admin** vinculado a su cuenta de Supabase con alcance `GLOBAL`.
+
+Ningún dato se inventó: el horario sale de la respuesta literal de la Dueña (`DISCOVERY_CHECKLIST` 1.3) y las sillas de `DEC-031`. **El horario es el dato que más fácil se captura mal** y del que depende todo el motor: si un bloque está mal, el sistema vende huecos con el salón cerrado y nada falla.
+
+**Idempotente, y más fino que eso.** Doce pruebas contra PostgreSQL real, y la central no es "siembra bien" sino **"correrlo dos veces deja exactamente lo mismo"** — porque se va a ejecutar en producción más de una vez: un despliegue se reintenta, nadie recuerda si ya se pasó, o se añade la cuarta sucursal. Duplicar sillas **cambiaría la capacidad vendible del salón**.
+
+Dos comportamientos que probé explícitamente porque *idempotente* significa "no cambia el resultado", **no "reimpone el valor de fábrica"**:
+
+- **No pisa un horario ajustado a mano.** Si la Dueña cambió el de Álamos desde el panel, el seed no lo reescribe: borrar una decisión de negocio con un valor por defecto, y en silencio, sería destructivo.
+- **No reactiva una silla desactivada.** Desactivarla fue reducir la capacidad a propósito (una estación en reparación); reactivarla haría que el sistema vendiera un hueco que no existe.
+
+**Falla ruidosamente y antes de escribir nada** si faltan los datos del Super Admin, porque una base sembrada sin usuario inicial **parece correcta** y no se puede usar: todos los endpoints de alta exigen `SUPER_ADMIN` o `ADMINISTRADOR`.
+
+> 🐛 **Un defecto que la prueba destapó:** el `sub` de Supabase **es un uuid** y la columna también. Sin validarlo, el fallo llegaba como `PostgresError: invalid input syntax for type uuid` **a mitad del seed, en producción**, con las sucursales ya creadas y sin decir qué variable estaba mal. Ahora valida el formato antes de tocar nada, con un mensaje que dice dónde encontrar el valor.
+
+---
+
+#### 5. Alistamiento de producción
+
+| Qué | Estado |
+|---|---|
+| **CORS estricto por entorno** | Añadido. Por lista explícita, **nunca `*`**: la API se autentica con un JWT en cabecera, y un `*` permitiría a cualquier página usar el token de una Encargada que tuviera el panel abierto. Sin `CORS_ORIGIN` en producción queda **desactivado**, asumiendo el mismo origen (`ADR-027`), que es el despliegue previsto. **Falla cerrado, no abierto** |
+| **`enableShutdownHooks()`** | Ya estaba desde el hardening de 2026-08-11: un `SIGTERM` de Railway drena el pool de PostgreSQL en vez de cortar conexiones a medias |
+| **`.env.example` del backend** | Reescrito: 114 líneas documentando las 17 variables, qué pasa si falta cada una y por qué. Las tres credenciales de integración **fallan cerrado** — un despliegue incompleto no manda mensajes por accidente |
+| **`.env.example` del frontend** | Reescrito, con la advertencia de que la `service_role key` **no aparece nunca** aquí: quedaría publicada en el JavaScript que descarga cualquiera |
+| **`npm run start:prod`** | Añadido (`node dist/main.js`), verificado contra la salida real de `nest build` |
+
+---
+
+#### 6. `N-14` y el runbook
+
+**`docs/operations/PLANTILLAS_META.md`** — las tres plantillas con su **texto exacto listo para copiar**, categoría `UTILITY`, idioma `es_MX` y el significado de cada variable. Los nombres coinciden con la constante `PLANTILLAS` del código, que es la fuente única y que el panel sirve por `GET /v1/conversaciones/plantillas`.
+
+Dos frases del texto **no son cortesía y no deben suavizarse al aprobar**: el recordatorio pide responder porque la confirmación es interactiva y de ahí depende el cierre del ciclo; y la oferta de hueco dice *"el lugar no queda reservado"* porque es `RN-AGE-13` — si diera a entender lo contrario, la clienta llegaría a un hueco vendido y la culpa sería del texto.
+
+El documento también dice **qué no cubren** estas tres: no hay plantilla de cancelación (`DEC-040`), ni de anticipo (la da una persona con la ventana abierta), ni promocional (sería `MARKETING`, otras reglas y otro coste). Y que **el coste por plantilla sigue sin presupuestar** (`Pregunta 8` / `N-13`).
+
+**`docs/operations/GO_LIVE_RUNBOOK.md`** — 277 líneas con el orden innegociable, 10 pruebas de humo en el orden en que hay que hacerlas, y la contingencia.
+
+Lo que el runbook deja claro en letra grande: **el paso 5 es un punto de no retorno.** Dar de alta un número en la Cloud API **lo desconecta de la app de WhatsApp Business inmediatamente**; si la Bandeja no está viva, el salón se queda incomunicado. De ahí que los pasos 0–4 no tengan ningún riesgo para la operación y que la migración empiece por **Álamos** (una silla, menos volumen, menos daño) con **un día de espera** antes de seguir — migrar las tres el mismo día desperdicia la sucursal piloto y triplica el daño de un problema.
+
+También: **arrancar con `BOT_ACTIVO=false`**. Separa los problemas (si algo falla, no es el bot) y permite ver cómo escriben las clientas reales antes de dejar que una conversación acabe en una cita sin que nadie la mire — porque el bot **agenda de verdad** (`DEC-044` Enmienda 1).
+
+---
+
+#### 🏁 Métricas finales del MVP
+
+| Proyecto | Suites | Pruebas |
+|---|---|---|
+| Backend | **76** | **1165** |
+| Frontend | **10** | **152** |
+| **Total** | **86** | **1317** |
+
+| Fase | Qué entregó |
+|---|---|
+| 1 | Identidad y Accesos, Sucursales y Personal, Catálogo y Cotización |
+| 2 | Agenda: Sillas Virtuales, no-doble-booking en la base, ciclo de vida de `Cita`, Lista de Espera |
+| 3 | CRM/Clientas y Anticipos por transferencia manual |
+| 4 | Canal WhatsApp Cloud API, Planificador (`ADR-025`) y Bot IA con frontera determinista |
+| 5 | Frontend operativo: Bandeja, Anticipos, CRM, Agenda de mostrador y vista de iPad |
+| 6 | **Diferida post-MVP** por decisión de negocio (Analítica; registro paralelo en Excel) |
+| 7 | Alistamiento de producción, cierre de `P6`/`P8`/`P10` y `N-14` |
+
+**29 ADRs**, 10 puntos del Closure Plan cerrados, 14 migraciones (**ninguna aplicada nunca a una base real**).
+
+---
+
+#### Guía rápida para el equipo
+
+**Levantar el entorno** (necesita Docker para las pruebas):
+
+```bash
+# backend
+cd backend && npm install && cp .env.example .env   # rellenar DATABASE_URL y SUPABASE_URL
+npm run db:migrate && npm run db:seed               # ver las variables del seed en .env.example
+npm run start:dev                                   # :3000
+
+# frontend (otra terminal)
+cd frontend && npm install && cp .env.example .env  # rellenar las dos de Supabase
+npm run dev                                         # :5173, con proxy de /v1 a :3000
+```
+
+**Antes de dar por terminado un cambio:**
+
+```bash
+cd backend  && npx tsc --noEmit && npm run lint && npm run build \
+            && npx drizzle-kit check && npx madge --circular --extensions ts src/ && npm test
+cd frontend && npx tsc -b && npm run lint && npm run build && npm test
+```
+
+**Si cambias un presenter, un DTO, una ruta o un `@Roles`:**
+
+```bash
+cd backend && npm run contrato:actualizar   # y revisa el diff: cada línea es un cambio de contrato
+```
+
+**Desplegar:** `docs/operations/GO_LIVE_RUNBOOK.md`, de principio a fin y en orden.
+
+---
+
+#### Lo que sigue abierto, y no es técnico
+
+Cuatro cosas, ninguna resuelta por esta fase porque ninguna lo es por código:
+
+1. **Las 3 plantillas aprobadas en Meta** (`N-14` documentado, aprobación pendiente). Bloquea la migración de números tanto como la Bandeja, y **tarda**: es el paso 0 del runbook.
+2. **Canal del aviso activo al personal** (`DEC-046`). Hoy es el contador del panel, que **no cumple literalmente** lo que la Dueña pidió — sigue exigiendo el panel abierto.
+3. **Tope de gasto de IA** (`F-07`). Recomiendo formalizarlo **antes** de encender OpenAI; el intérprete determinista no tiene coste por mensaje y permite arrancar sin eso.
+4. **Valor de retención del contenido conversacional** (`ADR-029`), que depende del marco legal (Pregunta Abierta #12).
+
+Y una verificación que solo puede hacerse en producción: **nada está probado contra Supabase, Meta, OpenAI ni Railway reales.** No hay credenciales en este entorno. Está declarado así en `ADR-024`, `ADR-008`, `ADR-027` y `ADR-028`, y los pasos 3–5 del runbook son la primera vez que este código habla con esos servicios.
+
+---
+
 ### 2026-10-16 (c) — Fase 5 Parte 2: Agenda Operativa, Ausencias/Coberturas, Lista de Espera y vista de iPad. **🏁 FASE 5 CERRADA · `P3` CERRADO**
 
 **Backend: 1149 pruebas en 74 suites** (+11). **Frontend: 101 pruebas en 9 suites** (+48). Los seis controles del backend y los cuatro del frontend en verde.

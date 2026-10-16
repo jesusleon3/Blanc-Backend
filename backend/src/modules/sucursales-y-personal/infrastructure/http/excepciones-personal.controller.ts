@@ -9,7 +9,7 @@ import {
 } from '../../application/use-cases/registrar-excepcion-personal.use-case';
 import { ListarExcepcionesDto, RegistrarAusenciaDto, RegistrarCoberturaDto } from './dto/excepcion-personal.dto';
 
-const excepcionAJson = (excepcion: ResultadoExcepcion['excepcion']) => ({
+export const excepcionAJson = (excepcion: ResultadoExcepcion['excepcion']) => ({
   id: excepcion.id,
   manicuristaId: excepcion.manicuristaId,
   tipo: excepcion.tipo,

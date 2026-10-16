@@ -19,7 +19,7 @@ import {
 } from './dto/clienta.dto';
 import { Clienta } from '../../domain/entities/clienta.entity';
 
-const clientaAJson = (clienta: Clienta) => ({
+export const clientaAJson = (clienta: Clienta) => ({
   id: clienta.id,
   nombre: clienta.nombre,
   telefono: clienta.telefono,

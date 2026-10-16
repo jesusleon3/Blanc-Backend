@@ -13,7 +13,7 @@ import { AceptarOfertaDto, AvanzarTurnoDto, ConsultarListaEsperaDto, InscribirEn
 import { SolicitudListaEspera } from '../../domain/entities/solicitud-lista-espera.entity';
 import { citaAJson } from './cita.presenter';
 
-const solicitudAJson = (solicitud: SolicitudListaEspera) => ({
+export const solicitudAJson = (solicitud: SolicitudListaEspera) => ({
   id: solicitud.id,
   sucursalId: solicitud.sucursalId,
   clientaId: solicitud.clientaId,

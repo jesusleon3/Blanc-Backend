@@ -23,7 +23,7 @@ import {
 import { Conversacion } from '../../domain/entities/conversacion.entity';
 import { PLANTILLAS_DE_WHATSAPP } from '../../domain/plantillas';
 
-const conversacionAJson = (conversacion: Conversacion) => ({
+export const conversacionAJson = (conversacion: Conversacion) => ({
   id: conversacion.id,
   sucursalId: conversacion.sucursalId,
   telefonoClienta: conversacion.telefonoClienta,
