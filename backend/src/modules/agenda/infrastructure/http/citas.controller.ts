@@ -65,7 +65,10 @@ export class CitasController {
 
     return {
       citas: pagina.citas.map((cita) =>
-        citaAJson(cita, usuario, { enListaRoja: pagina.enListaRojaPorClienta.get(cita.clientaId) }),
+        citaAJson(cita, usuario, {
+          enListaRoja: pagina.enListaRojaPorClienta.get(cita.clientaId),
+          clientaNombre: pagina.nombrePorClienta.get(cita.clientaId),
+        }),
       ),
       limite: pagina.limite,
       desplazamiento: pagina.desplazamiento,
@@ -125,11 +128,39 @@ export class CitasController {
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
   @HttpCode(200)
   async cancelar(@Param('id') id: string, @Body() dto: CancelarCitaDto, @CurrentUser() usuario: ClaimsUsuario) {
-    const { cita, incidenteTardio, anticipoRetenido } = await this.cancelarCita.ejecutar(
+    const { cita, incidenteTardio, anticipoRetenido, listaEspera } = await this.cancelarCita.ejecutar(
       { citaId: id, motivo: dto.motivo, confirmacionDeEmpleado: dto.confirmacionDeEmpleado },
       usuario,
     );
-    return { cita: citaAJson(cita, usuario), incidenteTardio, anticipoRetenido };
+
+    return {
+      cita: citaAJson(cita, usuario),
+      incidenteTardio,
+      anticipoRetenido,
+      /**
+       * **Qué pasó con el hueco liberado** (`DEC-039`). Antes se descartaba, y era información que
+       * solo existía en el log:
+       *
+       * - `huecoPerdidoCortoPlazo` — se liberó a `<= 30 min` del inicio, así que **no se avisó a
+       *   nadie** de la fila: es capacidad perdida, y la Encargada tiene que verlo para poder
+       *   intentar llenarlo por su cuenta.
+       * - `ofrecidaA` — a quién se le ofreció, si alguien cupo. Hoy **el aviso lo da una persona**
+       *   si el canal de WhatsApp está apagado, así que sin este dato no sabría a quién llamar.
+       * - `descartadasPorNoCaber` — cuántas de la fila se saltaron porque su servicio no cabía en
+       *   el hueco. Explica por qué la primera de la fila no fue la elegida.
+       *
+       * `null` significa **"la fila no se pudo procesar"**, que es distinto de "no había nadie":
+       * la cancelación ya está hecha y `avanzar-turno` recogerá la fila más tarde.
+       */
+      listaEspera:
+        listaEspera === null
+          ? null
+          : {
+              huecoPerdidoCortoPlazo: listaEspera.huecoPerdidoCortoPlazo,
+              ofrecidaA: listaEspera.ofrecida === null ? null : { id: listaEspera.ofrecida.id, clientaId: listaEspera.ofrecida.clientaId },
+              descartadasPorNoCaber: listaEspera.descartadasPorNoCaber,
+            },
+    };
   }
 
   @Post(':id/reprogramar')

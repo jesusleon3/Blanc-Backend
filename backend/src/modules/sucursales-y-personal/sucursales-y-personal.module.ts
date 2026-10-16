@@ -22,7 +22,10 @@ import { DesactivarManicuristaUseCase } from './application/use-cases/desactivar
 import { ListarManicuristasUseCase } from './application/use-cases/listar-manicuristas.use-case';
 import { AsignarManicuristaASucursalUseCase } from './application/use-cases/asignar-manicurista-a-sucursal.use-case';
 import { RemoverManicuristaDeSucursalUseCase } from './application/use-cases/remover-manicurista-de-sucursal.use-case';
-import { RegistrarExcepcionPersonalUseCase } from './application/use-cases/registrar-excepcion-personal.use-case';
+import {
+  ListarExcepcionesPersonalUseCase,
+  RegistrarExcepcionPersonalUseCase,
+} from './application/use-cases/registrar-excepcion-personal.use-case';
 
 /**
  * Módulo NestJS del Bounded Context "Sucursales y Personal" (ADR-001, ADR-002) — frontera
@@ -49,6 +52,7 @@ import { RegistrarExcepcionPersonalUseCase } from './application/use-cases/regis
     AsignarManicuristaASucursalUseCase,
     RemoverManicuristaDeSucursalUseCase,
     RegistrarExcepcionPersonalUseCase,
+    ListarExcepcionesPersonalUseCase,
   ],
   // Los exporta para que `IntegracionModule` pueda construir los adaptadores entre contextos.
   exports: [MANICURISTA_REPOSITORY, SUCURSAL_REPOSITORY, EXCEPCION_PERSONAL_REPOSITORY],

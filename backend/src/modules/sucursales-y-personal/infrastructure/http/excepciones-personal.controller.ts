@@ -1,20 +1,26 @@
-import { Body, Controller, Delete, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { Roles } from '../../../../shared/auth/roles.decorator';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
-import { RegistrarExcepcionPersonalUseCase, ResultadoExcepcion } from '../../application/use-cases/registrar-excepcion-personal.use-case';
-import { RegistrarAusenciaDto, RegistrarCoberturaDto } from './dto/excepcion-personal.dto';
+import {
+  ListarExcepcionesPersonalUseCase,
+  RegistrarExcepcionPersonalUseCase,
+  ResultadoExcepcion,
+} from '../../application/use-cases/registrar-excepcion-personal.use-case';
+import { ListarExcepcionesDto, RegistrarAusenciaDto, RegistrarCoberturaDto } from './dto/excepcion-personal.dto';
+
+const excepcionAJson = (excepcion: ResultadoExcepcion['excepcion']) => ({
+  id: excepcion.id,
+  manicuristaId: excepcion.manicuristaId,
+  tipo: excepcion.tipo,
+  sucursalId: excepcion.sucursalId,
+  inicio: excepcion.rango.inicio.toISOString(),
+  fin: excepcion.rango.fin.toISOString(),
+  motivo: excepcion.motivo,
+});
 
 const aJson = ({ excepcion, citasAfectadas }: ResultadoExcepcion) => ({
-  excepcion: {
-    id: excepcion.id,
-    manicuristaId: excepcion.manicuristaId,
-    tipo: excepcion.tipo,
-    sucursalId: excepcion.sucursalId,
-    inicio: excepcion.rango.inicio.toISOString(),
-    fin: excepcion.rango.fin.toISOString(),
-    motivo: excepcion.motivo,
-  },
+  excepcion: excepcionAJson(excepcion),
   // Siempre presente, aunque esté vacía: que el cliente no tenga que adivinar si "no vino" el
   // campo significa "no hay daño" o "no se calculó".
   citasAfectadas,
@@ -30,7 +36,28 @@ const aJson = ({ excepcion, citasAfectadas }: ResultadoExcepcion) => ({
  */
 @Controller('v1/sucursales-y-personal/excepciones')
 export class ExcepcionesPersonalController {
-  constructor(private readonly registrarExcepcion: RegistrarExcepcionPersonalUseCase) {}
+  constructor(
+    private readonly registrarExcepcion: RegistrarExcepcionPersonalUseCase,
+    private readonly listarExcepciones: ListarExcepcionesPersonalUseCase,
+  ) {}
+
+  /**
+   * Las ausencias y coberturas que solapan un rango.
+   *
+   * **Sin esto, una excepción mal capturada era irreversible desde la interfaz**: para revocarla
+   * hace falta su id, y el id solo existía en la respuesta del `POST` que la creó. `DEC-036` se
+   * construyó con tres escrituras y ninguna lectura porque su único consumidor era el
+   * `MotorDisponibilidad`, que va al repositorio directamente.
+   */
+  @Get()
+  @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
+  async listar(@Query() query: ListarExcepcionesDto) {
+    const excepciones = await this.listarExcepciones.ejecutar({
+      rango: { inicio: new Date(query.inicio), fin: new Date(query.fin) },
+      ...(query.sucursalId ? { sucursalId: query.sucursalId } : {}),
+    });
+    return { excepciones: excepciones.map(excepcionAJson) };
+  }
 
   @Post('ausencias')
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)

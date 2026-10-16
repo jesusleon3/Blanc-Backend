@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { Roles } from '../../../../shared/auth/roles.decorator';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
@@ -9,6 +9,7 @@ import { AsignarManicuristaASucursalUseCase } from '../../application/use-cases/
 import { RemoverManicuristaDeSucursalUseCase } from '../../application/use-cases/remover-manicurista-de-sucursal.use-case';
 import { CrearManicuristaDto } from './dto/crear-manicurista.dto';
 import { manicuristaAJson } from './sucursal.presenter';
+import { ListarManicuristasDto } from './dto/listar-manicuristas.dto';
 
 /** `/v1/sucursales-y-personal/manicuristas` — FL-SUC-03 (registro administrativo). */
 @Controller('v1/sucursales-y-personal/manicuristas')
@@ -21,9 +22,10 @@ export class ManicuristasController {
     private readonly removerDeSucursal: RemoverManicuristaDeSucursalUseCase,
   ) {}
 
+  /** `?sucursalId=` responde *"¿quién trabaja aquí?"*, que es lo que el panel necesita ofrecer. */
   @Get()
-  async listar() {
-    const manicuristas = await this.listarManicuristas.ejecutar();
+  async listar(@Query() query: ListarManicuristasDto) {
+    const manicuristas = await this.listarManicuristas.ejecutar(query.sucursalId ? { sucursalId: query.sucursalId } : {});
     return { manicuristas: manicuristas.map(manicuristaAJson) };
   }
 

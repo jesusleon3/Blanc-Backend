@@ -355,4 +355,91 @@ describe('Personal — Excepciones E2E (HTTP) — DEC-036', () => {
     expect(detalle).toContain('registrar_ausencia');
     expect(detalle).not.toContain(clientaId);
   });
+
+  describe('`GET /` — listado (Fase 5 Parte 2)', () => {
+    /**
+     * Sin esta ruta, **una excepción mal capturada era irreversible desde la interfaz**: para
+     * revocarla hace falta su id, y el id solo vivía en la respuesta del `POST` que la creó.
+     * `DEC-036` se construyó con tres escrituras y ninguna lectura porque su único consumidor era
+     * el `MotorDisponibilidad`, que va al repositorio directamente.
+     */
+    const listar = (query: Record<string, string>, autorizacion = encargada) =>
+      request(app.getHttpServer()).get(BASE).query(query).set('Authorization', `Bearer ${autorizacion}`);
+
+    it('200 con las excepciones que SOLAPAN el rango, y permite revocar con el id devuelto', async () => {
+      const { body } = await registrarAusencia().expect(201);
+
+      const respuesta = await listar({ inicio: INICIO, fin: FIN }).expect(200);
+
+      expect(respuesta.body.excepciones).toHaveLength(1);
+      expect(respuesta.body.excepciones[0]).toMatchObject({
+        id: body.excepcion.id,
+        manicuristaId: ana.id,
+        tipo: 'ausencia',
+        sucursalId: null,
+      });
+
+      // El ciclo completo: listar → revocar con el id que vino del listado.
+      await request(app.getHttpServer())
+        .delete(`${BASE}/${respuesta.body.excepciones[0].id}`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(204);
+
+      expect((await listar({ inicio: INICIO, fin: FIN }).expect(200)).body.excepciones).toHaveLength(0);
+    });
+
+    it('NO devuelve las que quedan FUERA del rango', async () => {
+      await registrarAusencia().expect(201);
+
+      // Un mes después.
+      const despues = new Date(new Date(FIN).getTime() + 30 * 86_400_000).toISOString();
+      const muchoDespues = new Date(new Date(FIN).getTime() + 31 * 86_400_000).toISOString();
+
+      expect((await listar({ inicio: despues, fin: muchoDespues }).expect(200)).body.excepciones).toHaveLength(0);
+    });
+
+    it('EL FILTRO POR SUCURSAL INCLUYE LAS AUSENCIAS de las manicuristas de esa sucursal', async () => {
+      /**
+       * **La parte que no es obvia.** Una `ausencia` tiene `sucursal_id = null` —la manicurista no
+       * está, punto— mientras que una `cobertura` sí lleva sucursal (su destino). Si el filtro
+       * solo comparara `sucursal_id`, **las ausencias desaparecerían del panel justo cuando son
+       * el dato que importa**: la Encargada de Lomas abriría su sucursal y no vería que Ana faltó.
+       */
+      await registrarAusencia().expect(201);
+
+      const deLomas = await listar({ inicio: INICIO, fin: FIN, sucursalId }).expect(200);
+      expect(deLomas.body.excepciones).toHaveLength(1);
+      expect(deLomas.body.excepciones[0].sucursalId).toBeNull();
+
+      // Y no aparece en la sucursal a la que Ana no está asignada.
+      const deJuriquilla = await listar({ inicio: INICIO, fin: FIN, sucursalId: otraSucursalId }).expect(200);
+      expect(deJuriquilla.body.excepciones).toHaveLength(0);
+    });
+
+    it('una COBERTURA aparece en la sucursal DESTINO', async () => {
+      await request(app.getHttpServer())
+        .post(`${BASE}/coberturas`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ manicuristaId: ana.id, sucursalId: otraSucursalId, inicio: INICIO, fin: FIN })
+        .expect(201);
+
+      const destino = await listar({ inicio: INICIO, fin: FIN, sucursalId: otraSucursalId }).expect(200);
+      expect(destino.body.excepciones).toHaveLength(1);
+      expect(destino.body.excepciones[0]).toMatchObject({ tipo: 'cobertura', sucursalId: otraSucursalId });
+    });
+
+    it('400 con un rango invertido o demasiado amplio', async () => {
+      await listar({ inicio: FIN, fin: INICIO }).expect(400);
+
+      const muyLejos = new Date(new Date(INICIO).getTime() + 90 * 86_400_000).toISOString();
+      const respuesta = await listar({ inicio: INICIO, fin: muyLejos }).expect(400);
+      expect(respuesta.body.error.code).toBe('RANGO_DE_CONSULTA_DEMASIADO_AMPLIO');
+    });
+
+    it('403 para MANICURISTA y RECEPCIONISTA: mismo criterio que el resto del controlador', async () => {
+      for (const autorizacion of [manicurista, recepcionista]) {
+        await listar({ inicio: INICIO, fin: FIN }, autorizacion).expect(403);
+      }
+    });
+  });
 });

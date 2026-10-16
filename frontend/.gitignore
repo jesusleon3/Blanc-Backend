@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 *.local
+# Caché incremental de `tsc -b`. Se colaba al repositorio en el commit de la Parte 1: es un
+# artefacto de compilación, cambia en cada build y no aporta nada a quien clone.
+*.tsbuildinfo

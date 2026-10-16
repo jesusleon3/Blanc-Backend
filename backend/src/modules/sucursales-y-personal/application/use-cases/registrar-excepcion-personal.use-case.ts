@@ -9,7 +9,7 @@ import { MANICURISTA_REPOSITORY, ManicuristaRepository } from '../../domain/port
 import { SUCURSAL_REPOSITORY, SucursalRepository } from '../../domain/ports/sucursal.repository';
 import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
-import { ConflictoDeNegocioError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
+import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
 import { aMinutos, diaDeLaSemana, minutosLocales } from '../../../../shared/tiempo/zona-horaria-negocio';
 import { BloqueHorario } from '../../domain/value-objects/horario-semanal.vo';
 import { Sucursal } from '../../domain/entities/sucursal.entity';
@@ -170,5 +170,82 @@ export class RegistrarExcepcionPersonalUseCase {
     if (!(await this.manicuristas.buscarPorId(manicuristaId))) {
       throw new RecursoNoEncontradoError('Manicurista', manicuristaId);
     }
+  }
+}
+
+/** Tope de días por consulta, mismo criterio que la agenda: una lectura acotada. */
+export const MAXIMO_DIAS_DE_EXCEPCIONES = 62;
+
+/**
+ * Listado de ausencias y coberturas que solapan un rango.
+ *
+ * ## POR QUÉ HACÍA FALTA, Y POR QUÉ NO ESTABA
+ *
+ * `DEC-036` se construyó con tres operaciones de escritura (registrar ausencia, registrar
+ * cobertura, revocar) y **ninguna de lectura**: el consumidor era el `MotorDisponibilidad`, que
+ * consulta el repositorio directamente. Al llegar el panel apareció el consumidor que faltaba —
+ * para **revocar** una excepción mal capturada hay que poder verla primero, y hasta ahora el id
+ * solo existía en la respuesta del `POST` que la creó. Es decir: un error de captura era
+ * irreversible desde la interfaz.
+ *
+ * El filtro por sucursal **no es trivial** y de ahí el comentario largo: una ausencia no tiene
+ * sucursal (`sucursal_id` es `null` — la manicurista no está, punto), mientras que una cobertura
+ * sí la tiene (es su destino). Así que filtrar por sucursal tiene que incluir **las ausencias de
+ * las manicuristas asignadas a esa sucursal** además de las coberturas hacia ella; si solo
+ * comparara `sucursal_id`, las ausencias desaparecerían del panel justo cuando son el dato que
+ * importa.
+ */
+@Injectable()
+export class ListarExcepcionesPersonalUseCase {
+  constructor(
+    @Inject(EXCEPCION_PERSONAL_REPOSITORY) private readonly excepciones: ExcepcionPersonalRepository,
+    @Inject(MANICURISTA_REPOSITORY) private readonly manicuristas: ManicuristaRepository,
+  ) {}
+
+  async ejecutar(input: { rango: RangoHorario; sucursalId?: string }): Promise<ExcepcionPersonal[]> {
+    const { inicio, fin } = input.rango;
+
+    // `400` y no `409`: un rango mal formado es una petición inválida, no un conflicto con el
+    // estado del recurso. Mismo criterio y mismos códigos que `ConsultarAgendaUseCase`.
+    if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+      throw new DomainError('RANGO_INVALIDO', 'El rango de consulta contiene una fecha inválida.', 400);
+    }
+    if (fin.getTime() <= inicio.getTime()) {
+      throw new DomainError('RANGO_INVALIDO', 'El fin del rango debe ser posterior al inicio.', 400);
+    }
+    const dias = (fin.getTime() - inicio.getTime()) / 86_400_000;
+    if (dias > MAXIMO_DIAS_DE_EXCEPCIONES) {
+      throw new DomainError(
+        'RANGO_DE_CONSULTA_DEMASIADO_AMPLIO',
+        `Una consulta de excepciones no puede abarcar más de ${MAXIMO_DIAS_DE_EXCEPCIONES} días.`,
+        400,
+        { maximoDias: MAXIMO_DIAS_DE_EXCEPCIONES, diasSolicitados: Math.ceil(dias) },
+      );
+    }
+
+    const todas = await this.excepciones.listarQueSolapan(input.rango);
+    // Se liga a una constante local para que TypeScript lo estreche dentro del callback del
+    // `filter`: `input.sucursalId` sigue siendo `string | undefined` para el compilador ahí dentro.
+    const sucursalId = input.sucursalId;
+    if (!sucursalId) return this.ordenadas(todas);
+
+    // Ver la nota de la cabecera: una ausencia no lleva sucursal, así que se resuelve por la
+    // asignación de la manicurista. Se consulta una vez por manicurista implicada, no por fila.
+    const sucursalesPorManicurista = new Map<string, string[]>();
+    for (const manicuristaId of new Set(todas.map((excepcion) => excepcion.manicuristaId))) {
+      sucursalesPorManicurista.set(manicuristaId, await this.manicuristas.listarSucursalesDeManicurista(manicuristaId));
+    }
+
+    return this.ordenadas(
+      todas.filter((excepcion) => {
+        if (excepcion.sucursalId !== null) return excepcion.sucursalId === sucursalId;
+        return (sucursalesPorManicurista.get(excepcion.manicuristaId) ?? []).includes(sucursalId);
+      }),
+    );
+  }
+
+  /** Lo más próximo primero: es una lista de trabajo del día, no un archivo histórico. */
+  private ordenadas(excepciones: ExcepcionPersonal[]): ExcepcionPersonal[] {
+    return [...excepciones].sort((a, b) => a.rango.inicio.getTime() - b.rango.inicio.getTime());
   }
 }

@@ -1,4 +1,15 @@
-import type { EmisorMensaje, EstadoAnticipo, EstadoDeRiesgo, EstadoDeVentana, MotivoDeEscalamiento, Rol } from '../api/contrato';
+import type {
+  ClaseDeAfectacion,
+  EmisorMensaje,
+  EstadoAnticipo,
+  EstadoCita,
+  EstadoDeRiesgo,
+  EstadoDeVentana,
+  EstadoSolicitud,
+  MotivoDeEscalamiento,
+  Rol,
+  TipoExcepcion,
+} from '../api/contrato';
 
 /**
  * Traducciones de los valores del dominio a lenguaje de quien opera.
@@ -134,4 +145,90 @@ export function haceCuanto(iso: string, ahora = new Date()): string {
   if (horas < 24) return `hace ${horas} h`;
   const dias = Math.floor(horas / 24);
   return dias === 1 ? 'hace 1 día' : `hace ${dias} días`;
+}
+
+// ---------------------------------------------------------------------------
+// Agenda (Fase 5 Parte 2)
+// ---------------------------------------------------------------------------
+
+export const ETIQUETA_DE_ESTADO_CITA: Record<EstadoCita, string> = {
+  en_espera_pago: 'Espera anticipo',
+  agendada: 'Agendada',
+  pendiente_confirmacion: 'Por confirmar',
+  confirmada: 'Confirmada',
+  completada: 'Atendida',
+  no_show: 'No llegó',
+  cancelada: 'Cancelada',
+  reprogramada: 'Reprogramada',
+  expirada: 'Expirada',
+};
+
+/**
+ * Tono por estado. Lo que ordena la atención, igual que la severidad de los motivos en la Bandeja.
+ *
+ * `en_espera_pago` va en **aviso** porque es el único estado que **no ocupa el horario**: la cita
+ * existe pero el lugar sigue vendible hasta que el anticipo se confirme (`RN-ANT-03`). Pintarla
+ * igual que una `agendada` haría creer que el hueco está tomado.
+ */
+export const TONO_DE_ESTADO_CITA: Record<EstadoCita, 'neutro' | 'exito' | 'aviso' | 'peligro' | 'info' | 'acento'> = {
+  en_espera_pago: 'aviso',
+  agendada: 'info',
+  pendiente_confirmacion: 'aviso',
+  confirmada: 'exito',
+  completada: 'neutro',
+  no_show: 'peligro',
+  cancelada: 'neutro',
+  reprogramada: 'neutro',
+  expirada: 'neutro',
+};
+
+export const ETIQUETA_DE_TIPO_EXCEPCION: Record<TipoExcepcion, string> = {
+  ausencia: 'Ausencia',
+  cobertura: 'Cobertura',
+};
+
+export const ETIQUETA_DE_AFECTACION: Record<ClaseDeAfectacion, string> = {
+  cita_asignada: 'Cita asignada a esta manicurista',
+  sobrecupo_en_sucursal: 'La sucursal queda sin suficiente personal',
+};
+
+export const ETIQUETA_DE_ESTADO_SOLICITUD: Record<EstadoSolicitud, string> = {
+  en_espera: 'En espera',
+  notificada: 'Avisada, esperando respuesta',
+  aceptada: 'Aceptó y se agendó',
+  expirada: 'Se le pasó el turno',
+  cancelada: 'Cancelada',
+};
+
+/** Fecha de pared `YYYY-MM-DD` en Querétaro. Es lo que los endpoints de fecha esperan. */
+export function fechaLocalDeHoy(ahora = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ahora);
+}
+
+/**
+ * `YYYY-MM-DD` + `HH:MM` de pared de Querétaro → instante ISO.
+ *
+ * ## EL DESFASE FIJO ES DELIBERADO, Y ES EL ERROR MÁS PROBABLE DE TODO EL FRONTEND
+ *
+ * `-06:00` es el desfase de México desde que abolió el horario de verano en 2022. Construir la
+ * fecha con `new Date('2026-12-07T10:00')` la interpretaría en **la zona del navegador**, así que
+ * una Encargada con el portátil en otra zona —o un servidor en UTC corriendo las pruebas— agendaría
+ * la cita a otra hora sin que nada avisara. Es el mismo criterio que usa el backend en
+ * `HerramientasDelBot.rangoDe`, y por la misma razón.
+ */
+export function instanteDesdeHoraLocal(fecha: string, hora: string): string {
+  return new Date(`${fecha}T${hora}:00-06:00`).toISOString();
+}
+
+/** Límites del día de pared, para consultar la agenda de una fecha. */
+export function rangoDelDia(fecha: string): { inicio: string; fin: string } {
+  return {
+    inicio: new Date(`${fecha}T00:00:00-06:00`).toISOString(),
+    fin: new Date(`${fecha}T23:59:59-06:00`).toISOString(),
+  };
+}
+
+/** Cuánto falta para que venza algo. Negativo = ya venció. */
+export function minutosHasta(iso: string, ahora = new Date()): number {
+  return Math.round((new Date(iso).getTime() - ahora.getTime()) / 60_000);
 }

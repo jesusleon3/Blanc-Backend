@@ -8,7 +8,7 @@ import { Entrar } from './paginas/entrar/Entrar';
 import { Bandeja } from './paginas/bandeja/Bandeja';
 import { Anticipos } from './paginas/anticipos/Anticipos';
 import { Clientas } from './paginas/clientas/Clientas';
-import { AgendaPendiente } from './paginas/agenda/AgendaPendiente';
+import { Agenda } from './paginas/agenda/Agenda';
 import { MiAgenda } from './paginas/mi-agenda/MiAgenda';
 import { SinAcceso } from './paginas/SinAcceso';
 
@@ -46,7 +46,7 @@ export function App() {
         <Route path="/bandeja" element={<Bandeja />} />
         <Route path="/anticipos" element={<Anticipos />} />
         <Route path="/clientas" element={<Clientas />} />
-        <Route path="/agenda" element={<AgendaPendiente />} />
+        <Route path="/agenda" element={<Agenda />} />
       </Route>
 
       {/* Manicurista: su propio marco, sin navegación ni contador. */}

@@ -35,7 +35,7 @@ export function crearContextoCatalogoFalso(servicios: ServicioAgendable[] = [ser
  * `estadoDeRiesgo` explícitamente.
  */
 export function crearContextoClientaFalso(
-  opciones: { existe?: boolean; estadoDeRiesgo?: ContextoClienta['estadoDeRiesgo'] } = {},
+  opciones: { existe?: boolean; estadoDeRiesgo?: ContextoClienta['estadoDeRiesgo']; nombres?: Record<string, string> } = {},
 ): ContextoClientaPort {
   const existe = opciones.existe ?? true;
   const estadoDeRiesgo = opciones.estadoDeRiesgo ?? 'normal';
@@ -44,6 +44,10 @@ export function crearContextoClientaFalso(
   return {
     obtener: async (id) => (existe ? contexto(id) : null),
     obtenerVarias: async (ids) => new Map(existe ? ids.map((id) => [id, contexto(id)]) : []),
+    // Por defecto NO devuelve nombres: las pruebas que no van sobre eso no deben verse afectadas,
+    // y una que afirme algo sobre el nombre tiene que pasarlo explícitamente.
+    obtenerNombres: async (ids) =>
+      new Map(ids.filter((id) => opciones.nombres?.[id] !== undefined).map((id) => [id, opciones.nombres![id]!])),
   };
 }
 

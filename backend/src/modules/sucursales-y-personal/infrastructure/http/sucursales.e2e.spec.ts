@@ -264,4 +264,83 @@ describe('Sucursales y Personal — E2E (HTTP)', () => {
       .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR)}`)
       .expect(204);
   });
+
+  describe('`GET /manicuristas?sucursalId=` — filtro por sucursal (Fase 5 Parte 2)', () => {
+    /**
+     * Hacía falta para el panel: al asignar una manicurista a una cita, ofrecer a las de las otras
+     * sucursales garantiza un `409 MANICURISTA_NO_ASIGNADA_A_SUCURSAL` y obliga a quien opera a
+     * recordar de memoria quién trabaja dónde.
+     *
+     * **No sustituye la validación del caso de uso**, que sigue ahí: es la lista correcta por
+     * adelantado. Y no es el alcance de sucursal del usuario —ese sigue pendiente de decisión de
+     * negocio (Pregunta 11)—, es otra pregunta: *"¿quién trabaja aquí?"*.
+     */
+    const crearSucursal = async (nombre: string) =>
+      (
+        await request(app.getHttpServer())
+          .post('/v1/sucursales-y-personal/sucursales')
+          .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR)}`)
+          .send({ nombre, horarioSemanal: HORARIO })
+          .expect(201)
+      ).body.id as string;
+
+    const crearManicurista = async (nombre: string, sucursalId?: string) => {
+      const creada = await request(app.getHttpServer())
+        .post('/v1/sucursales-y-personal/manicuristas')
+        .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR)}`)
+        .send({ nombre })
+        .expect(201);
+      if (sucursalId) {
+        await request(app.getHttpServer())
+          .post(`/v1/sucursales-y-personal/manicuristas/${creada.body.id}/sucursales/${sucursalId}`)
+          .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR)}`)
+          .expect(204);
+      }
+      return creada.body.id as string;
+    };
+
+    const listar = async (sucursalId?: string) =>
+      (
+        await request(app.getHttpServer())
+          .get('/v1/sucursales-y-personal/manicuristas')
+          .query(sucursalId ? { sucursalId } : {})
+          .set('Authorization', `Bearer ${token(Rol.GERENTE)}`)
+          .expect(200)
+      ).body.manicuristas as { id: string; nombre: string }[];
+
+    it('devuelve SOLO las asignadas a esa sucursal', async () => {
+      const lomas = await crearSucursal('Filtro Lomas');
+      const juriquilla = await crearSucursal('Filtro Juriquilla');
+
+      const deLomas = await crearManicurista('Ana Lomas', lomas);
+      const deJuriquilla = await crearManicurista('Bea Juriquilla', juriquilla);
+      // Sin asignar a ninguna: no debe salir en ningún filtro, pero sí en el listado completo.
+      const sinAsignar = await crearManicurista('Cris Sin Sucursal');
+
+      const idsDeLomas = (await listar(lomas)).map((m) => m.id);
+
+      expect(idsDeLomas).toContain(deLomas);
+      expect(idsDeLomas).not.toContain(deJuriquilla);
+      expect(idsDeLomas).not.toContain(sinAsignar);
+    });
+
+    it('SIN el filtro sigue devolviendo todas: el comportamiento anterior no cambió', async () => {
+      const lomas = await crearSucursal('Sin Filtro Lomas');
+      const asignada = await crearManicurista('Dany Asignada', lomas);
+      const suelta = await crearManicurista('Eva Suelta');
+
+      const todas = (await listar()).map((m) => m.id);
+
+      expect(todas).toContain(asignada);
+      expect(todas).toContain(suelta);
+    });
+
+    it('400 con un `sucursalId` que no es un uuid', async () => {
+      await request(app.getHttpServer())
+        .get('/v1/sucursales-y-personal/manicuristas')
+        .query({ sucursalId: 'lomas' })
+        .set('Authorization', `Bearer ${token(Rol.GERENTE)}`)
+        .expect(400);
+    });
+  });
 });

@@ -33,6 +33,34 @@ export interface ContextoClientaPort {
   obtener(clientaId: string): Promise<ContextoClienta | null>;
 
   /**
+   * `clientaId` → **nombre, y nada más**.
+   *
+   * ## POR QUÉ UN MÉTODO APARTE EN LUGAR DE AÑADIR `nombre` A `ContextoClienta`
+   *
+   * Porque este es el único dato de la clienta que la **vista de iPad** puede recibir, y la forma
+   * de garantizarlo es que el tipo de retorno no pueda llevar nada más.
+   *
+   * `obtenerVarias` devuelve `estadoDeRiesgo`, y `ConsultarAgendaUseCase` **no lo invoca en
+   * absoluto** cuando pregunta una `MANICURISTA` — con esta razón explícita: *"si el dato nunca
+   * entra en el proceso, no puede filtrarse por un descuido de un presenter futuro, por un log,
+   * ni por un mensaje de error"* (`DEC-040`). Añadir `nombre` a `ContextoClienta` habría obligado
+   * a llamar a `obtenerVarias` también para ella, metiendo `estadoDeRiesgo` en su petición y
+   * dejando la garantía dependiendo otra vez de que el presenter filtre bien.
+   *
+   * Con un `Map<string, string>` eso es imposible por construcción: **no hay dónde escribir el
+   * estado de riesgo.** Es el mismo criterio con el que `Intencion` impide que el LLM invente un
+   * precio (`ADR-026`).
+   *
+   * ## POR QUÉ LA MANICURISTA SÍ VE EL NOMBRE
+   *
+   * Va a atender físicamente a esa persona: saber a quién recibe es parte de su trabajo, y
+   * ocultárselo no protege nada. Lo que `DEC-040` protege es la **clasificación de riesgo**, no la
+   * identidad. Y sigue **sin recibir `clientaId`**, que es el identificador con el que se
+   * consultaría su historial y su estado en CRM.
+   */
+  obtenerNombres(clientaIds: string[]): Promise<Map<string, string>>;
+
+  /**
    * Varias de golpe, para la consulta de agenda.
    *
    * Existe para evitar el N+1: pintar la agenda del día con el indicador de lista roja exigiría

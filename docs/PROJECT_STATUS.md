@@ -1209,6 +1209,162 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-16 (c) — Fase 5 Parte 2: Agenda Operativa, Ausencias/Coberturas, Lista de Espera y vista de iPad. **🏁 FASE 5 CERRADA · `P3` CERRADO**
+
+**Backend: 1149 pruebas en 74 suites** (+11). **Frontend: 101 pruebas en 9 suites** (+48). Los seis controles del backend y los cuatro del frontend en verde.
+
+---
+
+#### 1. Sí hizo falta tocar el backend: cuatro añadidos, todos huecos reales
+
+La orden permitía exponer endpoints `GET` de soporte si hacía falta. Hizo falta, y tres de los cuatro no eran "comodidades del panel":
+
+**(a) `GET /v1/sucursales-y-personal/excepciones`** — *(nuevo)*. `DEC-036` se construyó con **tres escrituras y ninguna lectura**, porque su único consumidor era el `MotorDisponibilidad`, que va al repositorio directamente. Consecuencia: **una excepción mal capturada era irreversible desde cualquier interfaz** — para revocarla hace falta su id, y el id solo existía en la respuesta del `POST` que la creó.
+
+El filtro por sucursal **no es trivial**, y es la parte que una implementación descuidada habría roto en silencio: una `ausencia` tiene `sucursal_id = null` (la manicurista no está, punto), mientras que una `cobertura` sí la lleva (su destino). Si el filtro solo comparara ese campo, **las ausencias desaparecerían del panel justo cuando son el dato que importa** — la Encargada de Lomas abriría su sucursal y no vería que Ana faltó. Así que incluye las ausencias de las manicuristas asignadas a esa sucursal. Hay una prueba E2E dedicada a eso.
+
+**(b) `GET /manicuristas?sucursalId=`** — filtro nuevo. Ofrecer a las manicuristas de otra sucursal al asignar garantiza un `409` y obliga a quien opera a recordar de memoria quién trabaja dónde. **No es el alcance de sucursal del usuario** —ese sigue pendiente de decisión de negocio (Pregunta 11)— sino otra pregunta: *"¿quién trabaja aquí?"*. Y **no sustituye la validación** del caso de uso: es la lista correcta por adelantado.
+
+**(c) `clientaNombre` en la agenda** — y aquí hubo que decidir algo con cuidado. La orden pide que el iPad muestre el nombre de la clienta, pero el presenter **excluye deliberadamente `clientaId`** y `ConsultarAgendaUseCase` **ni consulta CRM** para una `MANICURISTA`, con esta razón escrita: *"si el dato nunca entra en el proceso, no puede filtrarse por un descuido de un presenter futuro, por un log, ni por un mensaje de error"*.
+
+La solución **no** fue añadir `nombre` a `ContextoClienta`: eso habría obligado a llamar a `obtenerVarias` también para ella, metiendo `estadoDeRiesgo` en su petición y dejando la garantía dependiendo otra vez de que el presenter filtre bien. Se añadió un método aparte, `obtenerNombres(ids): Map<string, string>`, **donde no hay dónde escribir el estado de riesgo**. Es el mismo criterio con el que `Intencion` impide que el LLM invente un precio (`ADR-026`): la garantía es el tipo, no la disciplina.
+
+> **La frontera queda así: nombre sí, `clientaId` no.** El nombre no abre ninguna puerta —va a atender físicamente a esa persona— mientras que el id es el identificador con el que se consultaría su historial y su clasificación. Lo que `DEC-040` protege es la clasificación de riesgo, no la identidad.
+
+**(d) `listaEspera` en la respuesta de cancelar** — el caso de uso ya lo calculaba y **el controlador lo descartaba**, así que la información solo existía en el log. Para el mostrador es necesaria: si `huecoPerdidoCortoPlazo` es `true` nadie fue avisado y es capacidad perdida que se puede intentar llenar a mano; si hay `ofrecidaA`, es a quién hay que llamar mientras el canal de WhatsApp esté apagado.
+
+---
+
+#### 2. Agenda Operativa de Mostrador
+
+Una pantalla con tres pestañas que **comparten sucursal y día**, porque el trabajo salta entre ellas constantemente: se registra una ausencia, aparecen citas comprometidas, y hay que volver a la agenda a reasignarlas. Separarlas en rutas obligaría a reelegir el contexto en cada salto. **La sucursal y la fecha viven en la URL**, así que la pantalla es compartible y sobrevive a un refresco.
+
+**Cero UUIDs escritos a mano.** Los selectores se pueblan de los endpoints reales: sucursales, servicios **activos** (ofrecer uno de baja garantiza `409 SERVICIO_INACTIVO`), manicuristas **de la sucursal**, y la clienta por búsqueda de teléfono que **siempre presenta la lista** (mamá e hija comparten número; el backend nunca elige). El problema de fondo no era la comodidad: **un uuid pegado mal no da un error claro** — un `servicioId` equivocado da `404`, uno de otra sucursal da `409`, y quien opera no puede distinguir "el dato estaba mal" de "la operación no se puede".
+
+**Lo que el formulario de alta NO pide, y es el punto:** ni hora de fin (la deriva el backend de la duración del catálogo), ni silla (son virtuales, `DEC-031`), ni precio (lo congela el backend). Hay una prueba que verifica que esos tres campos **no se envían**.
+
+**Walk-in** es un botón que pone la hora actual, no un flujo aparte: un walk-in es una cita creada en el momento (`DEC-037`).
+
+**Acciones del ciclo de vida** con la tabla de transiciones copiada de `TRANSICIONES_LEGALES`. Ofrecer un botón que el backend va a rechazar con `409 TRANSICION_ILEGAL` es peor que no ofrecerlo, porque invita a intentarlo. Incluye `completada → no_show`, que es la corrección administrativa de `N-02`.
+
+**Asignar al llegar** va primero cuando `manicuristaId` es `null`, y la cita lo dice como tarea del mostrador (*"Sin asignar · por asignar al llegar"*) en vez de dejarlo en blanco. `409 MANICURISTA_OCUPADA` se explica.
+
+**Consulta de disponibilidad** pregunta por el **rango que ocupa el servicio**, no por un instante: *"¿hay hueco a las 5?"* no es respondible, porque a las 5 puede caber un retiro de 30 minutos y no un acrílico de dos horas. Muestra `deficitDePersonal` sin acotar, que es lo que permite ver un sobrecupo real.
+
+**`en_espera_pago` se pinta distinto y lo explica**: es el único estado que **no ocupa el horario** (`RN-ANT-03`), así que avisa de que el lugar no está reservado hasta que pague. Pintarlo como una `agendada` haría creer que el hueco está tomado.
+
+---
+
+#### 3. Cancelar: la confirmación consciente, y por qué el flujo es así
+
+El flujo es **cancelar → `409 CANCELACION_REQUIERE_CONFIRMACION` → se explica → la persona decide → reintento con `confirmacionDeEmpleado`**.
+
+Mandar `confirmacionDeEmpleado: true` desde el principio sería más corto y sería un error: **convertiría una barrera deliberada en un trámite invisible.** Alguien cancelaría la cita de una clienta que pagó sin enterarse de que su dinero no se devuelve, y la clienta lo descubriría después. La advertencia enumera las dos consecuencias (anticipo retenido, incidente en el historial) y ofrece *"No cancelar"*.
+
+Después, el **resumen se muestra siempre**, incluso sin daño: *"canceló con tiempo, no se registró incidente"* es información que quien canceló necesita para poder decírselo a la clienta. Y distingue los tres casos del hueco liberado, incluido `listaEspera: null` (*"no se pudo procesar"*, distinto de *"no había nadie"*).
+
+---
+
+#### 4. Ausencias y coberturas: la alerta es el producto, no un acuse
+
+**Esto nunca bloquea**, y es la decisión de fondo de `DEC-036`: la manicurista no falta porque el sistema se lo permita. Si el sistema no deja anotarlo, el motor de disponibilidad sigue contando con alguien que no está y **sigue vendiendo huecos imposibles**.
+
+Así que se registra siempre y `citasAfectadas` se muestra **destacada, con `role="alert"`, y no se cierra sola**: es el momento en que una persona puede reasignar o reprogramar, y un aviso que desaparece a los tres segundos haría que el daño se descubriera cuando la clienta llegue. Cubre las dos clases que el backend distingue —`cita_asignada` y `sobrecupo_en_sucursal` con su `deficitDePersonal`— porque llevan a acciones distintas.
+
+Día completo y salida anticipada son dos formas distintas del mismo registro, como `DEC-036` pidió: *"hoy no viene"* y *"se va a las 2"* no son lo mismo, y el segundo es el frecuente.
+
+---
+
+#### 5. Lista de espera
+
+Fila FIFO **numerada al pintar**: el orden lo da el backend por `creado_en` y **no hay columna `posicion`**, porque una posición almacenada se desincroniza en cuanto alguien cancela.
+
+Para una solicitud `notificada`, la cuenta atrás es prominente y **no es decorativa**: es el tiempo real antes de que el turno pase a la siguiente, y va acompañada de *"el lugar no está reservado mientras decide"* (`RN-AGE-13`) — sin eso, quien atiende prometería el hueco por teléfono. Aceptar en su nombre **puede fallar con `409`** por la misma razón, y se explica.
+
+La hora de la cita se pide **explícitamente** al aceptar: desde la interfaz no se sabe cuál fue el hueco ofrecido —el backend lo guarda, pero no viaja en la solicitud— y en una llamada real la clienta puede aceptar *otra* hora del mismo día.
+
+---
+
+#### 6. Vista de iPad: tres garantías, ninguna depende del frontend
+
+1. **Solo sus citas** — el filtro lo aplica `ConsultarAgendaUseCase` con el `manicuristaId` de **sus permisos resueltos contra PostgreSQL** (`P9`), nunca de la petición. Esta pantalla manda la misma consulta que el panel y recibe menos filas; no filtra nada.
+2. **Sin lista roja ni anticipos** — el presenter sale antes de añadirlos y para ella **ni se consulta CRM**. Hay una prueba que le manda una respuesta **deliberadamente incorrecta** (con `enListaRoja` y `clientaId`) y verifica que la pantalla no los pinta: defensa en profundidad.
+3. **Cero mutaciones** — no hay un solo botón de acción. Una prueba comprueba que los únicos controles son *Hoy* y *Salir*, y otra que **no sale ninguna petición que no sea `GET`**.
+
+**No monta `Layout`**, y eso es estructural: ese marco lleva el contador de escaladas y los enlaces al panel. Una prueba monta `App` entera para verificar que el **árbol de rutas** la aísla, y no declara manejador para `/escaladas/pendientes` — con MSW estricto, si esa rama lo pidiera, fallaría.
+
+**Junta las citas de todas las sucursales**, y no es pereza: ese día puede estar cubriendo en otra (`DEC-036`), y preguntarle en cuál está la obligaría a saber cambiar un selector para ver sus propias citas.
+
+Diseño de tablet: tipografía grande, filas altas, una columna. Se lee de reojo con las manos ocupadas, a medio metro.
+
+> **Sin vínculo de personal (`P9`) avisa explícitamente.** El backend devuelve cero citas —lado seguro— y sin ese aviso la pantalla parecería decir *"hoy no tienes trabajo"*: una mentira con consecuencias, porque se iría a casa.
+
+---
+
+#### 7. 🐛 Dos defectos propios que las pruebas destaparon
+
+**(a) El formulario agendaba para HOY, no para el día que se estaba viendo.** Arrancaba en `fechaLocalDeHoy()`, así que mirando la agenda del 8 de marzo y pulsando «Agendar», la cita se creaba para hoy. **Nada avisaba**: la cita simplemente no aparecía en la lista que se estaba mirando. En un mostrador son citas perdidas en días equivocados. Lo encontró la prueba que verifica el cuerpo enviado.
+
+**(b) Dos campos distintos con la etiqueta «Servicio» en la misma pantalla.** El formulario de alta y la consulta de disponibilidad. Es ambiguo para un lector de pantalla y para quien opera; las pruebas lo destaparon al no poder distinguirlos. El de disponibilidad pasó a *"Servicio a consultar"*.
+
+---
+
+#### 8. Cierre documental de `P3`
+
+`01-domain-discovery.md` §5.3 tiene ahora la **máquina de estados formal de `Conversacion`**, derivada del código y de las restricciones de la base. Tres cosas que la especificación aclara:
+
+- **No hay estado `activa | cerrada`.** El diseño original lo previó y la implementación lo descartó, por lo que confirmó la Dueña (`DISCOVERY_CHECKLIST` 1.22): la conversación es una **identidad persistente** por `(sucursal_id, telefono_clienta)`. El hilo no se cierra nunca, igual que en el teléfono real.
+- **La máquina es `modo` (`bot` ⇄ `humano`)**, con la tabla completa de disparadores y el `motivo` que cada uno obliga a fijar. Se distinguen de ella dos dimensiones ortogonales que no son estados: la ventana de Meta (derivada, no almacenada) y el contador de mensajes sin responder.
+- **La transición que NO existe es la regla.** No hay retorno automático de `humano` a `bot`, ni por inactividad ni por tiempo. Esto **resuelve la Pregunta Abierta #16 y el pendiente de `PA-15`** (*"el mecanismo de reseteo de `modo` tras inactividad"*): **no hay reseteo**, y era el camino directo al peor escenario de negocio que la revisión adversarial identificó (DM-C).
+
+Con eso y con `DEC-045` (`TicketEscalamiento` descartado), **`P3` queda cerrado por completo**: los tres bloqueadores no negociables del Closure Plan (`P3`, `P4`, `P5`) están los tres resueltos. Siguen abiertos solo `P6`, `P8` y `P10`.
+
+---
+
+#### 🏁 Cierre de Fase 5 — Frontend Operativo del MVP
+
+| Parte | Qué entregó |
+|---|---|
+| 1 | `ADR-026`/`ADR-027`, `DEC-044` Enmienda 1, `DEC-045`, `DEC-046`; base del frontend, sesión con Supabase, dos árboles de rutas, Bandeja Compartida, Anticipos y CRM |
+| 2 | Agenda Operativa de mostrador, Ausencias/Coberturas con `citasAfectadas`, Lista de Espera, vista de iPad, y cierre de `P3` |
+
+| Proyecto | Suites | Pruebas |
+|---|---|---|
+| Backend | 74 | **1149** |
+| Frontend | 9 | **101** |
+
+Las nueve suites del frontend: `api/cliente` (6), `auth/acceso` (10), `bandeja` (18), `anticipos` (8), `clientas` (11), `agenda` (22), `excepciones` (8), `lista-espera` (8), `mi-agenda` (10).
+
+---
+
+#### Listo para la Fase 7 (Preparación de Despliegue)
+
+Lo que la Fase 7 tiene que hacer, con lo que ya existe para apoyarse:
+
+| Tarea | Qué hay hecho | Qué falta |
+|---|---|---|
+| **Variables de entorno** | Los nombres están todos en el código y ninguno con valor en el repositorio. Backend: `DATABASE_URL`, `SUPABASE_*`, `JWT_*`, `META_APP_SECRET`, `META_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`, `OPENAI_API_KEY`, `PLANIFICADOR_ACTIVO`, `BOT_ACTIVO`. Frontend: `frontend/.env.example` | Conseguir los valores y cargarlos en Railway. **Los tres adaptadores externos fallan cerrado si falta su secreto**, así que un despliegue incompleto no envía nada por accidente |
+| **Seeds de las 3 sucursales** | Todo se da de alta por API con su RBAC: sucursales con `horarioSemanal`, sillas, manicuristas y su asignación, servicios, y `POST /v1/conversaciones/numeros` | Escribir el seed. **El horario semanal es el dato que más fácil se captura mal** y de él depende el motor de disponibilidad |
+| **Pruebas de humo** | `GET /health` existe; los E2E de cada módulo son el guion de lo que hay que verificar | Un guion contra el entorno real |
+| **Verificaciones pendientes de credenciales** | Nada de esto está verificado contra el servicio real: **Supabase Auth** (rotación de refresh token con detección de reuso), **Meta Cloud API** (webhook, firma HMAC, plantillas), **OpenAI** (`OpenAiAgenteAdapter`), **Railway** (despliegue rolling/blue-green) | Son tareas de verificación, no decisiones abiertas. Están declaradas así en `ADR-024`, `ADR-008` y `ADR-027` |
+
+Cuatro avisos para quien la tome:
+
+1. **El orden de puesta en marcha no es negociable.** `ADR-008` Enmienda 1: dar de alta un número en la Cloud API **lo desconecta de la app de WhatsApp Business**. Ningún número puede migrarse antes de que la Bandeja esté en producción y probada. Si se invierte, el salón se queda incomunicado.
+2. **Dos interruptores de rollback por entorno**, los dos verificables: `PLANIFICADOR_ACTIVO=false` (apaga los barridos dejando los endpoints vivos) y `BOT_ACTIVO=false` (el canal queda atendido solo por personas). **No se apagan quitando módulos**: el contenedor no arrancaría (`ADR-026`).
+3. **Ninguna migración se ha aplicado nunca a una base real.** Las 14 migraciones son el DDL y las pruebas corren contra Testcontainers. Aplicarlas es actividad de despliegue.
+4. **El frontend se sirve como estáticos** (`ADR-027`): `npm run build` en `frontend/` produce `dist/`. No hace falta un segundo servicio en Railway.
+
+#### Para decidir con la Dueña
+
+Las mismas tres de siempre, ninguna resuelta por esta entrega porque ninguna es técnica:
+
+1. **Canal del aviso activo al personal** (`DEC-046`).
+2. **Inventario y redacción de las plantillas de Meta** (`N-14`) — bloquea la migración de números tanto como la Bandeja.
+3. **¿OpenAI o el intérprete determinista?** Se puede arrancar con el determinista y activar OpenAI con una variable.
+
+---
+
 ### 2026-10-16 (b) — Fase 5 Parte 1: cierre documental de Fase 4, Frontend base, Bandeja Compartida y Anticipos/CRM
 
 **Backend: 1138 pruebas en 74 suites** (+10). **Frontend nuevo: 53 pruebas en 5 suites.** Compilación, lint y build limpios en los dos proyectos.

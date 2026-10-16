@@ -505,6 +505,31 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       expect(respuesta.body).toHaveProperty('incidenteTardio');
       expect(respuesta.body.cita.estado).toBe('cancelada');
     });
+
+    it('cancelar devuelve QUÉ PASÓ CON EL HUECO liberado (`listaEspera`, Fase 5 Parte 2)', async () => {
+      /**
+       * El caso de uso ya calculaba esto; **el controlador lo descartaba**, así que la información
+       * solo existía en el log. Para el panel es necesaria: si `huecoPerdidoCortoPlazo` es `true`
+       * nadie fue avisado y es capacidad perdida que la Encargada puede intentar llenar a mano, y
+       * si hay `ofrecidaA` es a quién tiene que llamar mientras el canal de WhatsApp esté apagado.
+       */
+      const { body: cita } = await agendar().expect(201);
+
+      const respuesta = await request(app.getHttpServer())
+        .post(`${RUTA}/${cita.id}/cancelar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ motivo: 'La clienta avisó' })
+        .expect(200);
+
+      // La fila está vacía en este escenario, así que se procesó y no había candidata: eso es
+      // `ofrecidaA: null` DENTRO de un objeto, no `listaEspera: null` (que sería "no se pudo
+      // procesar"). La distinción es la que el caso de uso documenta.
+      expect(respuesta.body.listaEspera).toEqual({
+        huecoPerdidoCortoPlazo: expect.any(Boolean),
+        ofrecidaA: null,
+        descartadasPorNoCaber: 0,
+      });
+    });
   });
 
   describe('RBAC de la vista de iPad (`DEC-040`)', () => {
@@ -672,6 +697,44 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       expect(paraElIpad.body.citas).toHaveLength(1);
       expect(paraElIpad.body.citas[0]).not.toHaveProperty('enListaRoja');
       expect(paraElIpad.body.citas[0]).not.toHaveProperty('clientaId');
+    });
+
+    it('AMBOS ROLES RECIBEN `clientaNombre`; la MANICURISTA sigue SIN `clientaId` ni lista roja', async () => {
+      /**
+       * Añadido en Fase 5 Parte 2 para la vista de iPad: la Manicurista **va a atender físicamente
+       * a esa persona**, así que saber a quién recibe es parte de su trabajo. Lo que `DEC-040`
+       * protege es la **clasificación de riesgo**, no la identidad.
+       *
+       * Lo que esta prueba fija es la frontera exacta: **nombre sí, `clientaId` no.** El id es el
+       * identificador con el que se consultaría el historial y el estado en CRM; el nombre no
+       * abre ninguna puerta. Y el nombre llega por `obtenerNombres`, cuyo `Map<string, string>`
+       * **no puede** transportar el estado de riesgo aunque el presenter se equivocara.
+       */
+      await agendar({ clientaId: clientaEnListaRoja.id, manicuristaId: ana.id }).expect(201);
+
+      const paraLaEncargada = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+      expect(paraLaEncargada.body.citas[0].clientaNombre).toBe(clientaEnListaRoja.nombre);
+
+      const paraElIpad = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio: INICIO, fin: FIN })
+        .set('Authorization', `Bearer ${manicuristaAna}`)
+        .expect(200);
+
+      // Ve el nombre…
+      expect(paraElIpad.body.citas[0].clientaNombre).toBe(clientaEnListaRoja.nombre);
+      // …y nada más de la clienta. Esta clienta ESTÁ en lista roja, así que si el aislamiento
+      // fallara, fallaría aquí.
+      expect(paraElIpad.body.citas[0]).not.toHaveProperty('clientaId');
+      expect(paraElIpad.body.citas[0]).not.toHaveProperty('enListaRoja');
+      // Ni por asomo en el resto del cuerpo: un `JSON.stringify` cubre también un campo nuevo que
+      // alguien añadiera mañana sin pensarlo.
+      expect(JSON.stringify(paraElIpad.body)).not.toContain('lista_roja');
+      expect(JSON.stringify(paraElIpad.body)).not.toContain(clientaEnListaRoja.id);
     });
 
     it('una clienta `normal` sigue naciendo `agendada` y con `enListaRoja: false`', async () => {

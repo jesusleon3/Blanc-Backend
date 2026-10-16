@@ -191,6 +191,184 @@ export interface Sucursal {
 }
 
 // ---------------------------------------------------------------------------
+// Agenda
+// ---------------------------------------------------------------------------
+
+/** Los 9 estados de `TRANSICIONES_LEGALES` (`P3`, máquina de `Cita` cerrada 2026-10-14). */
+export type EstadoCita =
+  | 'en_espera_pago'
+  | 'agendada'
+  | 'pendiente_confirmacion'
+  | 'confirmada'
+  | 'completada'
+  | 'no_show'
+  | 'cancelada'
+  | 'reprogramada'
+  | 'expirada';
+
+/** Desglose de precio congelado al agendar. El backend lo calcula; el cliente NUNCA. */
+export interface CotizacionSnapshot {
+  precioBaseCentavos: number;
+  totalCentavos: number;
+  modificadores?: { nombre: string; montoCentavos: number }[];
+  [clave: string]: unknown;
+}
+
+/**
+ * Una cita **como la ve quien pregunta**.
+ *
+ * Los cuatro últimos campos son `undefined` para una `MANICURISTA`: el presenter del backend sale
+ * antes de añadirlos (`DEC-040`). **No es que lleguen vacíos: no llegan.** Por eso son opcionales
+ * en el tipo y no `| null` — el tipo refleja la asimetría real en vez de ocultarla.
+ */
+export interface Cita {
+  id: string;
+  sucursalId: string;
+  sillaId: string | null;
+  manicuristaId: string | null;
+  servicioId: string;
+  inicio: string;
+  fin: string;
+  estado: EstadoCita;
+  cotizacionSnapshot: CotizacionSnapshot | null;
+  /** Presente para todos los roles, incluida la Manicurista: va a atender a esa persona. */
+  clientaNombre?: string;
+
+  clientaId?: string;
+  citaOrigenId?: string | null;
+  numeroDeReprogramaciones?: number;
+  /** `undefined` cuando no se resolvió, que es distinto de `false`. */
+  enListaRoja?: boolean;
+}
+
+export interface PaginaDeAgenda {
+  citas: Cita[];
+  limite: number;
+  desplazamiento: number;
+  hayMas: boolean;
+}
+
+export interface Disponibilidad {
+  sillasLibres: number;
+  manicuristasDisponibles: number;
+  capacidad: number;
+  /** Sin acotar a 0: es lo que permite detectar sobrecupo real. */
+  deficitDePersonal: number;
+  hayLugar: boolean;
+  motivo?: string;
+}
+
+export interface Silla {
+  id: string;
+  sucursalId: string;
+  nombre: string;
+  activa: boolean;
+}
+
+/** Qué pasó con el hueco al cancelar (`DEC-039`). `null` = la fila no se pudo procesar. */
+export interface ResultadoDeHueco {
+  /** Se liberó a `<= 30 min`: **no se avisó a nadie**, es capacidad perdida. */
+  huecoPerdidoCortoPlazo: boolean;
+  ofrecidaA: { id: string; clientaId: string } | null;
+  descartadasPorNoCaber: number;
+}
+
+export interface ResultadoDeCancelacion {
+  cita: Cita;
+  /** Canceló a `<= 60 min` del inicio. **Sugiere** lista roja; no la aplica (`RN-CRM-06`). */
+  incidenteTardio: boolean;
+  /** Había anticipo pagado y **queda retenido** (`RN-ANT-04`). No se reembolsa. */
+  anticipoRetenido: boolean;
+  listaEspera: ResultadoDeHueco | null;
+}
+
+export interface ResultadoDeReprogramacion {
+  original: Cita;
+  nueva: Cita;
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo
+// ---------------------------------------------------------------------------
+
+export interface Servicio {
+  id: string;
+  nombre: string;
+  categoria: string;
+  duracionBaseMinutos: number;
+  precioBaseCentavos: number;
+  activo: boolean;
+  requiereCotizacionManual: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Personal y excepciones (`DEC-036`)
+// ---------------------------------------------------------------------------
+
+export interface Manicurista {
+  id: string;
+  nombre: string;
+  activa: boolean;
+}
+
+export type TipoExcepcion = 'ausencia' | 'cobertura';
+
+export interface ExcepcionPersonal {
+  id: string;
+  manicuristaId: string;
+  tipo: TipoExcepcion;
+  /** `null` en una ausencia (la manicurista no está, punto); el destino en una cobertura. */
+  sucursalId: string | null;
+  inicio: string;
+  fin: string;
+  motivo: string | null;
+}
+
+/** Clase del daño que una excepción provoca. */
+export type ClaseDeAfectacion = 'cita_asignada' | 'sobrecupo_en_sucursal';
+
+export interface CitaAfectada {
+  citaId: string;
+  clase: ClaseDeAfectacion;
+  inicio: string;
+  fin: string;
+  manicuristaId: string | null;
+  deficitDePersonal?: number;
+}
+
+export interface ResultadoDeExcepcion {
+  excepcion: ExcepcionPersonal;
+  /** Siempre presente, aunque vacía: así "no vino" nunca significa "no se calculó". */
+  citasAfectadas: CitaAfectada[];
+}
+
+// ---------------------------------------------------------------------------
+// Lista de espera (`DEC-039`)
+// ---------------------------------------------------------------------------
+
+export type EstadoSolicitud = 'en_espera' | 'notificada' | 'aceptada' | 'expirada' | 'cancelada';
+
+export interface SolicitudListaEspera {
+  id: string;
+  sucursalId: string;
+  clientaId: string;
+  servicioId: string;
+  /** Fecha de pared `YYYY-MM-DD`, no un instante. */
+  fecha: string;
+  estado: EstadoSolicitud;
+  notificadaEn: string | null;
+  /** Cuándo vence su turno. La oferta **no retiene el lugar** (`RN-AGE-13`). */
+  expiraEn: string | null;
+  citaId: string | null;
+  creadoEn: string;
+}
+
+export interface ResultadoDeAvance {
+  expiradas: SolicitudListaEspera[];
+  nuevasOfertas: SolicitudListaEspera[];
+}
+
+// ---------------------------------------------------------------------------
 // Errores (`ADR-013`)
 // ---------------------------------------------------------------------------
 

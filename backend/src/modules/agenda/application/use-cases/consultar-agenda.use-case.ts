@@ -25,6 +25,15 @@ export interface PaginaDeAgenda {
    * filtrar la salida después: para ella no se consulta en absoluto.
    */
   enListaRojaPorClienta: Map<string, boolean>;
+  /**
+   * `clientaId` → nombre. **Se resuelve para TODOS los roles, incluida la `MANICURISTA`.**
+   *
+   * Es la diferencia con `enListaRojaPorClienta`, y es intencionada: la Manicurista va a atender
+   * físicamente a esa persona, así que saber a quién recibe es parte de su trabajo. Lo que
+   * `DEC-040` protege es la **clasificación de riesgo**, no la identidad — y ella sigue sin
+   * recibir `clientaId`, que es el identificador con el que se consultaría su historial.
+   */
+  nombrePorClienta: Map<string, string>;
   limite: number;
   desplazamiento: number;
   /**
@@ -81,7 +90,7 @@ export class ConsultarAgendaUseCase {
 
     const manicuristaId = this.filtroDeManicurista(actor);
     if (manicuristaId === 'SIN_ACCESO') {
-      return { citas: [], limite, desplazamiento, hayMas: false, enListaRojaPorClienta: new Map() };
+      return { citas: [], limite, desplazamiento, hayMas: false, enListaRojaPorClienta: new Map(), nombrePorClienta: new Map() };
     }
 
     // Se pide una fila de más para saber si hay página siguiente sin tener que contar el total.
@@ -93,13 +102,18 @@ export class ConsultarAgendaUseCase {
 
     const citas = filas.slice(0, limite);
 
-    return {
-      citas,
-      limite,
-      desplazamiento,
-      hayMas: filas.length > limite,
-      enListaRojaPorClienta: await this.resolverListaRoja(citas, actor),
-    };
+    /**
+     * Las dos resoluciones van en paralelo y son **independientes a propósito**: la de nombres
+     * corre para todo el mundo y la de lista roja solo para quien no es `MANICURISTA`. Son dos
+     * llamadas distintas al puerto, con dos tipos de retorno distintos, y eso es lo que mantiene
+     * el estado de riesgo fuera de la petición del iPad.
+     */
+    const [enListaRojaPorClienta, nombrePorClienta] = await Promise.all([
+      this.resolverListaRoja(citas, actor),
+      this.resolverNombres(citas),
+    ]);
+
+    return { citas, limite, desplazamiento, hayMas: filas.length > limite, enListaRojaPorClienta, nombrePorClienta };
   }
 
   /**
@@ -117,6 +131,18 @@ export class ConsultarAgendaUseCase {
 
     const contextos = await this.clientas.obtenerVarias(citas.map((cita) => cita.clientaId));
     return new Map([...contextos.values()].map((contexto) => [contexto.id, contexto.estadoDeRiesgo === 'lista_roja']));
+  }
+
+  /**
+   * Nombres de las clientas de la página. Una sola consulta, igual que la de lista roja.
+   *
+   * **Sin condicionar por rol**: ver la nota de `nombrePorClienta`. Y el puerto devuelve
+   * `Map<string, string>`, así que esta llamada **no puede** traer el estado de riesgo ni el
+   * teléfono aunque alguien quisiera.
+   */
+  private async resolverNombres(citas: Cita[]): Promise<Map<string, string>> {
+    if (citas.length === 0) return new Map();
+    return this.clientas.obtenerNombres(citas.map((cita) => cita.clientaId));
   }
 
   /**

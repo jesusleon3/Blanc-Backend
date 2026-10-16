@@ -14,8 +14,18 @@ import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
  *   `MANICURISTA` no recibe, no en el `base` que sí recibe.
  * - **No ve `clientaId`**: no lo necesita para trabajar, y es el identificador por el que se
  *   consultaría el historial y la clasificación de la clienta.
+ * - **SÍ ve `clientaNombre`** (añadido en Fase 5 Parte 2, para la vista de iPad). Va a atender
+ *   físicamente a esa persona: saber a quién recibe es parte de su trabajo, y ocultárselo no
+ *   protege nada. Lo que `DEC-040` protege es la **clasificación de riesgo**, no la identidad.
+ *   El nombre llega por `ContextoClientaPort.obtenerNombres`, cuyo `Map<string, string>` **no
+ *   puede** transportar el estado de riesgo — así la garantía no depende de que este presenter
+ *   filtre bien, sino de que el dato no exista en la petición.
  */
-export function citaAJson(cita: Cita, actor: ClaimsUsuario, datosDeClienta: { enListaRoja?: boolean } = {}) {
+export function citaAJson(
+  cita: Cita,
+  actor: ClaimsUsuario,
+  datosDeClienta: { enListaRoja?: boolean; clientaNombre?: string } = {},
+) {
   const base = {
     id: cita.id,
     sucursalId: cita.sucursalId,
@@ -26,6 +36,9 @@ export function citaAJson(cita: Cita, actor: ClaimsUsuario, datosDeClienta: { en
     fin: cita.rangoHorario.fin.toISOString(),
     estado: cita.estado,
     cotizacionSnapshot: cita.cotizacionSnapshot,
+    // `undefined` si no se resolvió (p. ej. la respuesta de agendar, que devuelve una cita suelta),
+    // que es distinto de "esta clienta no tiene nombre".
+    clientaNombre: datosDeClienta.clientaNombre,
   };
 
   // La salida temprana es la barrera: todo lo que se añada debajo es, por construcción, invisible
