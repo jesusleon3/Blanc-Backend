@@ -6,6 +6,7 @@ import { Boton } from '../../../componentes/Boton';
 import { AvisoDeError } from '../../../componentes/AvisoDeError';
 import { SelectorDeManicurista } from '../../../componentes/selectores';
 import { fechaLocalDeHoy, instanteDesdeHoraLocal, pesosOSinCotizar } from '../../../componentes/etiquetas';
+import { DialogoDeGarantia } from './AgendarGarantia';
 
 /**
  * Qué transiciones ofrece cada estado. **Copiado de `TRANSICIONES_LEGALES` del backend.**
@@ -39,7 +40,21 @@ const TEXTO_DE_ACCION = {
   reprogramar: 'Reprogramar',
 } as const;
 
-type Dialogo = 'cancelar' | 'reprogramar' | 'asignar' | null;
+type Dialogo = 'cancelar' | 'reprogramar' | 'asignar' | 'garantia' | null;
+
+/**
+ * ¿Se puede agendar una garantía sobre esta cita (`RN-GAR-01`/`RN-GAR-02`)?
+ *
+ * Las dos condiciones que el cliente **sí** puede comprobar sin consultar nada: la cita se
+ * completó, y no es ella misma una garantía. La tercera —que la ventana de días siga abierta— la
+ * decide el backend, que es el único que conoce `DIAS_DE_GARANTIA` y la hora real; se ofrece el
+ * botón y el `409 GARANTIA_VENCIDA` explica cuántos días han pasado.
+ *
+ * **No se calcula la ventana aquí a propósito.** Hacerlo escondería el botón con el reloj del
+ * navegador, y a quien atiende el mostrador le parecería que la función no existe en vez de leer
+ * que la garantía venció y que una excepción la decide la Dueña.
+ */
+const admiteGarantia = (cita: Cita): boolean => cita.estado === 'completada' && !cita.esGarantia;
 
 export function AccionesDeCita({ cita, onCambio }: { cita: Cita; onCambio: () => Promise<void> | void }) {
   const [dialogo, setDialogo] = useState<Dialogo>(null);
@@ -103,10 +118,20 @@ export function AccionesDeCita({ cita, onCambio }: { cita: Cita; onCambio: () =>
             ),
           )}
 
-          {acciones.length === 0 && cita.manicuristaId !== null ? (
+          {admiteGarantia(cita) ? (
+            <Boton variante="secundario" onClick={() => setDialogo('garantia')}>
+              Agendar garantía
+            </Boton>
+          ) : null}
+
+          {acciones.length === 0 && cita.manicuristaId !== null && !admiteGarantia(cita) ? (
             <p className="text-[11px] text-texto-terciario">Esta cita ya está cerrada: no admite más cambios.</p>
           ) : null}
         </div>
+      ) : null}
+
+      {dialogo === 'garantia' ? (
+        <DialogoDeGarantia cita={cita} onCerrar={() => setDialogo(null)} onCambio={onCambio} />
       ) : null}
 
       {dialogo === 'asignar' ? (

@@ -43,6 +43,31 @@ export class ServiciosController {
     return { servicios: servicios.map(servicioAJson) };
   }
 
+  /**
+   * Las categorías **en uso**, derivadas del catálogo.
+   *
+   * ## POR QUÉ NO ES UNA TABLA
+   *
+   * `categoria` es **texto en `Servicio`**, no una entidad: el modelo nunca le dio identidad
+   * propia, y no la necesita — no tiene atributos, ni reglas, ni nada que referenciar. Crear una
+   * tabla `categorias` para que el Backoffice tenga un selector sería inventar un aggregate por
+   * comodidad de una pantalla.
+   *
+   * Lo que el selector necesita de verdad es *"¿qué categorías ya existen?"*, para que nadie
+   * teclee `Manos` en un servicio y `manos` en el siguiente y acaben siendo dos. Eso se responde
+   * con un `DISTINCT`, no con una tabla.
+   *
+   * **Declarado antes de `@Get(':id')` futuro**: si alguien añade uno, `categorias` se capturaría
+   * como un id. Hoy no hay ninguno.
+   */
+  @Get('categorias')
+  @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE, Rol.RECEPCIONISTA)
+  async categorias() {
+    const servicios = await this.obtenerServicios.ejecutar();
+    const categorias = [...new Set(servicios.map((servicio) => servicio.categoria))].sort((a, b) => a.localeCompare(b, 'es'));
+    return { categorias };
+  }
+
   @Post()
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR)
   async crear(@Body() dto: CrearServicioDto, @CurrentUser() usuario: ClaimsUsuario) {

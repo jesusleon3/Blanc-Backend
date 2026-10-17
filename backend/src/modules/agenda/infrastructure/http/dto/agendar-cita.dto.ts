@@ -135,3 +135,27 @@ export class ConsultarAgendaDto {
   @Min(0)
   desplazamiento?: number;
 }
+
+/**
+ * Agendar una garantía (`RN-GAR-01..06`, cierre de `P10`).
+ *
+ * **No lleva `servicioId` ni `clientaId`**: los dos salen de la cita original. Dejar elegir el
+ * servicio permitiría cambiar un retiro de $150 por un acrílico de $800 y cobrarlo como garantía.
+ */
+export class AgendarGarantiaDto {
+  @IsUUID()
+  citaGarantizadaId!: string;
+
+  @IsISO8601({ strict: true })
+  inicio!: string;
+
+  @IsOptional()
+  @IsUUID()
+  manicuristaId?: string;
+
+  /** Qué reportó la clienta. Va a la auditoría: es el rastro de por qué se concedió. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  motivo?: string;
+}

@@ -127,6 +127,24 @@ export const citas = agendaSchema.table(
      */
     citaOrigenId: uuid('cita_origen_id'),
     /**
+     * `true` si esta cita es la **reposición de un servicio bajo garantía** (`RN-GAR-01..06`).
+     *
+     * ## POR QUÉ NO SE REUTILIZA `cita_origen_id`
+     *
+     * Ese campo ya significa *"esta cita viene de aquella por una reprogramación"*, y de él depende
+     * `numero_de_reprogramaciones` y el tope de 3 (`DEC-042`). Darle un segundo significado haría
+     * que una garantía contara como reprogramación: una clienta con un servicio mal hecho se
+     * quedaría sin poder mover su cita de reposición. Son dos relaciones distintas entre citas y
+     * necesitan dos columnas.
+     */
+    esGarantia: boolean('es_garantia').notNull().default(false),
+    /**
+     * La cita `completada` que se está honrando. **Inseparable de `es_garantia`** por un `CHECK`:
+     * una garantía sin cita de origen no se podría verificar contra la ventana de 7 días, y una
+     * cita normal con origen de garantía sería un dato sin sentido que alguien interpretaría mal.
+     */
+    citaGarantizadaId: uuid('cita_garantizada_id'),
+    /**
      * Cuántas veces se ha reprogramado esta cadena. Se guarda en vez de recorrer la cadena en
      * cada comprobación: el tope son **3** (`DEC-042`) y recorrer N citas por cada intento sería
      * una consulta por eslabón para responder una pregunta que cabe en un entero.

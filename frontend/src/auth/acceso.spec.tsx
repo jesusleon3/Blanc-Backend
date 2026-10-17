@@ -48,6 +48,42 @@ describe('Control de acceso por rol', () => {
     expect(await screen.findByRole('link', { name: 'Bandeja' })).toBeInTheDocument();
   });
 
+  it('la DUEÑA ve el enlace de CONFIGURACIÓN y la ENCARGADA no', async () => {
+    /**
+     * El Backoffice cambia precios, duraciones y capacidad vendible: los números de los que salen
+     * los cobros y cuántas citas simultáneas se venden. La Encargada opera el día **dentro** de
+     * esas reglas; cambiarlas es de la Dueña.
+     *
+     * Dos listas de enlaces y no un `if` dentro de una: es la misma razón por la que la vista de
+     * iPad es un árbol de rutas aparte. Y recordatorio de `ADR-027`: esto decide qué se dibuja —
+     * el `@Roles` de cada endpoint (`SUPER_ADMIN`, `ADMINISTRADOR`) es lo que lo impone.
+     */
+    responderYo('ADMINISTRADOR');
+    responderPanel();
+
+    const { unmount } = montar(<App />, { ruta: '/' });
+    expect(await screen.findByRole('link', { name: 'Configuración' })).toBeInTheDocument();
+    unmount();
+
+    responderYo('GERENTE');
+    responderPanel();
+
+    montar(<App />, { ruta: '/' });
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Bandeja' })).toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument();
+  });
+
+  it('la ENCARGADA que abre `/admin` a mano acaba en su pantalla, no en el Backoffice', async () => {
+    // `ExigeRol` la devuelve a su ruta inicial. Y si forzara la petición, el endpoint responde 403.
+    responderYo('GERENTE');
+    responderPanel();
+
+    montar(<App />, { ruta: '/admin' });
+
+    expect(await screen.findByRole('link', { name: 'Bandeja' })).toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: 'Secciones de configuración' })).not.toBeInTheDocument();
+  });
+
   it('la MANICURISTA va a `/mi-agenda` y NO VE NINGÚN ENLACE al panel', async () => {
     /**
      * `DEC-040`: su vista no transporta PII ni señales de riesgo. La prueba comprueba las dos

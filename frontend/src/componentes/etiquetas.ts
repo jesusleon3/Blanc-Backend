@@ -114,6 +114,36 @@ export function pesos(centavos: number): string {
 }
 
 /**
+ * Pesos escritos por una persona a **centavos enteros** (`RN-COT-07`).
+ *
+ * ## POR QUÉ EL BACKOFFICE PIDE PESOS Y NO CENTAVOS
+ *
+ * El contrato son centavos y eso no se discute. Pero la Dueña captura precios de su lista, y
+ * pedirle "45000" para un servicio de $450 garantiza que algún día teclee "450" y venda un
+ * acrílico en cuatro pesos cincuenta. El formulario pide pesos y convierte aquí, en un solo sitio.
+ *
+ * `Math.round` y no `Math.trunc`: `12.34 * 100` da `1233.9999999999998` en coma flotante, y
+ * truncar lo convertiría en 1233 centavos — un centavo perdido por cada precio con decimales. El
+ * `@IsInt()` del DTO rechazaría el decimal, así que el defecto saldría como un `400` confuso en
+ * vez de como un precio mal guardado; aun así, convertir bien es la única forma honesta.
+ *
+ * Devuelve `null` si el texto no es un número: quien llama decide qué hacer con un campo inválido,
+ * que no es lo mismo que un cero.
+ */
+export function centavosDesdePesos(texto: string): number | null {
+  const limpio = texto.trim().replace(/,/g, '');
+  if (limpio === '') return null;
+  const valor = Number(limpio);
+  if (!Number.isFinite(valor) || valor < 0) return null;
+  return Math.round(valor * 100);
+}
+
+/** Centavos a un texto editable en pesos, para rellenar el formulario de edición. */
+export function pesosEditables(centavos: number): string {
+  return (centavos / 100).toFixed(2);
+}
+
+/**
  * Texto para un total que **puede estar sin cotizar**.
  *
  * `null` no es cero: es la negativa explícita del sistema a inventar un precio que debe fijar una

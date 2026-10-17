@@ -711,3 +711,186 @@ describe('Cortacircuitos de gasto de IA (`F-07`)', () => {
     expect(decision!.detalle).toMatchObject({ sinPresupuesto: true });
   });
 });
+
+describe('GATILLOS CRÍTICOS — palabras clave que escalan sin tocar el modelo', () => {
+  /**
+   * El sujeto de todo este bloque: un mensaje con un gatillo crítico **no llega al LLM**. Se dobla
+   * el intérprete con una intención inofensiva (`saludo`) para que, si el filtro fallara, el bot
+   * respondiera un saludo y la prueba lo delatara.
+   */
+  const conInterpreteEspia = async () => {
+    const interprete = interpreteFijo({ tipo: 'saludo', confianza: 1 });
+    const { db } = await preparar();
+    const preparado = await preparar({ interprete, presupuesto: new PresupuestoDeIaEnPostgres(db, 100) });
+    await preparado.crearClienta('Ana');
+    return { interprete, preparado, presupuesto: new PresupuestoDeIaEnPostgres(db, 100) };
+  };
+
+  it('«Los voy a acusar con PROFECO» escala como QUEJA, sin invocar al modelo', async () => {
+    /**
+     * **El caso que da nombre a esta familia de gatillos.**
+     *
+     * PROFECO es el regulador de consumo mexicano: una clienta que lo menciona está a un paso de
+     * una denuncia. Que un clasificador probabilístico decida si eso «es una queja» es
+     * exactamente el riesgo que no se delega — el coste de equivocarse no es una respuesta rara,
+     * es un expediente.
+     */
+    const { interprete, preparado } = await conInterpreteEspia();
+
+    await preparado.entra('Los voy a acusar con PROFECO si no me resuelven');
+
+    expect((await preparado.conversacion()).modo).toBe('humano');
+    expect((await preparado.conversacion()).motivoDeEscalamiento).toBe('queja_o_reclamo');
+    expect(interprete.interpretar).not.toHaveBeenCalled();
+  });
+
+  it('«Me lastimaron un dedo» escala como QUEJA: es daño físico, no calidad', async () => {
+    // Una respuesta automática —incluso correcta— leída por alguien a quien acaban de lastimar se
+    // percibe como desprecio. El bot no tiene nada que decir aquí.
+    const { interprete, preparado } = await conInterpreteEspia();
+
+    await preparado.entra('me lastimaron un dedo en mi cita de ayer');
+
+    expect((await preparado.conversacion()).motivoDeEscalamiento).toBe('queja_o_reclamo');
+    expect(interprete.interpretar).not.toHaveBeenCalled();
+  });
+
+  it('«Quiero hablar con la dueña» escala como SOLICITUD HUMANA', async () => {
+    const { interprete, preparado } = await conInterpreteEspia();
+
+    await preparado.entra('quiero hablar con la dueña por favor');
+
+    expect((await preparado.conversacion()).motivoDeEscalamiento).toBe('solicitud_humana');
+    expect(interprete.interpretar).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['legal: demanda', 'si no me contestan los voy a demandar', 'queja_o_reclamo'],
+    ['legal: abogado', 'ya hable con mi abogado', 'queja_o_reclamo'],
+    ['financiero: reembolso', 'exijo mi reembolso completo', 'queja_o_reclamo'],
+    ['financiero: fraude', 'esto es un fraude', 'queja_o_reclamo'],
+    ['sanitario: infección', 'creo que tengo una infeccion en la uña', 'queja_o_reclamo'],
+    ['sanitario: sangre', 'me sacaron sangre al limar', 'queja_o_reclamo'],
+    ['sanitario: hongos', 'me salieron hongos', 'queja_o_reclamo'],
+    ['sanitario: dolor', 'me duele mucho el dedo', 'queja_o_reclamo'],
+    ['garantía: se cayó', 'se me cayo una uña a los dos dias', 'queja_o_reclamo'],
+    ['garantía: palabra', 'esto tiene garantia?', 'queja_o_reclamo'],
+    ['humano: encargada', 'me pueden pasar con la encargada', 'solicitud_humana'],
+    ['humano: persona', 'prefiero una persona', 'solicitud_humana'],
+    ['humano: recepción', 'comunicame a recepcion', 'solicitud_humana'],
+  ] as const)('%s escala sin modelo y con el motivo correcto', async (_caso, mensaje, motivoEsperado) => {
+    const { interprete, preparado } = await conInterpreteEspia();
+
+    await preparado.entra(mensaje);
+
+    expect((await preparado.conversacion()).motivoDeEscalamiento).toBe(motivoEsperado);
+    expect(interprete.interpretar).not.toHaveBeenCalled();
+  });
+
+  it('un gatillo crítico recibe un acuse SOBRIO, no el «claro» genérico', async () => {
+    /**
+     * *"Claro, una encargada te atiende en breve"* está bien para *"quiero hablar con alguien"* y
+     * es impropio para *"me lastimaron"*: en ese momento el tono es parte del daño.
+     *
+     * Y el acuse **no se disculpa en nombre del salón** —eso es una admisión que corresponde a una
+     * persona con los hechos delante— ni **promete una solución** (`RN-GAR-04`: el beneficio lo
+     * decide la Dueña caso por caso).
+     */
+    const { preparado } = await conInterpreteEspia();
+
+    await preparado.entra('me lastimaron un dedo');
+
+    const acuse = preparado.ultimoTextoEnviado()!;
+    expect(acuse).toContain('administración');
+    expect(acuse).not.toContain('Claro');
+    // Sin disculpa ni promesa.
+    expect(acuse.toLowerCase()).not.toMatch(/disculp|perdon|lo sentimos/);
+    expect(acuse.toLowerCase()).not.toMatch(/te lo reponemos|sin costo|gratis|te devolvemos/);
+  });
+
+  it('pedir una persona recibe el acuse GENÉRICO, que es más ágil', async () => {
+    const { preparado } = await conInterpreteEspia();
+
+    await preparado.entra('quiero hablar con alguien');
+
+    expect(preparado.ultimoTextoEnviado()).toBe(RESPUESTAS.derivandoAHumano);
+  });
+
+  it('un gatillo crítico AVISA AL PERSONAL con el motivo real', async () => {
+    const { preparado } = await conInterpreteEspia();
+
+    await preparado.entra('los voy a reportar a profeco');
+
+    expect(preparado.notificador.conversacionNecesitaHumano).toHaveBeenCalledWith(
+      expect.objectContaining({ motivo: 'queja_o_reclamo', yaEstabaEscalada: false }),
+    );
+  });
+
+  it('un gatillo crítico NO CONSUME presupuesto de IA', async () => {
+    // Son los escalamientos más frecuentes; si consumieran, una tarde de quejas agotaría el tope
+    // sin haber llamado a OpenAI ni una vez.
+    const { db } = await preparar();
+    const presupuesto = new PresupuestoDeIaEnPostgres(db, 5);
+    const preparado = await preparar({ presupuesto });
+    await preparado.crearClienta('Ana');
+
+    await preparado.entra('esto es un robo, quiero mi devolucion');
+
+    expect((await presupuesto.consumoDeHoy()).llamadas).toBe(0);
+  });
+
+  it('el bot NO INTENTA AGENDAR cuando hay un gatillo crítico', async () => {
+    /**
+     * Es la parte menos obvia y la más importante: un mensaje puede traer **las dos cosas**. Una
+     * clienta enfadada que además pide hora —*"quiero que me reembolsen y agendar gelish el…"*—
+     * no debe acabar con una cita creada y la queja sin atender.
+     *
+     * El filtro corre **antes** de toda la capa de herramientas, así que no hay forma de que la
+     * petición de agendar se procese.
+     */
+    const { preparado } = await conInterpreteEspia();
+    const manana = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+    await preparado.entra(`quiero mi reembolso y tambien agendar gelish el ${manana} a las 13:00`);
+
+    const citas = await preparado.citaRepo.listarParaConsulta(
+      SUCURSAL,
+      { inicio: new Date(`${manana}T00:00:00-06:00`), fin: new Date(`${manana}T23:59:00-06:00`) },
+      { limite: 50, desplazamiento: 0 },
+    );
+    expect(citas).toHaveLength(0);
+    expect((await preparado.conversacion()).motivoDeEscalamiento).toBe('queja_o_reclamo');
+  });
+
+  describe('NO escala lo que no debe: los falsos positivos que el filtro por palabra evita', () => {
+    /**
+     * La primera versión comparaba por **subcadena** y produjo falsos positivos reales, verificados:
+     * *"diseño **persona**lizado"* escalaba como `solicitud_humana` —el motivo equivocado, que es
+     * justo lo que la Dueña mira— y *"eres un **robo**t"* como `queja_o_reclamo`.
+     */
+    it.each([
+      ['un diseño personalizado NO es pedir una persona', 'quiero un diseño personalizado', 'cotizacion_compleja'],
+      ['preguntar si es un robot NO es denunciar un robo', 'eres un robot?', null],
+    ] as const)('%s', async (_caso, mensaje, motivoEsperado) => {
+      expect(detectarEscalamientoPorTexto(mensaje)).toBe(motivoEsperado);
+    });
+
+    it('un mensaje normal de agendamiento NO dispara ningún gatillo', () => {
+      for (const mensaje of ['hola quiero agendar gelish', 'tienen lugar mañana?', 'cuanto cuesta el acrilico', 'si confirmo mi cita']) {
+        expect(detectarEscalamientoPorTexto(mensaje)).toBeNull();
+      }
+    });
+
+    it('el PLURAL sí se reconoce: `garantia` encuentra `garantias`', () => {
+      // Coincidencia por palabra admitiendo el plural español, no por prefijo arbitrario.
+      expect(detectarEscalamientoPorTexto('tienen garantias?')).toBe('queja_o_reclamo');
+      expect(detectarEscalamientoPorTexto('me salieron hongos')).toBe('queja_o_reclamo');
+    });
+
+    it('IGNORA ACENTOS Y MAYÚSCULAS en los gatillos nuevos', () => {
+      expect(detectarEscalamientoPorTexto('tengo una INFECCIÓN')).toBe('queja_o_reclamo');
+      expect(detectarEscalamientoPorTexto('hablar con la DUEÑA')).toBe('solicitud_humana');
+      expect(detectarEscalamientoPorTexto('es una ESTAFA')).toBe('queja_o_reclamo');
+    });
+  });
+});

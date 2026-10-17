@@ -35,8 +35,9 @@ export function Compositor({
   estadoDeVentana: EstadoDeVentana;
   enviandoTexto: boolean;
   enviandoPlantilla: boolean;
-  onEnviarTexto: (texto: string) => Promise<void>;
-  onEnviarPlantilla: (plantilla: string, parametros: string[]) => Promise<void>;
+  /** Resuelve a `true` si se envió. `false` conserva lo escrito para reintentarlo. */
+  onEnviarTexto: (texto: string) => Promise<boolean>;
+  onEnviarPlantilla: (plantilla: string, parametros: string[]) => Promise<boolean>;
 }) {
   const abierta = estadoDeVentana === 'abierta';
 
@@ -56,15 +57,15 @@ export function Compositor({
   );
 }
 
-function CajaDeTexto({ enviando, onEnviar }: { enviando: boolean; onEnviar: (texto: string) => Promise<void> }) {
+function CajaDeTexto({ enviando, onEnviar }: { enviando: boolean; onEnviar: (texto: string) => Promise<boolean> }) {
   const [texto, setTexto] = useState('');
 
   const enviar = async () => {
     const limpio = texto.trim();
     if (limpio.length === 0) return;
-    await onEnviar(limpio);
-    // Se limpia **después** de que la promesa resuelva: si el envío falla, lo escrito sigue ahí.
-    setTexto('');
+    // Se limpia **solo si el envío salió bien**: con una clienta esperando, perder lo escrito es
+    // peor que el propio fallo.
+    if (await onEnviar(limpio)) setTexto('');
   };
 
   return (
@@ -106,7 +107,7 @@ function SelectorDePlantilla({
 }: {
   estadoDeVentana: EstadoDeVentana;
   enviando: boolean;
-  onEnviar: (plantilla: string, parametros: string[]) => Promise<void>;
+  onEnviar: (plantilla: string, parametros: string[]) => Promise<boolean>;
 }) {
   const { data } = useQuery({
     queryKey: ['conversaciones', 'plantillas'],

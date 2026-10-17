@@ -1,5 +1,6 @@
 import type {
   Anticipo,
+  ModificadorDiseno,
   Cita,
   ReporteDeAgenda,
   ReporteDeAnticipos,
@@ -69,6 +70,8 @@ export const CLAVES_DE_CITA_OPERACION = completas<Cita>()([
   'estado',
   'cotizacionSnapshot',
   'clientaNombre',
+  'esGarantia',
+  'citaGarantizadaId',
   'clientaId',
   'citaOrigenId',
   'numeroDeReprogramaciones',
@@ -93,6 +96,10 @@ export const CLAVES_DE_CITA_IPAD: readonly string[] = [
   'estado',
   'cotizacionSnapshot',
   'clientaNombre',
+  // La Manicurista SÍ ve que es una garantía: tiene que saber que repone un trabajo antes de
+  // empezar. No revela nada que `DEC-040` proteja.
+  'esGarantia',
+  'citaGarantizadaId',
 ];
 
 export const CLAVES_DE_SILLA = completas<Silla>()(['id', 'sucursalId', 'nombre', 'activa']);
@@ -250,4 +257,13 @@ export const CLAVES_DE_INDICADORES = completas<ResumenAnalitico['indicadores']>(
   'efectividadDeListaDeEspera',
   'porcentajeResueltoPorElBot',
   'ingresoTotalEstimadoCentavos',
+]);
+
+export const CLAVES_DE_MODIFICADOR = completas<ModificadorDiseno>()([
+  'id',
+  'nombre',
+  'minutosAdicionales',
+  'precioAdicionalCentavos',
+  'activo',
+  'requiereCotizacionManual',
 ]);

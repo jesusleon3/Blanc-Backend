@@ -60,7 +60,11 @@ export function ListaDeCitas({ citas, sucursalId, onCambio }: { citas: Cita[]; s
 
             <div className="ml-auto flex flex-col items-end gap-1.5">
               <Insignia tono={TONO_DE_ESTADO_CITA[cita.estado]}>{ETIQUETA_DE_ESTADO_CITA[cita.estado]}</Insignia>
-              {cita.cotizacionSnapshot ? (
+              {/* Una garantía se marca **antes** que el importe: su `$0.00` no es un error de
+                  captura ni un servicio sin cotizar, y sin la insignia parecería uno de los dos.
+                  La ve también la Manicurista en su iPad — tiene que saber que repone un trabajo. */}
+              {cita.esGarantia ? <Insignia tono="info">Garantía · sin costo</Insignia> : null}
+              {cita.cotizacionSnapshot && !cita.esGarantia ? (
                 <span className="text-sm font-medium text-texto">{pesosOSinCotizar(cita.cotizacionSnapshot.totalCentavos)}</span>
               ) : null}
               {/* Indicadores discretos para recepción. `enListaRoja` solo llega a los roles de

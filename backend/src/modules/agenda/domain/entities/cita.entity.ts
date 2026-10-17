@@ -13,6 +13,10 @@ export interface CitaProps {
   estado: EstadoCita;
   citaOrigenId: string | null;
   numeroDeReprogramaciones: number;
+  /** `true` si es la reposición de un servicio bajo garantía (`RN-GAR-01..06`). */
+  esGarantia: boolean;
+  /** La cita `completada` que se honra. Inseparable de `esGarantia` (`CHECK` en la base). */
+  citaGarantizadaId: string | null;
   /** Cotización congelada al agendar (`04-data-model.md` §5.2). `null` hasta que exista `FL-COT-03`. */
   cotizacionSnapshot: unknown;
 }
@@ -95,6 +99,8 @@ export class Cita {
     estado?: EstadoCita;
     citaOrigenId?: string | null;
     numeroDeReprogramaciones?: number;
+    esGarantia?: boolean;
+    citaGarantizadaId?: string | null;
     cotizacionSnapshot?: unknown;
   }): Cita {
     validarRangoHorario(input.rangoHorario);
@@ -122,6 +128,8 @@ export class Cita {
       estado,
       citaOrigenId: input.citaOrigenId ?? null,
       numeroDeReprogramaciones: input.numeroDeReprogramaciones ?? 0,
+      esGarantia: input.esGarantia ?? false,
+      citaGarantizadaId: input.citaGarantizadaId ?? null,
       cotizacionSnapshot: input.cotizacionSnapshot ?? null,
     });
   }
@@ -220,6 +228,14 @@ export class Cita {
   get estado(): EstadoCita {
     return this.props.estado;
   }
+  get esGarantia(): boolean {
+    return this.props.esGarantia;
+  }
+
+  get citaGarantizadaId(): string | null {
+    return this.props.citaGarantizadaId;
+  }
+
   get citaOrigenId(): string | null {
     return this.props.citaOrigenId;
   }

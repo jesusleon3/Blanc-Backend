@@ -54,9 +54,16 @@ async function main(): Promise<void> {
     registrar('\nResumen:');
     registrar(`  Sucursales creadas: ${resumen.sucursalesCreadas} (ya existían ${resumen.sucursalesExistentes})`);
     registrar(`  Sillas creadas: ${resumen.sillasCreadas}`);
+    registrar(`  Servicios creados: ${resumen.serviciosCreados} (ya existían ${resumen.serviciosExistentes})`);
     registrar(`  Números de WhatsApp dados de alta: ${resumen.numerosDeWhatsappDadosDeAlta}`);
     registrar(`  Super Admin: ${resumen.superAdmin}`);
-    registrar('\nListo. Siguiente paso: dar de alta manicuristas y servicios por la API (ver GO_LIVE_RUNBOOK.md).');
+    if (resumen.serviciosCreados > 0) {
+      registrar('\n⚠️ IMPORTANTE: los precios y duraciones del catálogo son PROVISIONALES.');
+      registrar('   La tabla real de la Dueña no está en el repositorio y `PA-02` sigue parcialmente abierta.');
+      registrar('   Corrígelos en el Backoffice (/admin) ANTES de operar: la duración decide si una cita cabe');
+      registrar('   y el precio se congela en cada cita que se agende.');
+    }
+    registrar('\nListo. Siguiente paso: dar de alta manicuristas por la API o el Backoffice (ver GO_LIVE_RUNBOOK.md).');
   } finally {
     // El pool se cierra siempre: sin esto el proceso se queda colgado y en un contenedor de
     // Railway eso es un job que nunca termina.

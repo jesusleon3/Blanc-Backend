@@ -63,14 +63,30 @@ export function Conversacion({ id }: { id: string }) {
     ]);
   };
 
-  const conAviso = <T,>(accion: () => Promise<T>) => async () => {
+  /**
+   * Ejecuta una acción y **devuelve si salió bien**, en vez de volver a lanzar el error.
+   *
+   * ## POR QUÉ NO RELANZA (CORREGIDO)
+   *
+   * Antes relanzaba, para que el Compositor supiera que el envío falló y **no borrara el borrador**
+   * —lo correcto— pero todos los puntos de llamada son manejadores de evento (`onClick`,
+   * `onKeyDown`), que descartan la promesa con `void`. El resultado era un **rechazo no
+   * gestionado** en cada fallo: en el navegador, ruido en la consola; en las pruebas, un error
+   * suelto que Vitest señala como posible fuente de falsos positivos. Lo destapó la prueba del
+   * `409 VENTANA_24H_CERRADA`.
+   *
+   * Devolver un booleano conserva lo que importaba —quien llama decide si limpia el borrador— sin
+   * dejar una promesa rechazada en el aire. El error ya se muestra por `errorDeAccion`.
+   */
+  const conAviso = <T,>(accion: () => Promise<T>) => async (): Promise<boolean> => {
     setErrorDeAccion(null);
     try {
       await accion();
       await refrescarTodo();
+      return true;
     } catch (fallo) {
       setErrorDeAccion(fallo);
-      throw fallo;
+      return false;
     }
   };
 
@@ -106,7 +122,7 @@ export function Conversacion({ id }: { id: string }) {
 
           <div className="ml-auto flex gap-2">
             {laLlevaElBot ? (
-              <Boton variante="secundario" cargando={tomar.isPending} onClick={conAviso(() => tomar.mutateAsync())}>
+              <Boton variante="secundario" cargando={tomar.isPending} onClick={() => void conAviso(() => tomar.mutateAsync())()}>
                 Tomar conversación
               </Boton>
             ) : (
@@ -116,7 +132,7 @@ export function Conversacion({ id }: { id: string }) {
                * hablar con alguien y recibe de nuevo al bot a los diez minutos concluye, con razón,
                * que nadie la escuchó. Por eso este botón existe y no hay un temporizador.
                */
-              <Boton variante="secundario" cargando={devolver.isPending} onClick={conAviso(() => devolver.mutateAsync())}>
+              <Boton variante="secundario" cargando={devolver.isPending} onClick={() => void conAviso(() => devolver.mutateAsync())()}>
                 Devolver al bot
               </Boton>
             )}
@@ -146,12 +162,8 @@ export function Conversacion({ id }: { id: string }) {
         estadoDeVentana={estadoDeVentana}
         enviandoTexto={responder.isPending}
         enviandoPlantilla={enviarPlantilla.isPending}
-        onEnviarTexto={async (texto) => {
-          await conAviso(() => responder.mutateAsync(texto))();
-        }}
-        onEnviarPlantilla={async (plantilla, parametros) => {
-          await conAviso(() => enviarPlantilla.mutateAsync({ plantilla, parametros }))();
-        }}
+        onEnviarTexto={(texto) => conAviso(() => responder.mutateAsync(texto))()}
+        onEnviarPlantilla={(plantilla, parametros) => conAviso(() => enviarPlantilla.mutateAsync({ plantilla, parametros }))()}
       />
     </div>
   );

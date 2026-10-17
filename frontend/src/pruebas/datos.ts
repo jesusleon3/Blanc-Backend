@@ -1,5 +1,6 @@
 import type {
   Anticipo,
+  ModificadorDiseno,
   ResumenAnalitico,
   Cita,
   CitaAfectada,
@@ -192,6 +193,8 @@ export const cita = (extra: Partial<Cita> = {}): Cita => ({
   citaOrigenId: null,
   numeroDeReprogramaciones: 0,
   enListaRoja: false,
+  esGarantia: false,
+  citaGarantizadaId: null,
   ...extra,
 });
 
@@ -215,6 +218,8 @@ export const citaDeManicurista = (extra: Partial<Cita> = {}): Cita => {
     fin: completa.fin,
     estado: completa.estado,
     cotizacionSnapshot: completa.cotizacionSnapshot,
+    esGarantia: completa.esGarantia,
+    citaGarantizadaId: completa.citaGarantizadaId,
     ...(completa.clientaNombre !== undefined ? { clientaNombre: completa.clientaNombre } : {}),
   };
 };
@@ -322,5 +327,15 @@ export const resumenAnalitico = (extra: Partial<ResumenAnalitico> = {}): Resumen
   advertencias: [
     'El ingreso es un ESTIMADO: sale de lo cotizado al agendar, no de lo cobrado. No incluye extras, propinas, descuentos de mostrador ni productos, que viven en el registro paralelo de Excel.',
   ],
+  ...extra,
+});
+
+export const modificador = (extra: Partial<ModificadorDiseno> = {}): ModificadorDiseno => ({
+  id: 'mod-1',
+  nombre: 'Decoración francesa',
+  minutosAdicionales: 15,
+  precioAdicionalCentavos: 8000,
+  activo: true,
+  requiereCotizacionManual: false,
   ...extra,
 });

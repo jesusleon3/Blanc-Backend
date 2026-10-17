@@ -1252,4 +1252,232 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       expect(respuesta.body).toMatchObject({ sillasLibres: 2, manicuristasDisponibles: 2, capacidad: 2, hayLugar: true });
     });
   });
+
+  describe('GARANTÍAS (`RN-GAR-01..06`) — cierre de `P10`', () => {
+    const GARANTIAS = `${RUTA}/garantias`;
+
+    /** Una cita completada que terminó hace N días, para probar la ventana. */
+    const citaCompletadaHace = async (dias: number) => {
+      const inicio = new Date(Date.now() - dias * 86_400_000);
+      const { body: cita } = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ sucursalId, servicioId: servicio.id, clientaId: CLIENTA, inicio: inicio.toISOString() })
+        .expect(201);
+
+      await request(app.getHttpServer()).post(`${RUTA}/${cita.id}/completar`).set('Authorization', `Bearer ${encargada}`).expect(200);
+      return cita as { id: string };
+    };
+
+    const agendarGarantia = (citaGarantizadaId: string, extra: Record<string, unknown> = {}, autorizacion = encargada) =>
+      request(app.getHttpServer())
+        .post(GARANTIAS)
+        .set('Authorization', `Bearer ${autorizacion}`)
+        .send({
+          citaGarantizadaId,
+          // Mañana: dentro del horario abierto siempre de la sucursal de prueba.
+          inicio: new Date(Date.now() + 86_400_000).toISOString(),
+          ...extra,
+        });
+
+    it('DENTRO de la ventana: agenda la reposición con COSTO CERO y vinculada al servicio original', async () => {
+      /**
+       * `totalCentavos: 0` y **no `null`**: `null` significa *"nadie lo ha cotizado"* (`DEC-033`),
+       * `0` significa *"es gratis"*. La diferencia importa en Analítica — una garantía no debe
+       * contar como servicio sin cotizar ni alterar el ingreso estimado.
+       */
+      const original = await citaCompletadaHace(2);
+
+      const respuesta = await agendarGarantia(original.id, { motivo: 'Se le desprendió una uña a los dos días' }).expect(201);
+
+      expect(respuesta.body).toMatchObject({
+        esGarantia: true,
+        citaGarantizadaId: original.id,
+        estado: 'agendada',
+        // El servicio se toma de la cita original, no de la petición.
+        servicioId: servicio.id,
+      });
+      expect(respuesta.body.cotizacionSnapshot.totalCentavos).toBe(0);
+      expect(respuesta.body.sillaId).not.toBeNull();
+    });
+
+    it('FUERA de la ventana: `409 GARANTIA_VENCIDA`, diciendo cuántos días han pasado', async () => {
+      // `RN-GAR-01`: 7 días. El mensaje tiene que dar el dato para que quien atiende pueda
+      // explicárselo a la clienta y, si la Dueña hace una excepción, agendar una cita normal.
+      const original = await citaCompletadaHace(10);
+
+      const respuesta = await agendarGarantia(original.id).expect(409);
+
+      expect(respuesta.body.error.code).toBe('GARANTIA_VENCIDA');
+      // La cita EMPEZÓ hace 10 días y duró una hora, así que **terminó** hace 9 días y 23 horas:
+      // `9` días completos. La ventana se cuenta desde el fin del servicio —cuando se entregó el
+      // trabajo— que es el punto de referencia honesto, no desde cuando la clienta se sentó.
+      expect(respuesta.body.error.details).toMatchObject({ diasDeCobertura: 7, diasTranscurridos: 9 });
+    });
+
+    it('EN EL BORDE de la ventana (día 7) todavía entra', async () => {
+      // El límite es `<= 7 días` (`RN-GAR-01`), no `< 7`: el séptimo día está cubierto.
+      const original = await citaCompletadaHace(6);
+
+      await agendarGarantia(original.id).expect(201);
+    });
+
+    it('`RN-GAR-02`: sobre una cita CANCELADA no aplica, y el mensaje NO dice "se te pasó el plazo"', async () => {
+      /**
+       * La distinción importa para quien atiende: una cita cancelada no tiene garantía por mucho
+       * que sea de ayer, y decir *"venció"* haría pensar a la clienta que llegó tarde cuando el
+       * problema es otro — que el servicio nunca se dio.
+       */
+      const { body: cita } = await agendar().expect(201);
+      await request(app.getHttpServer()).post(`${RUTA}/${cita.id}/cancelar`).set('Authorization', `Bearer ${encargada}`).expect(200);
+
+      const respuesta = await agendarGarantia(cita.id).expect(409);
+
+      expect(respuesta.body.error.code).toBe('GARANTIA_SOBRE_CITA_NO_COMPLETADA');
+      expect(respuesta.body.error.details).toMatchObject({ estado: 'cancelada' });
+    });
+
+    it('una cita `no_show` tampoco: el servicio no se realizó', async () => {
+      const { body: cita } = await agendar().expect(201);
+      await request(app.getHttpServer()).post(`${RUTA}/${cita.id}/no-show`).set('Authorization', `Bearer ${encargada}`).expect(200);
+
+      expect((await agendarGarantia(cita.id).expect(409)).body.error.code).toBe('GARANTIA_SOBRE_CITA_NO_COMPLETADA');
+    });
+
+    it('UN SERVICIO SE HONRA UNA SOLA VEZ: la segunda garantía da `409`', async () => {
+      const original = await citaCompletadaHace(1);
+      await agendarGarantia(original.id).expect(201);
+
+      const respuesta = await agendarGarantia(original.id, { inicio: new Date(Date.now() + 2 * 86_400_000).toISOString() }).expect(409);
+
+      expect(respuesta.body.error.code).toBe('GARANTIA_YA_OTORGADA');
+    });
+
+    it('NO SE PUEDE GARANTIZAR UNA GARANTÍA: sería una cadena indefinida de reposiciones gratis', async () => {
+      const original = await citaCompletadaHace(1);
+      const { body: garantia } = await agendarGarantia(original.id).expect(201);
+      await request(app.getHttpServer()).post(`${RUTA}/${garantia.id}/completar`).set('Authorization', `Bearer ${encargada}`).expect(200);
+
+      const respuesta = await agendarGarantia(garantia.id, { inicio: new Date(Date.now() + 3 * 86_400_000).toISOString() }).expect(409);
+
+      expect(respuesta.body.error.code).toBe('GARANTIA_SOBRE_UNA_GARANTIA');
+    });
+
+    it('404 si la cita original no existe', async () => {
+      await agendarGarantia(randomUUID()).expect(404);
+    });
+
+    it('una garantía para una clienta en LISTA ROJA nace `agendada`, NO `en_espera_pago`', async () => {
+      /**
+       * **No es una excepción a `RN-ANT-01`**: el anticipo es el 40 % del servicio y el servicio
+       * cuesta `0`, así que no hay nada que anticipar. Pedirle un adelanto a una clienta para que
+       * le arreglen gratis un trabajo mal hecho sería absurdo además de inútil.
+       */
+      const { body: cita } = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({
+          sucursalId,
+          servicioId: servicio.id,
+          clientaId: clientaEnListaRoja.id,
+          inicio: new Date(Date.now() - 86_400_000).toISOString(),
+        })
+        .expect(201);
+      // Nació `en_espera_pago`; se confirma el pago para poder completarla.
+      expect(cita.estado).toBe('en_espera_pago');
+      const anticipo = await request(app.getHttpServer())
+        .get(`/v1/anticipos/de-cita/${cita.id}`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .post(`/v1/anticipos/${anticipo.body.id}/confirmar-pago`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ referenciaPago: 'REF-GAR-1' })
+        .expect(200);
+      await request(app.getHttpServer()).post(`${RUTA}/${cita.id}/completar`).set('Authorization', `Bearer ${encargada}`).expect(200);
+
+      const garantia = await agendarGarantia(cita.id).expect(201);
+
+      expect(garantia.body.estado).toBe('agendada');
+      expect(garantia.body.cotizacionSnapshot.totalCentavos).toBe(0);
+      // Y no se generó anticipo para la garantía.
+      await request(app.getHttpServer())
+        .get(`/v1/anticipos/de-cita/${garantia.body.id}`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(404);
+    });
+
+    it('la garantía APARECE en la agenda del día, marcada como tal', async () => {
+      const original = await citaCompletadaHace(1);
+      const { body: garantia } = await agendarGarantia(original.id).expect(201);
+
+      const manana = new Date(Date.now() + 86_400_000);
+      const respuesta = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({
+          sucursalId,
+          inicio: new Date(manana.getTime() - 12 * 3_600_000).toISOString(),
+          fin: new Date(manana.getTime() + 12 * 3_600_000).toISOString(),
+        })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      const enLaAgenda = respuesta.body.citas.find((c: { id: string }) => c.id === garantia.id);
+      expect(enLaAgenda).toMatchObject({ esGarantia: true, citaGarantizadaId: original.id });
+    });
+
+    it('LA MANICURISTA TAMBIÉN VE `esGarantia`: tiene que saber que repone un trabajo', async () => {
+      /**
+       * Va en el objeto `base` del presenter, así que llega a su vista de iPad. Es deliberado:
+       * ocultárselo la dejaría descubriéndolo con la clienta delante. Y no revela nada que
+       * `DEC-040` proteja — no es el estado de riesgo de la clienta, es una propiedad del servicio.
+       */
+      const original = await citaCompletadaHace(1);
+      await agendarGarantia(original.id, { manicuristaId: ana.id }).expect(201);
+
+      const manana = new Date(Date.now() + 86_400_000);
+      const respuesta = await request(app.getHttpServer())
+        .get(RUTA)
+        .query({
+          sucursalId,
+          inicio: new Date(manana.getTime() - 12 * 3_600_000).toISOString(),
+          fin: new Date(manana.getTime() + 12 * 3_600_000).toISOString(),
+        })
+        .set('Authorization', `Bearer ${manicuristaAna}`)
+        .expect(200);
+
+      expect(respuesta.body.citas[0]).toMatchObject({ esGarantia: true });
+      // Y sigue sin ver lo que no le toca.
+      expect(respuesta.body.citas[0]).not.toHaveProperty('clientaId');
+      expect(respuesta.body.citas[0]).not.toHaveProperty('enListaRoja');
+    });
+
+    it('expone los DÍAS DE COBERTURA vigentes, para que el panel no los lleve escritos', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .get(`${GARANTIAS}/cobertura`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(200);
+
+      expect(respuesta.body).toEqual({ diasDeCobertura: 7 });
+    });
+
+    describe('RBAC', () => {
+      it('la MANICURISTA recibe 403: conceder una garantía es una decisión de negocio', async () => {
+        const original = await citaCompletadaHace(1);
+        await agendarGarantia(original.id, {}, manicuristaAna).expect(403);
+      });
+
+      it('la RECEPCIONISTA recibe 403', async () => {
+        const original = await citaCompletadaHace(1);
+        await agendarGarantia(original.id, {}, recepcionista).expect(403);
+      });
+
+      it('la DUEÑA puede, igual que la Encargada', async () => {
+        // `RN-GAR-03` exige acción HUMANA explícita, no que sea de la Dueña: el acto de crearla ES
+        // esa acción. Y es la Encargada quien está en el salón cuando la clienta llega.
+        const original = await citaCompletadaHace(1);
+        await agendarGarantia(original.id, {}, dueña).expect(201);
+      });
+    });
+  });
 });

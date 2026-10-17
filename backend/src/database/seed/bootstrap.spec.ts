@@ -5,6 +5,8 @@ import { DrizzleSucursalRepository } from '../../modules/sucursales-y-personal/i
 import { DrizzleSillaRepository } from '../../modules/agenda/infrastructure/persistence/drizzle-silla.repository';
 import { DrizzleUsuarioRepository } from '../../modules/identidad-y-accesos/infrastructure/persistence/drizzle-usuario.repository';
 import { DrizzleConversacionRepository } from '../../modules/conversaciones/infrastructure/persistence/drizzle-conversacion.repository';
+import { DrizzleServicioRepository } from '../../modules/catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
+import { SERVICIOS_DE_BLANC } from './catalogo-de-blanc';
 import { Rol } from '../../shared/auth/rol';
 
 /** El `sub` de Supabase es un **uuid**, y `usuarios.supabase_user_id` es una columna `uuid`. */
@@ -142,6 +144,7 @@ describe('Bootstrap de producción (idempotente)', () => {
         sucursalesCreadas: 3,
         sucursalesExistentes: 0,
         sillasCreadas: 5 + 3 + 1,
+        serviciosCreados: SERVICIOS_DE_BLANC.length,
         superAdmin: 'creado',
       });
     });
@@ -256,6 +259,85 @@ describe('Bootstrap de producción (idempotente)', () => {
 
       // Y falla ANTES de escribir nada: la base queda intacta.
       expect(await sucursales.listar()).toHaveLength(0);
+    });
+  });
+
+  describe('catálogo inicial', () => {
+    it('siembra los servicios base con sus duraciones y precios', async () => {
+      const { db } = await repos();
+      const servicioRepo = new DrizzleServicioRepository(db);
+
+      await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      const servicios = await servicioRepo.listar();
+      expect(servicios.length).toBe(SERVICIOS_DE_BLANC.length);
+
+      const gelish = servicios.find((servicio) => servicio.nombre === 'Gelish');
+      expect(gelish).toBeDefined();
+      // La duración es lo que `AgendarCitaUseCase` usa para derivar el fin de la cita: si está mal,
+      // el sistema vende huecos del tamaño equivocado y nada falla.
+      expect(gelish!.duracionBaseMinutos).toBe(45);
+      expect(gelish!.precioBaseCentavos).toBe(35000);
+      expect(gelish!.activo).toBe(true);
+    });
+
+    it('«Diseño especial» nace con COTIZACIÓN MANUAL (`DEC-033`)', async () => {
+      /**
+       * Corresponde a las celdas que `PA-02` dejó con valor cualitativo —*"dentro de la hora
+       * dependiendo del diseño"*— y es la forma honesta de representarlas: no un número inventado.
+       * Su cita nace con `totalCentavos: null` y el bot escala en vez de agendarla.
+       */
+      const { db } = await repos();
+      await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      const servicios = await new DrizzleServicioRepository(db).listar();
+      const especial = servicios.find((servicio) => servicio.nombre === 'Diseño especial');
+
+      expect(especial!.requiereCotizacionManual).toBe(true);
+      // Y el resto no lo exige: sería paralizar el agendamiento automático entero.
+      expect(servicios.filter((servicio) => servicio.requiereCotizacionManual)).toHaveLength(1);
+    });
+
+    it('NO REIMPONE un precio que alguien ya corrigió desde el Backoffice', async () => {
+      /**
+       * **La prueba más importante del seed de catálogo.**
+       *
+       * Los valores de `catalogo-de-blanc.ts` son **provisionales**: la tabla real de la Dueña no
+       * está en el repositorio y `PA-02` sigue parcialmente abierta. Reescribir el precio que
+       * alguien corrigió sería **devolver un cobro a un número ficticio, y en silencio** — con
+       * dinero real de por medio, que es exactamente el riesgo que el `DISCOVERY_CHECKLIST`
+       * advierte sobre este punto.
+       */
+      const { db } = await repos();
+      await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      const servicioRepo = new DrizzleServicioRepository(db);
+      const gelish = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gelish')!;
+      gelish.actualizarDatos({ precioBaseCentavos: 42000, duracionBaseMinutos: 50 });
+      await servicioRepo.guardar(gelish);
+
+      const segunda = await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      expect(segunda.serviciosCreados).toBe(0);
+      const despues = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gelish')!;
+      expect(despues.precioBaseCentavos).toBe(42000);
+      expect(despues.duracionBaseMinutos).toBe(50);
+    });
+
+    it('NO REACTIVA un servicio dado de baja', async () => {
+      // Desactivarlo fue retirarlo de la venta a propósito. Recrearlo lo volvería a ofrecer.
+      const { db } = await repos();
+      await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      const servicioRepo = new DrizzleServicioRepository(db);
+      const retiro = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Retiro')!;
+      retiro.desactivar();
+      await servicioRepo.guardar(retiro);
+
+      const segunda = await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      expect(segunda.serviciosCreados).toBe(0);
+      expect((await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Retiro')!.activo).toBe(false);
     });
   });
 });

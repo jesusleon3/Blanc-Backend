@@ -37,6 +37,8 @@ export class DrizzleCitaRepository implements CitaRepository {
           estado: cita.estado,
           cotizacionSnapshot: cita.cotizacionSnapshot,
           citaOrigenId: cita.citaOrigenId,
+          esGarantia: cita.esGarantia,
+          citaGarantizadaId: cita.citaGarantizadaId,
           numeroDeReprogramaciones: cita.numeroDeReprogramaciones,
         })
         .onConflictDoUpdate({
@@ -47,6 +49,8 @@ export class DrizzleCitaRepository implements CitaRepository {
             rangoHorario: cita.rangoHorario,
             estado: cita.estado,
             cotizacionSnapshot: cita.cotizacionSnapshot,
+            esGarantia: cita.esGarantia,
+            citaGarantizadaId: cita.citaGarantizadaId,
             citaOrigenId: cita.citaOrigenId,
             numeroDeReprogramaciones: cita.numeroDeReprogramaciones,
             actualizadoEn: new Date(),
@@ -157,6 +161,16 @@ export class DrizzleCitaRepository implements CitaRepository {
     return filas.length === 0 ? null : this.aEntidad(filas[0]);
   }
 
+  async existeGarantiaDe(citaGarantizadaId: string): Promise<boolean> {
+    const filas = await this.db
+      .select({ id: citas.id })
+      .from(citas)
+      .where(and(eq(citas.citaGarantizadaId, citaGarantizadaId), eq(citas.esGarantia, true)))
+      .limit(1);
+
+    return filas.length > 0;
+  }
+
   async listarActivasYaTerminadas(ahora: Date, limite: number): Promise<Cita[]> {
     const filas = await this.db
       .select()
@@ -231,6 +245,8 @@ export class DrizzleCitaRepository implements CitaRepository {
       estado: fila.estado as EstadoCita,
       cotizacionSnapshot: fila.cotizacionSnapshot,
       citaOrigenId: fila.citaOrigenId,
+      esGarantia: fila.esGarantia,
+      citaGarantizadaId: fila.citaGarantizadaId,
       numeroDeReprogramaciones: fila.numeroDeReprogramaciones,
     });
   }

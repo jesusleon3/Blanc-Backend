@@ -39,6 +39,16 @@ export function citaAJson(
     // `undefined` si no se resolvió (p. ej. la respuesta de agendar, que devuelve una cita suelta),
     // que es distinto de "esta clienta no tiene nombre".
     clientaNombre: datosDeClienta.clientaNombre,
+    /**
+     * `esGarantia` va en `base`, así que **la Manicurista también lo ve**, y es deliberado: tiene
+     * que saber que está reponiendo un trabajo —probablemente el suyo— antes de empezar. Ocultarlo
+     * la dejaría descubriéndolo con la clienta delante.
+     *
+     * No revela nada protegido por `DEC-040`: no es el estado de riesgo de la clienta, es una
+     * propiedad del servicio que va a dar.
+     */
+    esGarantia: cita.esGarantia,
+    citaGarantizadaId: cita.citaGarantizadaId,
   };
 
   // La salida temprana es la barrera: todo lo que se añada debajo es, por construcción, invisible

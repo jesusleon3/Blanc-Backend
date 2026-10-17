@@ -66,6 +66,15 @@ export interface CitaRepository {
   buscarPendienteDeConfirmacionDeClienta(sucursalId: string, clientaId: string): Promise<Cita | null>;
 
   /**
+   * `true` si esa cita completada **ya tiene** una garantía agendada (`RN-GAR-01`).
+   *
+   * Un servicio se honra una sola vez. La base lo impone además con un índice único parcial: esta
+   * consulta da el mensaje legible, y el índice evita que dos personas atendiendo a la vez creen
+   * dos reposiciones gratuitas del mismo servicio.
+   */
+  existeGarantiaDe(citaGarantizadaId: string): Promise<boolean>;
+
+  /**
    * Citas activas cuyo horario **ya terminó** — las que el barrido de cierre pasa a `completada`
    * (`DEC-030`, `ADR-025`).
    *

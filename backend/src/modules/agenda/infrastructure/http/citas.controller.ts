@@ -3,6 +3,7 @@ import { Roles } from '../../../../shared/auth/roles.decorator';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
 import { AgendarCitaUseCase } from '../../application/use-cases/agendar-cita.use-case';
+import { AgendarGarantiaUseCase, diasDeGarantia } from '../../application/use-cases/agendar-garantia.use-case';
 import { AsignarManicuristaEnSucursalUseCase } from '../../application/use-cases/asignar-manicurista-en-sucursal.use-case';
 import { SolicitarConfirmacionCitaUseCase } from '../../application/use-cases/solicitar-confirmacion-cita.use-case';
 import { ConfirmarCitaUseCase } from '../../application/use-cases/confirmar-cita.use-case';
@@ -11,7 +12,14 @@ import { ReprogramarCitaUseCase } from '../../application/use-cases/reprogramar-
 import { MarcarNoShowUseCase } from '../../application/use-cases/marcar-no-show.use-case';
 import { CompletarCitaUseCase } from '../../application/use-cases/completar-cita.use-case';
 import { ConsultarAgendaUseCase } from '../../application/use-cases/consultar-agenda.use-case';
-import { AgendarCitaDto, AsignarManicuristaDto, CancelarCitaDto, ConsultarAgendaDto, ReprogramarCitaDto } from './dto/agendar-cita.dto';
+import {
+  AgendarCitaDto,
+  AgendarGarantiaDto,
+  AsignarManicuristaDto,
+  CancelarCitaDto,
+  ConsultarAgendaDto,
+  ReprogramarCitaDto,
+} from './dto/agendar-cita.dto';
 import { citaAJson } from './cita.presenter';
 
 /**
@@ -43,6 +51,7 @@ export class CitasController {
     private readonly marcarNoShow: MarcarNoShowUseCase,
     private readonly completarCita: CompletarCitaUseCase,
     private readonly consultarAgenda: ConsultarAgendaUseCase,
+    private readonly agendarGarantia: AgendarGarantiaUseCase,
   ) {}
 
   /**
@@ -93,6 +102,46 @@ export class CitasController {
       usuario,
     );
     return citaAJson(cita, usuario);
+  }
+
+  /**
+   * Agenda la **reposición de un servicio bajo garantía** (`RN-GAR-01..06`, cierre de `P10`).
+   *
+   * ## POR QUÉ `GERENTE` TAMBIÉN PUEDE, Y NO SOLO LA DUEÑA
+   *
+   * `RN-GAR-03` exige **acción humana explícita**, no que sea de la Dueña: el acto de crear la
+   * garantía ES esa acción. Y es la Encargada quien está en el salón cuando la clienta llega con
+   * la uña despegada — si solo pudiera la Dueña, el caso esperaría a que ella conteste y la clienta
+   * esperaría de pie.
+   *
+   * `RN-GAR-04` sí reserva a la Dueña el **beneficio** cuando no es una reposición (descuento,
+   * producto): eso sigue fuera del sistema, decidido caso por caso como la regla dice.
+   *
+   * Responde `409` con el código exacto si la garantía está vencida
+   * (`GARANTIA_VENCIDA`), si la cita no se completó (`GARANTIA_SOBRE_CITA_NO_COMPLETADA`), si ya se
+   * honró (`GARANTIA_YA_OTORGADA`) o si se intenta garantizar una garantía.
+   */
+  @Post('garantias')
+  @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
+  @HttpCode(201)
+  async garantia(@Body() dto: AgendarGarantiaDto, @CurrentUser() usuario: ClaimsUsuario) {
+    const cita = await this.agendarGarantia.ejecutar(
+      {
+        citaGarantizadaId: dto.citaGarantizadaId,
+        inicio: new Date(dto.inicio),
+        manicuristaId: dto.manicuristaId ?? null,
+        ...(dto.motivo ? { motivo: dto.motivo } : {}),
+      },
+      usuario,
+    );
+    return citaAJson(cita, usuario);
+  }
+
+  /** Días de cobertura vigentes, para que el panel los muestre sin tenerlos escritos. */
+  @Get('garantias/cobertura')
+  @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
+  cobertura() {
+    return { diasDeCobertura: diasDeGarantia() };
   }
 
   @Post(':id/manicurista')

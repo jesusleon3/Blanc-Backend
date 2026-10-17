@@ -24,7 +24,27 @@ const EXPLICACIONES: Record<string, string> = {
   SUCURSAL_SIN_NUMERO_DE_WHATSAPP: 'Esta sucursal todavía no tiene número de WhatsApp dado de alta, así que no se puede enviar nada.',
   ANTICIPO_NO_PENDIENTE: 'Ese anticipo ya no está esperando pago: alguien lo confirmó o lo expiró antes.',
   NO_AUTENTICADO: 'La sesión expiró. Vuelve a iniciar sesión.',
+  /**
+   * Baja de personal con citas futuras. **Se amplía el mensaje del dominio, no se repite**: el del
+   * backend dice qué hacer ("reasígnalas o cancélalas"), y aquí se añade la consecuencia de no
+   * hacerlo, que es el motivo por el que la baja se bloquea en vez de avisar y seguir.
+   */
+  MANICURISTA_CON_CITAS_ACTIVAS:
+    'Esta manicurista tiene citas futuras asignadas. Darla de baja las dejaría sin nadie que las atienda y nadie se enteraría hasta que la clienta llegara: primero reasígnalas o cancélalas en la Agenda.',
 };
+
+/**
+ * Códigos cuyo mensaje del backend se muestra **tal cual**, y la razón de que estén listados.
+ *
+ * Los cuatro errores de garantía (`GARANTIA_VENCIDA`, `GARANTIA_SOBRE_CITA_NO_COMPLETADA`,
+ * `GARANTIA_YA_OTORGADA`, `GARANTIA_SOBRE_UNA_GARANTIA`) traen **datos reales en el texto** —
+ * cuántos días cubre la garantía, cuántos han pasado, en qué estado está la cita— que una
+ * explicación fija de este archivo no podría incluir. Copiarlos aquí con otras palabras los
+ * empobrecería y además divergiría del dominio en la primera edición.
+ *
+ * Esta lista no es código: es la nota de por qué no hay entradas para ellos arriba.
+ */
+
 
 export function AvisoDeError({ error, className = '' }: { error: unknown; className?: string }) {
   if (!error) return null;

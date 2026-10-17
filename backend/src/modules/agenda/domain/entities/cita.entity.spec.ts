@@ -28,6 +28,8 @@ function enEstado(estado: EstadoCita): Cita {
     rangoHorario: base.rangoHorario,
     estado,
     citaOrigenId: null,
+    esGarantia: false,
+    citaGarantizadaId: null,
     numeroDeReprogramaciones: 0,
     cotizacionSnapshot: null,
   });

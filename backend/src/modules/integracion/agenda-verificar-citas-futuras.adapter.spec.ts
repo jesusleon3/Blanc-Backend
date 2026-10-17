@@ -57,6 +57,8 @@ async function preparar() {
       rangoHorario: base.rangoHorario,
       estado,
       citaOrigenId: null,
+    esGarantia: false,
+    citaGarantizadaId: null,
       numeroDeReprogramaciones: 0,
       cotizacionSnapshot: null,
     });

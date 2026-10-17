@@ -1209,6 +1209,133 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-17 — Plataforma completa (Parte 2/2): Backoffice Administrativo, palabras clave críticas, sembrado de catálogo y `P10` Garantías. **🏁 `P10` CERRADO · CIERRE 100 % DE CÓDIGO**
+
+**Backend: 1252 pruebas en 79 suites** (+48). **Frontend: 228 pruebas en 14 suites** (+48). Los seis controles del backend y los cuatro del frontend en verde.
+
+> **Dos cosas que conviene leer antes del resto:** el punto 2 cuenta un falso positivo del detector de palabras clave que habría escalado las quejas con el motivo equivocado (y el motivo es justo lo que la Dueña lee para priorizar), y el punto 7 explica por qué una de las cuatro pantallas que pedía la orden **no se construyó** — el motor que necesita no existe.
+
+---
+
+#### 1. `P10` Garantías — cerrado, y **sin Bounded Context propio**
+
+La orden pedía implementar `RN-GAR-01..06` y pasar `P10` de *Diferido* a **Cerrado**. Está cerrado, pero hay que decir con precisión qué se cerró: **no se construyó lo que la ficha original de `P10` describía.**
+
+La ficha pedía un Bounded Context de Garantías con aggregate, eventos de dominio y modelo de persistencia propios. Lo que hay es **una `Cita` con dos columnas más** en el esquema de Agenda (`es_garantia`, `cita_garantizada_id`, migración `0016_citas_de_garantia.sql`). La razón no es economía de esfuerzo:
+
+- Una garantía **ocupa una silla y un rato de trabajo**, exactamente como cualquier cita. El invariante que la gobierna es la `EXCLUDE USING gist` de `agenda.citas`. Un aggregate aparte tendría que coordinarse con ese invariante **desde otro esquema y sin FK** (`ADR-005`) para garantizar algo que una fila en la misma tabla garantiza sola.
+- Lo que las seis reglas exigen es **validación, no un ciclo de vida nuevo**: que la cita original esté `completada`, que la ventana siga abierta, que no se haya honrado ya, que no sea garantía de una garantía. La cuarta sólo es imponible por la base con un **índice único parcial sobre `cita_garantizada_id`**, y eso exige vivir en esa tabla.
+- `PLATFORM_ARCHITECTURE_MODEL.md` §3 pone un criterio exigente a propósito para crear una capa nueva, y Garantías no lo pasa: no tiene lenguaje propio ni ciclo de vida independiente del de la cita que repone.
+
+El razonamiento completo quedó en `ARCHITECTURE_CLOSURE_PLAN.md`, **Enmienda 1 de `P10`**, con el cierre anterior conservado debajo para que se vea qué cambió.
+
+**La tensión de la orden, resuelta sin maquillarla.** La orden describe la garantía como *"$0"*, y `RN-GAR-04` dice que **no hay un beneficio fijo**: la Dueña decide caso por caso entre reposición, descuento o producto. Se reconcilia así: el sistema agenda la **reposición**, que es la única de las tres que consume capacidad; el `$0` es la consecuencia del beneficio elegido, no un cálculo automático; descuentos y productos siguen fuera del sistema, como la regla define. La pantalla lo dice en voz alta para que "garantía" no acabe significando "reposición" por costumbre de la interfaz.
+
+**`RN-GAR-03` se cumple por construcción**, no por un `if`: no existe ninguna vía por la que el sistema conceda una garantía solo. El bot no puede (el gatillo `garantia` la escala a una persona), y el acto de que alguien autorizado la cree **es** la acción humana explícita que la regla exige. Su motivo va a auditoría: es el único rastro de por qué se concedió.
+
+**Tres decisiones del caso de uso que te van a extrañar al leerlo:**
+
+| Decisión | Por qué |
+|---|---|
+| El servicio sale de la **cita original**, nunca de la petición | Dejar elegirlo convertiría un retiro de $150 en un acrílico de $800 cobrado como garantía |
+| La ventana se cuenta desde el **fin** del servicio, no desde el inicio | Es cuando se entregó el trabajo. Mi primera prueba esperaba 10 días y salieron 9: una cita que empezó hace 10 días con 60 min terminó hace 9 d 23 h, y `Math.floor` da 9. **La prueba estaba mal, no el código** |
+| Nace `agendada`, nunca `en_espera_pago` | No es una excepción a `RN-ANT-01`: el anticipo es el 40 % del servicio y el servicio cuesta cero, así que no hay nada que anticipar |
+
+**Por qué NO se reutilizó `citaOrigenId`:** ya significa *"reprogramada desde"*, y de él dependen `numeroDeReprogramaciones` y el tope de 3 de `DEC-042`. Una garantía que contara como reprogramación dejaría a una clienta con un trabajo mal hecho **sin poder mover su cita de reposición**.
+
+Rutas: `POST /v1/agenda/citas/garantias` y `GET /v1/agenda/citas/garantias/cobertura`, ambas declaradas **antes** de las rutas `:id` del controlador — si se declararan después, Nest capturaría `garantias` como un id.
+
+---
+
+#### 2. Palabras clave críticas (PROFECO) — y el falso positivo que encontré verificándolo
+
+`FRASES_DE_ESCALAMIENTO` crece con los cuatro grupos que pedía la orden (autoridad/PROFECO, daño físico, petición explícita de hablar con la Dueña, garantía). El filtro corre **antes del LLM**, así que una amenaza legal no gasta una llamada a OpenAI ni depende de que el modelo la interprete bien.
+
+> 🐛 **El detector comparaba subcadenas, y eso clasificaba mal dos casos reales.** `persona` encajaba dentro de *"diseño personalizado"* → se escalaba como `solicitud_humana` en vez de `cotizacion_compleja`. Y `robo` encajaba dentro de *"robot"* → `queja_o_reclamo`.
+>
+> **El motivo no es un detalle cosmético: es lo que la Dueña lee en la Bandeja para decidir a quién atender primero**, y `SEVERIDAD_DE_MOTIVO` pinta `queja_o_reclamo` en rojo. Una clienta preguntando si hablaba con un robot habría aparecido como una queja urgente, y un diseño por cotizar como alguien pidiendo hablar con una persona.
+>
+> Corregido con `apareceEnElTexto()`: límite de palabra con soporte de plural español (`(s|es)?`), y las frases de varias palabras siguen comparándose completas porque ya son distintivas por sí mismas. Las 11 frases quedan verificadas una por una.
+
+El acuse de recibo se separó en dos: `RESPUESTAS.escalamientoCritico` para `queja_o_reclamo` y el genérico para el resto. A quien amenaza con PROFECO no se le contesta *"te derivo con una persona"* con el mismo tono que a quien pregunta un precio.
+
+---
+
+#### 3. Backoffice Administrativo (frontend) — `/admin`, exclusivo de la Dueña
+
+Cuatro pestañas: **Catálogo y tiempos**, **Modificadores de diseño**, **Sucursales y sillas** y **Personal**. Guarda `ROLES_DE_ADMINISTRACION`, enlace en la lista de administración del `Layout` (lista aparte, no un `if` dentro de la común — la misma razón de siempre).
+
+**Por qué está separado de la operación, en una frase:** en la Agenda se trabaja *dentro* de las reglas; aquí se cambian los números de los que las reglas salen. Un error aquí **no da un mensaje de error**: da citas que no caben, cobros equivocados o huecos que no existen, y se descubre en el mostrador.
+
+**El campo más peligroso de todo el panel es `duracionBaseMinutos`.** De él deriva `AgendarCitaUseCase` el fin de cada cita, y de ahí el `tstzrange` y la `EXCLUDE`. Si queda corto, el sistema **vende huecos que no existen y nada falla en ninguna parte**. Por eso se muestra en la tabla junto al precio —no escondido en un detalle—, el formulario dice qué consecuencia tiene, y el cliente rechaza `0` o no entero antes de llamar al backend (cuyo `@Min(0)` **acepta el cero**).
+
+**El precio se captura en pesos y se convierte a centavos** (`centavosDesdePesos`). El contrato son centavos (`RN-COT-07`) y eso no se discute, pero pedirle "45000" a quien captura una lista de precios garantiza que algún día teclee "450" y venda un acrílico en cuatro pesos cincuenta. La conversión usa `Math.round` y no `Math.trunc`: `850.5 * 100` da `85049.99999999999` en coma flotante.
+
+**La edición manda sólo los campos modificados.** Reenviar el precio sin haberlo tocado lo reescribiría con el valor redondeado del campo de texto, alterando un importe que nadie pidió cambiar.
+
+**Lo que el Backoffice NO ofrece, a propósito:** dar de alta sucursales. Una sucursal necesita horario semanal por bloques, descansos y días festivos (`RN-AGE-12`); un formulario aquí sería una forma cómoda de dejarla a medio configurar en producción, vendiendo huecos a horas en las que está cerrada. Se hace con `db:seed`, que es idempotente y queda versionado.
+
+En Personal, la baja **puede ser rechazada** con `409 MANICURISTA_CON_CITAS_ACTIVAS`, y la pantalla no intenta adivinarlo. Podría contar las citas futuras y esconder el botón; sería peor, porque parecería que la función no existe en vez de explicar qué falta. El aviso amplía el mensaje del dominio con la consecuencia: esas citas quedarían **sin nadie que las atienda** y nadie se enteraría hasta que la clienta llegara.
+
+---
+
+#### 4. `GET /v1/catalogo-y-cotizacion/servicios/categorias` — por qué no es una tabla
+
+El Backoffice necesita un selector de categorías, y la salida fácil era crear una tabla `categorias`. **`categoria` es texto en `Servicio`**: el modelo nunca le dio identidad propia y no la necesita — no tiene atributos, ni reglas, ni nada que referenciar. Una tabla sería inventar un aggregate por comodidad de una pantalla.
+
+Lo que el selector necesita de verdad es *"¿qué categorías ya existen?"*, para que nadie teclee `Manos` en un servicio y `manos` en el siguiente y acaben siendo dos. Eso se responde con un `DISTINCT` y se presenta con un `datalist` —no un `select`—, porque hay que poder escribir una nueva.
+
+---
+
+#### 5. Sembrado de catálogo (`db:seed`) — y por qué los números van marcados como provisionales
+
+`sembrarCatalogo()` crea 12 servicios en tres categorías (`Manos`, `Pies`, `Decorado`). Es idempotente por nombre en minúsculas, **nunca reimpone precios ni duraciones** de un servicio que ya existe y **no reactiva** uno dado de baja.
+
+> ⚠️ **Las duraciones y los precios son PROVISIONALES, y está escrito en el archivo, en la salida del CLI y en `GO_LIVE_RUNBOOK.md` §2.2, que es donde lo lee quien va a sembrar producción.** La tabla real de la Dueña no está en el repositorio y `PA-02` sigue parcialmente abierta; los valores vienen del mockup, que se declara a sí mismo *"100 % ficticios"*. Sembrarlos como *"el catálogo"* sin marcarlos sería exactamente el riesgo de *"dinero real de por medio"* del que advierte el Discovery Checklist: alguien cobraría con ellos.
+
+`Diseño especial` nace con `requiereCotizacionManual: true`.
+
+**El runbook quedó desactualizado al hacer esto y lo corregí:** su §2.3 decía que los servicios del catálogo **no** se siembran y había que darlos de alta por API. Ahora se siembran, y §2.2 lleva el aviso de los valores provisionales con las dos consecuencias separadas —el precio es lo que se cobra; la duración es de donde sale el fin de la cita— porque son dos riesgos distintos y el segundo no da ningún error.
+
+---
+
+#### 6. Dos correcciones de contrato y una de propagación de errores
+
+**`ModificadorDiseno` entra al contrato de `P8`.** No estaba porque ninguna pantalla lo leía. Y su forma es justo la clase de campo que se escribe de memoria mal: el frontend declaró primero `minutosExtra`/`precioExtraCentavos`, que **no existen**, y `tsc` lo aceptaba porque nadie comparaba contra el presenter real. Los nombres reales son `minutosAdicionales`/`precioAdicionalCentavos`.
+
+**`esGarantia` y `citaGarantizadaId` son campos obligatorios de `Cita` en el frontend**, y al declararlos así el build se rompió con tres errores — que es **exactamente el mecanismo que `P8` fue diseñado para producir**: `ClavesCompletas` resuelve a `never` cuando el arreglo de claves declaradas está incompleto. Van en las dos formas, operación **e iPad**: la Manicurista tiene que saber que repone un trabajo antes de empezar, y eso no revela nada que `DEC-040` proteja.
+
+> 🐛 **Defecto real de la Fase 5 que corregí: un rechazo no gestionado en la Bandeja.** `conAviso()` en `Conversacion.tsx` relanzaba el error para que el Compositor supiera que el envío falló y **no borrara el borrador** —lo correcto—, pero todos los puntos de llamada son manejadores de evento que descartan la promesa con `void`. Cada fallo dejaba una promesa rechazada en el aire: en el navegador, ruido en consola; en las pruebas, el error suelto que Vitest señala como posible fuente de **falsos positivos**. Lo destapó la prueba del `409 VENTANA_24H_CERRADA`. Ahora devuelve un booleano: se conserva lo que importaba (quien llama decide si limpia el borrador) sin dejar nada rechazado.
+
+---
+
+#### 7. ⚠️ Lo que la orden pedía y NO se construyó: «Combinaciones de servicios (tiempos compuestos)»
+
+La orden lista cuatro bloques en la pestaña de Catálogo: Categorías, Servicios, Modificadores y **Combinaciones**. Los tres primeros están. El cuarto **no se puede construir hoy**, y hay que decirlo claro en vez de entregar una pantalla que parezca funcionar.
+
+**El motor no existe.** `AgendarCitaUseCase` cotiza con `incluyeModificadores: false`: una cita cobra y ocupa la duración **base** del servicio, sin sumar los modificadores vinculados. `FL-COT-03` está **deliberadamente diferido** en el backend desde la Fase 2.
+
+Una interfaz de combinaciones sobre un motor que no suma haría que la Dueña configurara precios y tiempos **confiando en un cálculo que nadie hace**, y la diferencia la pagaría ella en cada cita de diseño: citas que se alargan sobre la siguiente, y servicios cobrados por debajo de lo configurado.
+
+Así que la pestaña de Modificadores **administra lo que sí es real** (minutos y precio adicionales, y el vínculo con cada servicio) y encabeza con un aviso que dice textualmente que *todavía no se suman solos a la cita*, con qué hacer entretanto. **Hay una prueba que protege ese aviso**, porque lo que protege es una ausencia: si alguien implementa el motor, tendrá que quitarla a conciencia.
+
+**Para construirlo hace falta una decisión de negocio, no sólo código:** si un diseño con pedrería alarga 20 minutos, ¿se suman al final de la cita (y puede dejar de caber en el horario) o se reserva el hueco mayor desde el principio (y se desperdicia capacidad cuando la clienta no lo pide)? Eso no lo decide el backend.
+
+---
+
+#### 8. Con qué te vas a tropezar
+
+| Si vas a… | Ten en cuenta |
+|---|---|
+| Cambiar la lista de estados de `Cita` | Sigue siendo el array de TS + el `CHECK` + los dos `WHERE` de las `EXCLUDE`. La migración `0016` **no toca nada de eso**: añade columnas y su propio `CHECK` de coherencia |
+| Añadir una palabra clave de escalamiento | Una sola palabra se compara **con límite de palabra**; una frase, completa. Antes de añadir una corta, piensa en qué palabras más largas la contienen (`robo` ⊂ `robot`) |
+| Tocar `DIAS_DE_GARANTIA` | La interfaz lo **consulta**, no lo tiene escrito. Si lo cambias, la pantalla dirá lo nuevo sin tocar código |
+| Añadir un campo a un presenter | Regenera el contrato (`npm run contrato:actualizar`) **y** añade la clave a `claves-del-contrato.ts`, o `tsc` del frontend falla con un `never` que no dice de dónde viene |
+| Correr las pruebas del frontend | El ruido de `[MSW] Error: intercepted a request without a matching request handler` en `acceso.spec.tsx` es **deliberado**: las pruebas de la Manicurista no declaran manejadores del panel, y que esas peticiones no ocurran es parte de la aserción |
+| Sembrar el catálogo en un entorno con datos | Es idempotente y **no reimpone** precios ni duraciones. Pero sus números son provisionales: si ya hay precios reales capturados, no los va a pisar, y si no los hay, no los inventa bien |
+
+---
+
 ### 2026-10-16 (e) — Plataforma completa (Parte 1/2): Fase 6 Analítica, cortacircuitos de IA (`F-07`) y retención (`ADR-029`)
 
 **Backend: 1204 pruebas en 79 suites** (+39). **Frontend: 180 pruebas en 11 suites** (+27). Los seis controles del backend y los cuatro del frontend en verde.

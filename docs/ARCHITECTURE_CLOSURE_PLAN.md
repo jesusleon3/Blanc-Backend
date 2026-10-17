@@ -197,7 +197,61 @@ Ningún otro intento de cierre sobrevive: todo lo demás (73 Business Rules, 36 
 - **Fase que bloquea:** Solo esa funcionalidad puntual dentro de Fase 1/2 — no bloquea el resto del módulo.
 - **¿Puede resolverse durante desarrollo?** Sí, sin riesgo real — es una columna aditiva sin dependencias.
 
-### P10 — Formalización del Bounded Context de Garantías — **✅ CERRADO COMO DIFERIDO POST-MVP (2026-10-16)**
+### P10 — Formalización del Bounded Context de Garantías — **✅ CERRADO (2026-10-17)**
+
+> ## ENMIENDA 1 (2026-10-17) — Cerrado por implementación, **sin Bounded Context propio**
+>
+> El 2026-10-16 este punto se cerró *como diferido* porque Garantías no estaba en el MVP. El
+> 2026-10-17 se autorizó construirlo, y eso es lo que reabre el punto según su propio criterio
+> (*"qué lo reabre: que se autorice construir el módulo"*). Queda **cerrado**, y hay que decir con
+> precisión qué se cerró y qué no, porque **no se construyó lo que la ficha original describía**.
+>
+> **Lo que se construyó.** `RN-GAR-01..06` quedan implementadas y vigiladas por pruebas:
+> `AgendarGarantiaUseCase` (`backend/src/modules/agenda/application/use-cases/`), las columnas
+> `es_garantia`/`cita_garantizada_id` con su `CHECK` de coherencia y su índice único parcial
+> (migración `0016_citas_de_garantia.sql`), los endpoints `POST /v1/agenda/citas/garantias` y
+> `GET /v1/agenda/citas/garantias/cobertura`, y la acción en la Agenda Operativa del frontend. La
+> ventana es configurable por `DIAS_DE_GARANTIA` con 7 días por defecto (`RN-GAR-01`).
+>
+> **Lo que NO se construyó, y por qué eso cierra el punto en vez de dejarlo a medias.** No hay
+> Bounded Context de Garantías, ni aggregate propio, ni eventos de dominio, ni tablas propias. Una
+> garantía **es una `Cita`** con dos columnas más, en el esquema de Agenda. La ficha original pedía
+> lo contrario, y la implementación demostró que lo contrario era el diseño equivocado:
+>
+> - Una garantía **ocupa una silla y un rato de trabajo**, exactamente igual que cualquier cita. El
+>   invariante que la gobierna es la `EXCLUDE USING gist` de `agenda.citas`. Un aggregate aparte
+>   tendría que coordinarse con ese invariante **desde otro esquema y sin FK** (`ADR-005`) para
+>   garantizar algo que una fila en la misma tabla garantiza sola.
+> - Lo que `RN-GAR-01..06` exigen es **validación, no un ciclo de vida nuevo**: que la cita original
+>   esté `completada`, que la ventana siga abierta, que no se haya honrado ya, que no sea una
+>   garantía de una garantía. Las cuatro son comprobaciones sobre una `Cita`, y la cuarta —el índice
+>   único parcial sobre `cita_garantizada_id`— sólo es imponible por la base si vive en esa tabla.
+> - El criterio de `PLATFORM_ARCHITECTURE_MODEL.md` §3 para crear una capa nueva es exigente a
+>   propósito, y Garantías no lo pasa: no tiene lenguaje propio, ni reglas de consistencia propias,
+>   ni un ciclo de vida independiente del de la cita que repone.
+>
+> **Lo que sigue fuera del sistema, y es la regla quien lo deja fuera.** `RN-GAR-04` establece que
+> **no hay un beneficio fijo**: la Dueña decide caso por caso entre reposición, descuento o
+> producto. El sistema agenda la **reposición**, que es la única de las tres que consume capacidad.
+> Descuentos y productos se acuerdan con la clienta y no se registran aquí — no es una carencia que
+> haya que tapar, es el alcance que la regla define.
+>
+> **`RN-GAR-03` se cumple por construcción:** no existe ninguna vía por la que el sistema conceda
+> una garantía por su cuenta. El bot no puede; cuando una clienta reclama, el filtro determinista
+> la escala a una persona (gatillo `garantia`). El acto de que alguien autorizado cree la garantía
+> **es** la acción humana explícita que la regla exige, y su motivo queda en auditoría.
+>
+> **Qué quedaría pendiente si algún día hiciera falta un módulo propio:** solo lo haría falta si
+> aparecieran beneficios que el sistema deba calcular o liquidar (un vale, un saldo a favor). Ese
+> día la ficha original vuelve a ser el punto de partida, y la decisión tendría que empezar por
+> `PLATFORM_ARCHITECTURE_MODEL.md` §3. Hoy no hay nada de eso.
+>
+> **Definition of Done de esta enmienda:** este documento. `01-domain-discovery.md` y
+> `04-data-model.md` **no** se modifican, y la razón es la misma por la que el punto se cierra así:
+> no hay subdominio nuevo que registrar ni tabla nueva que documentar — hay dos columnas en
+> `agenda.citas`, que es modelo físico y vive en la migración.
+
+#### Cierre anterior (2026-10-16), vigente hasta la Enmienda 1
 
 > **No se formaliza, y no formalizarlo es la decisión correcta.** Este punto fija su propio alcance con una frase que decide la cuestión: *"resolver únicamente antes de implementar el módulo de Garantías — **no antes**"*. Garantías **no está en el MVP**: el MVP cierra con la Fase 7 y su alcance es Agenda, Catálogo, CRM, Anticipos, Conversaciones/WhatsApp, Bot IA, Planificador y el Frontend operativo.
 >
@@ -262,7 +316,7 @@ Este documento se escribió el 2026-07-16, antes de que existieran `PLATFORM_ARC
 | P7 — Sign-off ADR-008 | Cliente | `ADR-008-*.md` | ~~Fase 4 + trámite Meta~~ Ninguna | **Resuelto (2026-10-09)** | Ninguna — API oficial en exclusiva (`DEC-043`); `ADR-008` pasa a `Accepted` con Enmienda 1. Revierte la petición de doble adaptador de 1.29. **Dispara el trámite de Meta: ahora es camino crítico** |
 | P8 — `05-api-design.md` | Arquitectura | `05-api-design.md` (ya existe, parcial) | Módulos sin contrato específico todavía | **✅ RESUELTO (2026-10-16).** Los contratos concretos están **derivados del código** en `contratos/api-v1.json` (80 rutas con sus roles + 12 formas de respuesta, invocando los presenters reales), verificados por los **dos** proyectos: un campo que desaparezca del backend **rompe el build del frontend**. Verificado por mutación en ambas direcciones. `05-api-design.md` sigue siendo la fuente de las convenciones (§0 bis) | Redactar contratos módulo por módulo |
 | P9 — `usuarios↔manicuristas_recurso` | Arquitectura | `04-data-model.md` | Rol Manicurista (Fase 1/2) | **Resuelto (2026-10-14)** | Columna `usuarios.manicurista_id`, migración `0009` |
-| P10 — Bounded Context de Garantías | Arquitectura + Negocio | `01-domain-discovery.md`, `04-data-model.md` | Módulo Garantías (post-MVP) | **Cerrado como DIFERIDO post-MVP (2026-10-16)** — su propio alcance lo decide: *"resolver únicamente antes de implementar el módulo — no antes"*, y Garantías no está en el MVP. `RN-GAR-01..06` siguen `Aprobada` y `PoliticaDeGarantia` aceptada en `ADR-023`: el vacío es de modelado, no de requisitos | Se añade a esta matriz ahora: la ficha de `P10` (Sección 1) existía desde 2026-08-04 pero **nunca se incorporó aquí**, como el propio documento dejó constancia. Diferido, no resuelto |
+| P10 — Bounded Context de Garantías | Arquitectura + Negocio | Este documento (Enmienda 1) | Implementado en el BC de Agenda | **CERRADO (2026-10-17)** — `RN-GAR-01..06` implementadas: `AgendarGarantiaUseCase`, migración `0016`, dos endpoints y la acción en la Agenda Operativa. **Sin Bounded Context propio, y eso es la decisión**: una garantía es una `Cita` con dos columnas más, porque el invariante que la gobierna es la `EXCLUDE` de `agenda.citas` | Cerrado **resuelto**, no diferido. La ficha original pedía un BC aparte; la implementación mostró que era el diseño equivocado — ver Enmienda 1 para el razonamiento completo y para lo que `RN-GAR-04` deja fuera del sistema a propósito |
 
 ---
 
@@ -345,7 +399,7 @@ Cuando los quince puntos están en verde, el proyecto puede empezar a programars
 | `P3` | Resuelto — las tres máquinas: `Cita` y `Conversacion` documentadas, `TicketEscalamiento` descartado (`DEC-045`) |
 | `P6` | Resuelto — `ADR-028` y `ADR-029`. **`F-27` aceptando una desviación declarada** |
 | `P8` | Resuelto — contrato derivado del código y verificado por los dos proyectos |
-| `P10` | **Cerrado como diferido post-MVP**, por su propio criterio de alcance |
+| `P10` | **Cerrado (2026-10-17)**: implementado dentro del BC de Agenda, sin BC propio (Enmienda 1) |
 
 **Los tres bloqueadores no negociables (`P3`, `P4`, `P5`) están resueltos.**
 

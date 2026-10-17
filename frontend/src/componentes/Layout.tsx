@@ -23,7 +23,10 @@ const ENLACES = [
  * Y recordatorio de `ADR-027`: esto decide qué se dibuja. La autorización está en el `@Roles` del
  * endpoint, que responde `403` aunque alguien navegue a mano.
  */
-const ENLACES_DE_ADMINISTRACION = [{ a: '/analitica', texto: 'Analítica' }] as const;
+const ENLACES_DE_ADMINISTRACION = [
+  { a: '/analitica', texto: 'Analítica' },
+  { a: '/admin', texto: 'Configuración' },
+] as const;
 
 /**
  * Marco del panel operativo.

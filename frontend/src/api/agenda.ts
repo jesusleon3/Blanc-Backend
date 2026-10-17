@@ -73,4 +73,35 @@ export const agendaApi = {
     peticion<Disponibilidad>('/v1/agenda/disponibilidad', { query: { sucursalId, inicio, fin } }),
 
   sillas: (sucursalId: string) => peticion<{ sillas: Silla[] }>('/v1/agenda/sillas', { query: { sucursalId } }),
+
+  /**
+   * Agendar la **reposición de un servicio bajo garantía** (`P10`, `RN-GAR-01..06`).
+   *
+   * ## LO QUE ESTA LLAMADA ES, EN TÉRMINOS DE LA REGLA
+   *
+   * `RN-GAR-03` exige **acción humana explícita**: nada se aprueba solo. Invocar esto *es* esa
+   * acción — por eso el formulario pide el motivo que reportó la clienta, que va a la auditoría
+   * como rastro de por qué se concedió.
+   *
+   * La cita nace en `$0` y **no genera anticipo**, que no es una excepción a `RN-ANT-01`: el
+   * anticipo es el 40 % del servicio y el servicio cuesta cero.
+   *
+   * **No se manda el servicio.** Lo toma de la cita original el backend: una reposición repone
+   * *ese* trabajo, y dejar elegir otro servicio aquí convertiría la garantía en un vale.
+   *
+   * Errores de negocio que hay que saber distinguir — los cuatro son `409` salvo el `404`:
+   * `GARANTIA_VENCIDA` (fuera de la ventana), `GARANTIA_SOBRE_CITA_NO_COMPLETADA`,
+   * `GARANTIA_YA_OTORGADA` y `GARANTIA_SOBRE_UNA_GARANTIA`.
+   */
+  agendarGarantia: (datos: { citaGarantizadaId: string; inicio: string; manicuristaId?: string; motivo?: string }) =>
+    peticion<Cita>(`${RUTA}/garantias`, { metodo: 'POST', cuerpo: datos }),
+
+  /**
+   * Los días de cobertura vigentes.
+   *
+   * Se consultan en vez de escribir "7" en la interfaz porque el valor sale de
+   * `DIAS_DE_GARANTIA` en el servidor: si la Dueña lo cambia, la pantalla tiene que decir lo mismo
+   * que el backend va a hacer cumplir.
+   */
+  coberturaDeGarantia: () => peticion<{ diasDeCobertura: number }>(`${RUTA}/garantias/cobertura`),
 };

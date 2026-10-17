@@ -670,4 +670,65 @@ describe('Catálogo — Servicios E2E (HTTP) — FL-COT-01', () => {
       expect(respuesta.body.error.message).toContain('precioBaseCentavos');
     });
   });
+
+  describe('`GET /categorias` — selector del Backoffice (Parte 2)', () => {
+    const RUTA_CATEGORIAS = `${RUTA}/categorias`;
+
+    const crearServicio = (nombre: string, categoria: string) =>
+      request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR, 'admin-categorias')}`)
+        .send({ nombre, categoria, duracionBaseMinutos: 30, precioBaseCentavos: 20000 })
+        .expect(201);
+
+    it('devuelve las categorías EN USO, sin duplicados y ordenadas', async () => {
+      /**
+       * No es una tabla: `categoria` es **texto en `Servicio`** y el modelo nunca le dio identidad
+       * propia. Lo que el selector necesita es *"¿qué categorías ya existen?"*, para que nadie
+       * teclee `Manos` en un servicio y `manos` en el siguiente y acaben siendo dos.
+       */
+      await crearServicio('Pedicure spa', 'Pies');
+      await crearServicio('Gelish manos', 'Manos');
+      await crearServicio('Acrílico', 'Manos');
+
+      const respuesta = await request(app.getHttpServer())
+        .get(RUTA_CATEGORIAS)
+        .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR, 'admin-cat-lee')}`)
+        .expect(200);
+
+      // Este archivo comparte la base entre pruebas, así que hay más categorías de las creadas
+      // aquí: se verifica lo que el endpoint garantiza —presencia, sin duplicados y orden— y no
+      // una lista exacta que dependería del orden de ejecución.
+      const categorias = respuesta.body.categorias as string[];
+      expect(categorias).toContain('Manos');
+      expect(categorias).toContain('Pies');
+      // `Manos` aparece en dos servicios y sale UNA vez: es el `DISTINCT`.
+      expect(categorias.filter((categoria) => categoria === 'Manos')).toHaveLength(1);
+      expect([...categorias]).toEqual([...categorias].sort((a, b) => a.localeCompare(b, 'es')));
+    });
+
+    it('incluye la categoría de un servicio DADO DE BAJA', async () => {
+      // El Backoffice tiene que poder reactivar o recrear algo en esa categoría sin volver a
+      // teclear el nombre y arriesgarse a una variante.
+      const { body: servicio } = await crearServicio('Servicio retirado', 'Especiales');
+      await request(app.getHttpServer())
+        .post(`${RUTA}/${servicio.id}/desactivar`)
+        .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR, 'admin-cat-baja')}`)
+        .expect(204);
+
+      const respuesta = await request(app.getHttpServer())
+        .get(RUTA_CATEGORIAS)
+        .set('Authorization', `Bearer ${token(Rol.ADMINISTRADOR, 'admin-cat-baja2')}`)
+        .expect(200);
+
+      expect(respuesta.body.categorias).toContain('Especiales');
+    });
+
+    it('NO se confunde con un id: la ruta está declarada antes', async () => {
+      await request(app.getHttpServer())
+        .get(RUTA_CATEGORIAS)
+        .set('Authorization', `Bearer ${token(Rol.GERENTE, 'gerente-cat')}`)
+        .expect(200);
+    });
+  });
 });

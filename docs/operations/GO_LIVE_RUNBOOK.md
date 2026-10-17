@@ -103,18 +103,30 @@ Deja listo:
 - **Las 3 sucursales** — Zibatá, Lomas, Álamos — con el horario real: **L-V 9:00–12:00 y 15:00–18:00, sábado 9:00–15:00, domingo cerrado** (`RN-AGE-12`).
 - **Las sillas virtuales**: Zibatá 5, Lomas 3, **Álamos 1** (`DEC-031`).
 - **El Super Admin** vinculado a su cuenta de Supabase, con alcance `GLOBAL`.
+- **El catálogo base**: 12 servicios en tres categorías (`Manos`, `Pies`, `Decorado`), uno de ellos (`Diseño especial`) marcado como de cotización manual.
+
+> ## ⚠️ LOS PRECIOS Y DURACIONES DEL CATÁLOGO SON PROVISIONALES
+>
+> **Hay que revisarlos con la Dueña antes de atender a la primera clienta.** La tabla real de precios y tiempos **no está en el repositorio** y `PA-02` sigue parcialmente abierta; los valores sembrados vienen del mockup, que se declara a sí mismo *"100 % ficticios"*.
+>
+> Importa por dos razones distintas, y la segunda es la grave:
+>
+> 1. El **precio** es lo que se cobra y la base del 40 % del anticipo (`RN-ANT-01`).
+> 2. La **duración** es de donde `AgendarCitaUseCase` deriva el fin de cada cita. Si queda corta, el sistema **vende huecos que no existen y nada falla en ninguna parte**: las citas simplemente no caben, y se descubre en el mostrador con dos clientas esperando.
+>
+> Se corrigen en **Configuración → Catálogo y tiempos** del panel, o por `PATCH /v1/catalogo-y-cotizacion/servicios/:id`. El seed **no los vuelve a pisar** al correrlo otra vez.
 
 **Es idempotente**: correrlo dos veces no duplica ni falla. Y es más fino que eso — **no reimpone valores de fábrica**: si alguien ajustó el horario de una sucursal desde el panel o desactivó una silla por reparación, el seed **no lo pisa**. Volver a correrlo es seguro siempre.
 
 Si falta algún dato del Super Admin, **falla antes de escribir nada** y dice qué variable. Es deliberado: una base sembrada sin usuario inicial **parece correcta** y no se puede usar, porque todos los endpoints de alta exigen `SUPER_ADMIN` o `ADMINISTRADOR`.
 
-### 2.3 Lo que el seed NO siembra, y hay que dar de alta por la API
+### 2.3 Lo que el seed NO siembra, y hay que dar de alta por la API o por el panel
 
-- **Manicuristas** y su asignación a sucursal → `POST /v1/sucursales-y-personal/manicuristas`
-- **Servicios del catálogo** con duración y precio → `POST /v1/catalogo-y-cotizacion/servicios`
+- **Manicuristas** y su asignación a sucursal → **Configuración → Personal** del panel, o `POST /v1/sucursales-y-personal/manicuristas`
 - **Usuarios de las Encargadas** → `POST /v1/identidad-y-accesos/usuarios` + vincular su `UID` de Supabase
+- **Los precios y duraciones reales del catálogo** → el seed deja 12 servicios **con valores provisionales** (ver el aviso de §2.2); confirmarlos con la Dueña es parte de la puesta en marcha, no algo posterior
 
-Van por API y no por seed porque **son datos que cambian** (alta y baja de personal, cambios de precio) y tienen su RBAC. El seed cubre solo el arranque en frío.
+Van por API y no por seed porque **son datos que cambian** (alta y baja de personal, cambios de precio) y tienen su RBAC. El seed cubre solo el arranque en frío: deja el sistema arrancable, no configurado.
 
 > **Sin manicuristas asignadas, el motor de disponibilidad no vende nada**: la capacidad es el mínimo entre sillas y personal. Si la agenda dice que no hay lugar a ninguna hora, esto es lo primero que hay que mirar.
 

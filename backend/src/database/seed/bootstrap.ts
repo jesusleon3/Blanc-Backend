@@ -8,6 +8,9 @@ import { DrizzleUsuarioRepository } from '../../modules/identidad-y-accesos/infr
 import { DrizzleConversacionRepository } from '../../modules/conversaciones/infrastructure/persistence/drizzle-conversacion.repository';
 import { Rol } from '../../shared/auth/rol';
 import { HORARIO_DE_BLANC, SUCURSALES_DE_BLANC, nombreDeSilla } from './datos-de-blanc';
+import { SERVICIOS_DE_BLANC } from './catalogo-de-blanc';
+import { Servicio } from '../../modules/catalogo-y-cotizacion/domain/entities/servicio.entity';
+import { DrizzleServicioRepository } from '../../modules/catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
 
 export interface DatosDelSuperAdmin {
   email: string;
@@ -28,6 +31,8 @@ export interface ResumenDeBootstrap {
   sucursalesCreadas: number;
   sucursalesExistentes: number;
   sillasCreadas: number;
+  serviciosCreados: number;
+  serviciosExistentes: number;
   numerosDeWhatsappDadosDeAlta: number;
   superAdmin: 'creado' | 'ya_existia' | 'revinculado';
 }
@@ -79,6 +84,8 @@ export async function ejecutarBootstrap(db: Database, opciones: OpcionesDeBootst
     sucursalesCreadas: 0,
     sucursalesExistentes: 0,
     sillasCreadas: 0,
+    serviciosCreados: 0,
+    serviciosExistentes: 0,
     numerosDeWhatsappDadosDeAlta: 0,
     superAdmin: 'ya_existia',
   };
@@ -113,6 +120,10 @@ export async function ejecutarBootstrap(db: Database, opciones: OpcionesDeBootst
       registrar(`· ${definicion.nombre}: sin \`phone_number_id\` (se dará de alta al migrar su número)`);
     }
   }
+
+  const catalogo = await sembrarCatalogo(new DrizzleServicioRepository(db), registrar);
+  resumen.serviciosCreados = catalogo.creados;
+  resumen.serviciosExistentes = catalogo.existentes;
 
   resumen.superAdmin = await sembrarSuperAdmin(usuarioRepo, opciones.superAdmin, registrar);
 
@@ -152,6 +163,52 @@ function exigirDatosDelSuperAdmin(datos: DatosDelSuperAdmin): void {
       `SUPER_ADMIN_SUPABASE_SUB debe ser el uuid del usuario en Supabase Auth (Authentication → Users → columna "UID"), no un correo ni un alias. Recibido: "${datos.supabaseUserId}".`,
     );
   }
+}
+
+/**
+ * Catálogo inicial. Crea solo los servicios que faltan, comparando por nombre.
+ *
+ * ## ⚠️ NO REIMPONE PRECIOS NI DURACIONES
+ *
+ * Si un servicio ya existe, **no se toca**. Es la misma regla que con el horario de las sucursales
+ * y aquí importa más: `catalogo-de-blanc.ts` lleva valores **provisionales** —la tabla real de la
+ * Dueña no está en el repositorio y `PA-02` sigue parcialmente abierta— así que reescribir el
+ * precio que alguien corrigió desde el Backoffice sería **devolver un cobro a un número ficticio**,
+ * y en silencio.
+ *
+ * Tampoco reactiva un servicio dado de baja: desactivarlo fue retirarlo de la venta a propósito.
+ */
+async function sembrarCatalogo(
+  repo: DrizzleServicioRepository,
+  registrar: (mensaje: string) => void,
+): Promise<{ creados: number; existentes: number }> {
+  // `listar` devuelve activos e inactivos, así que un servicio de baja cuenta como existente.
+  const existentes = new Set((await repo.listar()).map((servicio) => servicio.nombre.toLowerCase()));
+  let creados = 0;
+
+  for (const definicion of SERVICIOS_DE_BLANC) {
+    if (existentes.has(definicion.nombre.toLowerCase())) continue;
+
+    await repo.guardar(
+      Servicio.crear({
+        nombre: definicion.nombre,
+        categoria: definicion.categoria,
+        duracionBaseMinutos: definicion.duracionBaseMinutos,
+        precioBaseCentavos: definicion.precioBaseCentavos,
+        requiereCotizacionManual: definicion.requiereCotizacionManual ?? false,
+      }),
+    );
+    creados += 1;
+  }
+
+  if (creados > 0) {
+    registrar(`✓ Catálogo: ${creados} servicio(s) creado(s) de ${SERVICIOS_DE_BLANC.length}`);
+    registrar('  ⚠️ Sus precios y duraciones son PROVISIONALES: confírmalos con la Dueña antes de operar.');
+  } else {
+    registrar(`· Catálogo: los ${SERVICIOS_DE_BLANC.length} servicios ya existían (precios y duraciones intactos)`);
+  }
+
+  return { creados, existentes: SERVICIOS_DE_BLANC.length - creados };
 }
 
 /** Crea solo las que faltan, comparando por nombre. No reactiva las desactivadas. */

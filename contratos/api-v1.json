@@ -90,6 +90,24 @@
       ]
     },
     {
+      "metodo": "POST",
+      "ruta": "/v1/agenda/citas/garantias",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/agenda/citas/garantias/cobertura",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
       "metodo": "GET",
       "ruta": "/v1/agenda/disponibilidad",
       "roles": [
@@ -312,6 +330,16 @@
       "ruta": "/v1/catalogo-y-cotizacion/servicios/:id/modificadores/:modificadorId",
       "roles": [
         "ADMINISTRADOR",
+        "SUPER_ADMIN"
+      ]
+    },
+    {
+      "metodo": "GET",
+      "ruta": "/v1/catalogo-y-cotizacion/servicios/categorias",
+      "roles": [
+        "ADMINISTRADOR",
+        "GERENTE",
+        "RECEPCIONISTA",
         "SUPER_ADMIN"
       ]
     },
@@ -673,11 +701,13 @@
   ],
   "respuestas": {
     "Cita (roles de operación)": [
+      "citaGarantizadaId",
       "citaOrigenId",
       "clientaId",
       "clientaNombre",
       "cotizacionSnapshot",
       "enListaRoja",
+      "esGarantia",
       "estado",
       "fin",
       "id",
@@ -689,8 +719,10 @@
       "sucursalId"
     ],
     "Cita (MANICURISTA / iPad)": [
+      "citaGarantizadaId",
       "clientaNombre",
       "cotizacionSnapshot",
+      "esGarantia",
       "estado",
       "fin",
       "id",
@@ -769,6 +801,14 @@
       "id",
       "nombre",
       "precioBaseCentavos",
+      "requiereCotizacionManual"
+    ],
+    "ModificadorDiseno": [
+      "activo",
+      "id",
+      "minutosAdicionales",
+      "nombre",
+      "precioAdicionalCentavos",
       "requiereCotizacionManual"
     ],
     "Sucursal": [

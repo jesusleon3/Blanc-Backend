@@ -262,6 +262,14 @@ export interface Cita {
   cotizacionSnapshot: CotizacionSnapshot | null;
   /** Presente para todos los roles, incluida la Manicurista: va a atender a esa persona. */
   clientaNombre?: string;
+  /**
+   * `true` si es la reposición de un servicio bajo garantía (`RN-GAR-01..06`).
+   *
+   * **Lo ve también la Manicurista**: tiene que saber que repone un trabajo antes de empezar, y no
+   * revela nada que `DEC-040` proteja — no es el estado de riesgo de la clienta.
+   */
+  esGarantia: boolean;
+  citaGarantizadaId: string | null;
 
   clientaId?: string;
   citaOrigenId?: string | null;
@@ -327,6 +335,21 @@ export interface Servicio {
   duracionBaseMinutos: number;
   precioBaseCentavos: number;
   activo: boolean;
+  requiereCotizacionManual: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo — Backoffice (Parte 2)
+// ---------------------------------------------------------------------------
+
+export interface ModificadorDiseno {
+  id: string;
+  nombre: string;
+  /** Minutos que **añade** al servicio al que esté vinculado. */
+  minutosAdicionales: number;
+  precioAdicionalCentavos: number;
+  activo: boolean;
+  /** `true` → su precio lo fija una persona (`DEC-033`). */
   requiereCotizacionManual: boolean;
 }
 

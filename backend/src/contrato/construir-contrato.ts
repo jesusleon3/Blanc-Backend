@@ -33,7 +33,7 @@ import { anticipoAJson } from '../modules/anticipos/infrastructure/http/anticipo
 import { clientaAJson } from '../modules/crm-y-clientas/infrastructure/http/clientas.controller';
 import { conversacionAJson } from '../modules/conversaciones/infrastructure/http/bandeja.controller';
 import { excepcionAJson } from '../modules/sucursales-y-personal/infrastructure/http/excepciones-personal.controller';
-import { servicioAJson } from '../modules/catalogo-y-cotizacion/infrastructure/http/catalogo.presenter';
+import { modificadorDisenoAJson, servicioAJson } from '../modules/catalogo-y-cotizacion/infrastructure/http/catalogo.presenter';
 import { manicuristaAJson, sucursalAJson } from '../modules/sucursales-y-personal/infrastructure/http/sucursal.presenter';
 import { usuarioAJson } from '../modules/identidad-y-accesos/infrastructure/http/usuario.presenter';
 
@@ -46,6 +46,7 @@ import { Clienta } from '../modules/crm-y-clientas/domain/entities/clienta.entit
 import { Conversacion } from '../modules/conversaciones/domain/entities/conversacion.entity';
 import { ExcepcionPersonal } from '../modules/sucursales-y-personal/domain/entities/excepcion-personal.entity';
 import { Servicio } from '../modules/catalogo-y-cotizacion/domain/entities/servicio.entity';
+import { ModificadorDiseno } from '../modules/catalogo-y-cotizacion/domain/entities/modificador-diseno.entity';
 import { Sucursal } from '../modules/sucursales-y-personal/domain/entities/sucursal.entity';
 import { Manicurista } from '../modules/sucursales-y-personal/domain/entities/manicurista.entity';
 import { Usuario } from '../modules/identidad-y-accesos/domain/entities/usuario.entity';
@@ -138,6 +139,15 @@ export function construirContrato(): ContratoDeApi {
   const clienta = Clienta.registrar({ nombre: 'Contrato', telefono: '4420000000' });
   const conversacion = Conversacion.abrir({ sucursalId: UUID, telefonoClienta: '4420000000' });
   const servicio = Servicio.crear({ nombre: 'Contrato', categoria: 'manos', duracionBaseMinutos: 60, precioBaseCentavos: 10000 });
+  /**
+   * `ModificadorDiseno` entra al contrato al construirse el Backoffice (Parte 2).
+   *
+   * No estaba antes porque ninguna pantalla lo leía. Ahora sí, y su forma es **justo la clase de
+   * campo que se escribe de memoria mal**: el frontend declaró primero `minutosExtra` y
+   * `precioExtraCentavos` —que no existen— y `tsc` lo aceptaba porque nadie comparaba contra el
+   * presenter real. Con esto, inventarse un nombre rompe la prueba de contrato del frontend.
+   */
+  const modificador = ModificadorDiseno.crear({ nombre: 'Contrato', minutosAdicionales: 15, precioAdicionalCentavos: 5000 });
   const sucursal = Sucursal.crear({ nombre: 'Contrato', horarioSemanal: horarioAbiertoSiempre() });
   const manicurista = Manicurista.crear({ nombre: 'Contrato' });
   const usuario = Usuario.crear({ email: 'contrato@blanc.mx', nombre: 'Contrato', rol: Rol.GERENTE });
@@ -165,6 +175,7 @@ export function construirContrato(): ContratoDeApi {
       Conversacion: clavesDeRespuesta(conversacionAJson(conversacion)),
       ExcepcionPersonal: clavesDeRespuesta(excepcionAJson(excepcion)),
       Servicio: clavesDeRespuesta(servicioAJson(servicio)),
+      ModificadorDiseno: clavesDeRespuesta(modificadorDisenoAJson(modificador)),
       Sucursal: clavesDeRespuesta(sucursalAJson(sucursal)),
       Manicurista: clavesDeRespuesta(manicuristaAJson(manicurista)),
       Usuario: clavesDeRespuesta(usuarioAJson(usuario)),

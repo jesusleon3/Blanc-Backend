@@ -113,6 +113,13 @@
       "when": 1792191837802,
       "tag": "0015_consumo_de_ia",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792193966191,
+      "tag": "0016_citas_de_garantia",
+      "breakpoints": true
     }
   ]
 }

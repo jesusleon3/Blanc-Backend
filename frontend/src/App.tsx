@@ -9,6 +9,7 @@ import { Bandeja } from './paginas/bandeja/Bandeja';
 import { Anticipos } from './paginas/anticipos/Anticipos';
 import { Clientas } from './paginas/clientas/Clientas';
 import { Analitica } from './paginas/analitica/Analitica';
+import { Admin } from './paginas/admin/Admin';
 import { Agenda } from './paginas/agenda/Agenda';
 import { MiAgenda } from './paginas/mi-agenda/MiAgenda';
 import { SinAcceso } from './paginas/SinAcceso';
@@ -62,6 +63,20 @@ export function App() {
           element={
             <ExigeRol roles={ROLES_DE_ADMINISTRACION}>
               <Analitica />
+            </ExigeRol>
+          }
+        />
+        {/**
+         * El Backoffice, con la misma guarda que Analítica y por un motivo distinto: aquí no se
+         * *lee* información reservada, se **cambia la configuración de la que salen los cobros y la
+         * capacidad vendible**. La Encargada opera el día dentro de esas reglas; cambiarlas es de la
+         * Dueña. El `@Roles` de cada endpoint (`SUPER_ADMIN`, `ADMINISTRADOR`) es lo que lo impone.
+         */}
+        <Route
+          path="/admin"
+          element={
+            <ExigeRol roles={ROLES_DE_ADMINISTRACION}>
+              <Admin />
             </ExigeRol>
           }
         />

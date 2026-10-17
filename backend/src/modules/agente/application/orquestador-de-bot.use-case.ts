@@ -18,6 +18,23 @@ export const RESPUESTAS = {
   derivandoAHumano: 'Claro, una encargada te atiende en breve por aquí.',
   sinServicios: 'Ahora mismo no tengo el catálogo disponible. Una encargada te ayuda en breve.',
   noEntendi: 'No estoy segura de haber entendido. Una encargada te atiende en breve.',
+  /**
+   * Acuse para un gatillo crítico: queja, daño físico, riesgo legal o solicitud de garantía.
+   *
+   * ## POR QUÉ NO SIRVE EL ACUSE GENÉRICO
+   *
+   * *"Claro, una encargada te atiende en breve"* está bien para *"quiero hablar con alguien"* y es
+   * **impropio** para *"me lastimaron un dedo"* o *"los voy a acusar con PROFECO"*. Un *"claro"*
+   * leído por alguien a quien acaban de herir —o que está a un paso de una denuncia— se percibe
+   * como desprecio, y en ese momento el tono es parte del daño.
+   *
+   * Sobrio y sin promesas: **no se disculpa en nombre del salón** (eso es una admisión que le
+   * corresponde a una persona con los hechos delante) y **no promete una solución** (`RN-GAR-04`:
+   * el beneficio lo decide la Dueña caso por caso). Solo dice que alguien con capacidad de
+   * resolver ya lo tiene.
+   */
+  escalamientoCritico:
+    'Entiendo, y esto lo tiene que ver alguien de la administración directamente. Ya le pasé tu mensaje y te va a contactar por aquí personalmente.',
   citaConfirmada: '¡Listo! Tu cita queda confirmada. Te esperamos.',
 } as const;
 
@@ -75,10 +92,19 @@ export class OrquestadorDeBotUseCase implements OrquestadorDeBotPort {
       return { respondio: false, escalo: false };
     }
 
-    // CAPA 1 — filtro determinista. Si acierta, el modelo no se invoca.
+    /**
+     * CAPA 1 — filtro determinista de **gatillos críticos**. Si acierta, el modelo no se invoca.
+     *
+     * Aquí están `profeco`, `demanda`, `infeccion`, `sangre`, `garantia` y la petición explícita de
+     * una persona. Dos consecuencias que conviene nombrar:
+     *
+     * 1. **No se gasta presupuesto de IA** (`ADR-030`): el corte es anterior a la llamada.
+     * 2. **El bot no intenta agendar nada.** Una clienta que escribe *"me lastimaron"* no recibe
+     *    una propuesta de horario — recibe el acuse y una persona.
+     */
     const motivoPorTexto = detectarEscalamientoPorTexto(turno.texto);
     if (motivoPorTexto) {
-      return this.escalar(turno, motivoPorTexto, { fuente: 'filtro_determinista' });
+      return this.escalar(turno, motivoPorTexto, { fuente: 'filtro_determinista' }, textoDeAcuse(motivoPorTexto));
     }
 
     // CAPA 2 — el modelo clasifica. Nada más.
@@ -285,3 +311,15 @@ export class OrquestadorDeBotUseCase implements OrquestadorDeBotPort {
 
 /** Reexportado para las pruebas: comprueban el filtro sin montar el orquestador. */
 export { normalizarTexto };
+
+/**
+ * Qué se le dice a la clienta al escalar, según el motivo.
+ *
+ * Solo dos tonos, y la distinción es deliberada: una queja, un daño físico, una amenaza legal o una
+ * garantía necesitan un acuse **sobrio**; pedir hablar con alguien o un simple "no te entendí" se
+ * resuelven con el genérico, que es más ágil. Multiplicar los tonos por los nueve motivos daría
+ * nueve textos que divergirían con el tiempo.
+ */
+export function textoDeAcuse(motivo: MotivoDeEscalamiento): string {
+  return motivo === 'queja_o_reclamo' ? RESPUESTAS.escalamientoCritico : RESPUESTAS.derivandoAHumano;
+}
