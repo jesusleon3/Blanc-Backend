@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Cita } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
-import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { SelectorDeSillaLibre } from '../../domain/services/selector-de-silla';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
 import { ClaimsUsuario } from '../../../../shared/auth/rol';
@@ -42,8 +42,8 @@ import { ClaimsUsuario } from '../../../../shared/auth/rol';
 export class TransicionarCitaPorAnticipoUseCase {
   constructor(
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
-    @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
     private readonly motorDisponibilidad: MotorDisponibilidad,
+    private readonly selectorDeSilla: SelectorDeSillaLibre,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
   ) {}
 
@@ -147,18 +147,17 @@ export class TransicionarCitaPorAnticipoUseCase {
    * absurdo cuando la de al lado está vacía.
    */
   private async elegirSilla(cita: Cita): Promise<string> {
-    const activas = (await this.sillaRepository.listarPorSucursal(cita.sucursalId)).filter((silla) => silla.activa);
-    const ocupadas = new Set(
-      (await this.citaRepository.listarQueOcupanEnRango(cita.sucursalId, cita.rangoHorario))
-        .filter((otra) => otra.id !== cita.id)
-        .map((otra) => otra.sillaId),
-    );
+    // La propia cita se excluye: está en `en_espera_pago`, que no ocupa, y además no debe chocar
+    // consigo misma al pasar a ocupar.
+    const libres = await this.selectorDeSilla.libresEn(cita.sucursalId, cita.rangoHorario, { excluirCitaId: cita.id });
 
-    if (!ocupadas.has(cita.sillaId) && activas.some((silla) => silla.id === cita.sillaId)) return cita.sillaId;
+    // Su silla **si sigue libre y activa**: `libres` solo contiene activas, así que una sola
+    // comprobación cubre los dos casos.
+    if (libres.includes(cita.sillaId)) return cita.sillaId;
 
-    const libre = activas.find((silla) => !ocupadas.has(silla.id));
-    if (!libre) throw this.huecoPerdido(cita);
-    return libre.id;
+    const [primeraLibre] = libres;
+    if (primeraLibre === undefined) throw this.huecoPerdido(cita);
+    return primeraLibre;
   }
 
   /**

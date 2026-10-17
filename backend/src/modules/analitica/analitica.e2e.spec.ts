@@ -427,6 +427,47 @@ describe('Analítica — resumen ejecutivo E2E (Fase 6)', () => {
       expect(cuerpo.advertencias.join(' ')).toMatch(/cotización manual/);
     });
 
+    it('DISTINGUE las reposiciones de garantía de las citas que se cobraron', async () => {
+      /**
+       * ## EL DEFECTO QUE ESTA PRUEBA DESTAPÓ (auditoría 2026-10-17)
+       *
+       * Una garantía es una `Cita` con `totalCentavos: 0`. En el ingreso eso es correcto —suma
+       * cero, no lo infla— pero en los **conteos** era invisible: entraba en `porEstado.completada`
+       * y en `atendidasPorManicurista` como una cita cualquiera.
+       *
+       * Las dos consecuencias, y la segunda es la que importa:
+       *
+       * 1. La Dueña leía *"20 completadas, $9.000"* sin saber que tres fueron gratis, así que el
+       *    promedio por cita salía bajo sin explicación visible.
+       * 2. **El desglose por manicurista es una medida de su trabajo**, y una reposición suele ser
+       *    la corrección de su propio trabajo. Contarla igual que una cita vendida hacía que
+       *    rehacer uñas despegadas **subiera** su cifra.
+       *
+       * No se excluyen del conteo: la silla se ocupó y hubo trabajo real. Se **nombran**, que es lo
+       * que faltaba.
+       */
+      const original = await agendar('16');
+      await accion(original.id, 'completar').expect(200);
+
+      const { body: garantia } = await request(app.getHttpServer())
+        .post('/v1/agenda/citas/garantias')
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ citaGarantizadaId: original.id, inicio: horaDeCita(17) })
+        .expect(201);
+      await accion(garantia.id, 'completar').expect(200);
+
+      const cuerpo = await resumen();
+
+      // Dos completadas, y una de ellas fue una reposición sin costo.
+      expect(cuerpo.citas.porEstado.completada).toBe(2);
+      expect(cuerpo.citas.garantiasCompletadas).toBe(1);
+      // El ingreso NO se duplica: la garantía aportó cero, no el precio del servicio.
+      expect(cuerpo.citas.ingresoEstimadoCentavos).toBe(45000);
+      // Y `0` no es `null`: una garantía no es una cita "sin cotizar".
+      expect(cuerpo.citas.completadasSinCotizar).toBe(0);
+      expect(cuerpo.advertencias.join(' ')).toMatch(/garantía/i);
+    });
+
     it('desglosa anticipos por estado y suma `pagado` + `retenido` como COBRADO', async () => {
       /**
        * Los dos cuentan: un anticipo retenido por cancelación tardía **no se reembolsa**

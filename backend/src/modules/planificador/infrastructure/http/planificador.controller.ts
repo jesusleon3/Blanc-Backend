@@ -1,9 +1,10 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
-import { IsIn, IsOptional, IsISO8601 } from 'class-validator';
+import { IsIn, IsOptional } from 'class-validator';
 import { Roles } from '../../../../shared/auth/roles.decorator';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
 import { NombreDeBarrido, PlanificadorService } from '../../application/planificador.service';
+import { EsInstanteIso } from '../../../../shared/validacion/es-instante-iso.decorator';
 
 /**
  * Los cinco barridos. **El `satisfies` no es decorativo**: si `NombreDeBarrido` gana un valor y
@@ -28,7 +29,7 @@ export class DispararBarridoDto {
    * cita futura, porque la consulta exige que su horario haya terminado *respecto a ese instante*.
    */
   @IsOptional()
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   ahora?: string;
 }
 

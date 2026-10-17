@@ -14,6 +14,7 @@ import { ReprogramarCitaUseCase } from './application/use-cases/reprogramar-cita
 import { MarcarNoShowUseCase } from './application/use-cases/marcar-no-show.use-case';
 import { CompletarCitaUseCase } from './application/use-cases/completar-cita.use-case';
 import { MotorDisponibilidad } from './domain/services/motor-disponibilidad';
+import { SelectorDeSillaLibre } from './domain/services/selector-de-silla';
 import { ResolutorDeServicio } from './domain/services/resolutor-de-servicio';
 import { TransicionarCitaPorAnticipoUseCase } from './application/use-cases/transicionar-cita-por-anticipo.use-case';
 import { CerrarCitasTerminadasUseCase, SolicitarRecordatoriosUseCase } from './application/use-cases/barridos-de-agenda.use-cases';
@@ -81,6 +82,7 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     MarcarNoShowUseCase,
     CompletarCitaUseCase,
     MotorDisponibilidad,
+    SelectorDeSillaLibre,
     ResolutorDeServicio,
     ConsultarDisponibilidadUseCase,
     ConsultarAgendaUseCase,
@@ -101,6 +103,7 @@ import { SillasController } from './infrastructure/http/sillas.controller';
     SILLA_REPOSITORY,
     CITA_REPOSITORY,
     MotorDisponibilidad,
+    SelectorDeSillaLibre,
     TransicionarCitaPorAnticipoUseCase,
     // Los consume `PlanificadorModule`, que es un adaptador conductor y no un Bounded Context.
     AvanzarTurnoListaEsperaUseCase,

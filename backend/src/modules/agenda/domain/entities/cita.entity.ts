@@ -105,6 +105,30 @@ export class Cita {
   }): Cita {
     validarRangoHorario(input.rangoHorario);
 
+    /**
+     * **`esGarantia` y `citaGarantizadaId` son inseparables** (`RN-GAR-01..06`).
+     *
+     * La autoridad es el `CHECK citas_garantia_coherente` de la migración `0016`; esto no lo
+     * reemplaza, impide **construir** el estado ilegal. Importa porque su SQLSTATE es `23514` y
+     * `HttpExceptionFilter` solo traduce `23505` y `23P01`: sin esta guarda, el descuido de crear
+     * una garantía sin la cita que honra —o de apuntar a una sin marcar la bandera— salía como un
+     * `500 ERROR_INESPERADO` que no decía qué faltaba.
+     *
+     * Se valida en `crear` y **no en `reconstruir`**: el camino de vuelta desde la base lee filas
+     * que ese `CHECK` ya aprobó, y volver a validarlas convertiría un dato histórico inesperado en
+     * una excepción al *leer* la agenda — el peor momento para fallar.
+     */
+    const esGarantia = input.esGarantia ?? false;
+    const citaGarantizadaId = input.citaGarantizadaId ?? null;
+    if (esGarantia !== (citaGarantizadaId !== null)) {
+      throw new DomainError(
+        'CITA_GARANTIA_INCOHERENTE',
+        'Una cita de garantía necesita la cita completada que honra, y solo una garantía puede apuntar a una.',
+        400,
+        { esGarantia, citaGarantizadaId },
+      );
+    }
+
     const estado = input.estado ?? 'agendada';
     if (!(ESTADOS_INICIALES as readonly string[]).includes(estado)) {
       throw new DomainError(
@@ -128,8 +152,8 @@ export class Cita {
       estado,
       citaOrigenId: input.citaOrigenId ?? null,
       numeroDeReprogramaciones: input.numeroDeReprogramaciones ?? 0,
-      esGarantia: input.esGarantia ?? false,
-      citaGarantizadaId: input.citaGarantizadaId ?? null,
+      esGarantia,
+      citaGarantizadaId,
       cotizacionSnapshot: input.cotizacionSnapshot ?? null,
     });
   }

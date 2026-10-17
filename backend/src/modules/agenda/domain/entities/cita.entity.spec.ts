@@ -199,6 +199,63 @@ describe('Cita — aggregate raíz de Agenda', () => {
     });
   });
 
+  describe('coherencia de garantía (`RN-GAR-01..06`)', () => {
+    /**
+     * ## POR QUÉ ESTO SE VALIDA EN LA ENTIDAD AUNQUE LA BASE YA LO IMPONGA
+     *
+     * La migración `0016` lleva un `CHECK` (`citas_garantia_coherente`) que es la autoridad. Pero
+     * su SQLSTATE es `23514`, y `HttpExceptionFilter` solo traduce `23505` y `23P01`: una cita
+     * incoherente construida por error salía como **500 ERROR_INESPERADO**, sin decir qué faltaba.
+     *
+     * La entidad no puede *reemplazar* al `CHECK` —dos procesos, una sola autoridad— pero sí puede
+     * impedir construir el estado ilegal, que es su trabajo como aggregate.
+     */
+    it('`esGarantia` sin la cita que honra es un estado ilegal', () => {
+      expect(() => Cita.crear({ ...BASE, esGarantia: true })).toThrow(
+        expect.objectContaining({ code: 'CITA_GARANTIA_INCOHERENTE' }),
+      );
+    });
+
+    it('apuntar a una cita garantizada sin ser garantía también lo es', () => {
+      expect(() => Cita.crear({ ...BASE, citaGarantizadaId: '66666666-6666-4666-8666-666666666666' })).toThrow(
+        expect.objectContaining({ code: 'CITA_GARANTIA_INCOHERENTE' }),
+      );
+    });
+
+    it('las dos juntas son legítimas, y las dos ausentes son el caso normal', () => {
+      expect(Cita.crear({ ...BASE, esGarantia: true, citaGarantizadaId: '66666666-6666-4666-8666-666666666666' }).esGarantia).toBe(true);
+      expect(Cita.crear(BASE).esGarantia).toBe(false);
+    });
+
+    it('`reconstruir` NO revalida: una fila ya persistida se lee tal cual', () => {
+      /**
+       * Deliberado. `reconstruir` es el camino de vuelta desde la base, y la base ya tiene su
+       * `CHECK`: volver a validar aquí convertiría un dato histórico inesperado en una excepción al
+       * **leer** la agenda, que es el peor momento para fallar. La validación va en `crear`, que es
+       * donde se decide un estado nuevo.
+       */
+      const normal = Cita.crear(BASE);
+      expect(() =>
+        Cita.reconstruir({
+          id: normal.id,
+          sucursalId: normal.sucursalId,
+          sillaId: normal.sillaId,
+          manicuristaId: normal.manicuristaId,
+          clientaId: normal.clientaId,
+          servicioId: normal.servicioId,
+          rangoHorario: normal.rangoHorario,
+          estado: 'agendada',
+          citaOrigenId: null,
+          numeroDeReprogramaciones: 0,
+          cotizacionSnapshot: null,
+          // La combinación que `crear` rechaza.
+          esGarantia: true,
+          citaGarantizadaId: null,
+        }),
+      ).not.toThrow();
+    });
+  });
+
   it('asignarManicurista fija el id — la validación de solape la hace la base de datos, no esta clase', () => {
     const cita = Cita.crear(BASE);
     cita.asignarManicurista('55555555-5555-5555-5555-555555555555');

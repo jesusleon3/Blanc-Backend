@@ -58,11 +58,29 @@ export function PersonalAdmin() {
     ]);
   };
 
-  const crear = useMutation({ mutationFn: (texto: string) => adminApi.crearManicurista(texto) });
-  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarManicurista(id) });
+  /**
+   * Las tres con `mutate` + `onSuccess`, **nunca `await mutateAsync()` en el `onClick`**.
+   *
+   * React descarta la promesa de un manejador de evento, así que un `mutateAsync` que rechace deja
+   * un rechazo sin gestionar — y aquí rechaza en el caso **esperado**: el `409
+   * MANICURISTA_CON_CITAS_ACTIVAS` no es un fallo del programa, es la barrera funcionando. La
+   * versión anterior lo tapaba con un `try/catch` vacío en el `onClick` de la baja, que escondía el
+   * síntoma en un sitio y lo dejaba en los otros dos.
+   */
+  const crear = useMutation({
+    mutationFn: (texto: string) => adminApi.crearManicurista(texto),
+    onSuccess: async () => {
+      setNombre('');
+      await refrescar();
+    },
+  });
+  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarManicurista(id), onSuccess: refrescar });
   const asignacion = useMutation({
     mutationFn: ({ manicuristaId, asignar }: { manicuristaId: string; asignar: boolean }) =>
       asignar ? adminApi.asignarASucursal(manicuristaId, sucursalId) : adminApi.removerDeSucursal(manicuristaId, sucursalId),
+    onSuccess: async () => {
+      await Promise.all([refrescar(), cliente.invalidateQueries({ queryKey: ['admin-manicuristas', sucursalId] })]);
+    },
   });
 
   const lista = todas.data?.manicuristas ?? [];
@@ -87,15 +105,13 @@ export function PersonalAdmin() {
           </div>
           <Boton
             cargando={crear.isPending}
-            onClick={async () => {
+            onClick={() => {
               setInvalido(null);
               if (nombre.trim() === '') {
                 setInvalido('Escribe el nombre con el que la vas a reconocer en la agenda.');
                 return;
               }
-              await crear.mutateAsync(nombre.trim());
-              setNombre('');
-              await refrescar();
+              crear.mutate(nombre.trim());
             }}
           >
             Dar de alta
@@ -150,10 +166,7 @@ export function PersonalAdmin() {
                         variante="secundario"
                         cargando={asignacion.isPending}
                         aria-label={`${asignada ? 'Quitar de la sucursal' : 'Asignar a la sucursal'} a ${manicurista.nombre}`}
-                        onClick={async () => {
-                          await asignacion.mutateAsync({ manicuristaId: manicurista.id, asignar: !asignada });
-                          await Promise.all([refrescar(), cliente.invalidateQueries({ queryKey: ['admin-manicuristas', sucursalId] })]);
-                        }}
+                        onClick={() => asignacion.mutate({ manicuristaId: manicurista.id, asignar: !asignada })}
                       >
                         {asignada ? 'Quitar de esta sucursal' : 'Asignar a esta sucursal'}
                       </Boton>
@@ -164,15 +177,7 @@ export function PersonalAdmin() {
                         variante="peligro"
                         cargando={desactivar.isPending}
                         aria-label={`Dar de baja a ${manicurista.nombre}`}
-                        onClick={async () => {
-                          try {
-                            await desactivar.mutateAsync(manicurista.id);
-                            await refrescar();
-                          } catch {
-                            // El error se muestra abajo con su explicación; aquí solo se evita que
-                            // una promesa rechazada escape como fallo no gestionado.
-                          }
-                        }}
+                        onClick={() => desactivar.mutate(manicurista.id)}
                       >
                         Dar de baja
                       </Boton>

@@ -20,6 +20,7 @@ import { crearContextoPersonalFalso } from '../../test-utils/contexto-personal-f
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { crearContextoCatalogoFalso, crearContextoClientaFalso, servicioDePrueba } from '../../test-utils/contexto-catalogo-falso';
 import { crearProcesarListaEsperaInerte } from '../../test-utils/lista-espera-inerte';
+import { SelectorDeSillaLibre } from '../../../../modules/agenda/domain/services/selector-de-silla';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -51,11 +52,11 @@ async function preparar(numeroDeSillas = 2, estadoDeAnticipo: Parameters<typeof 
     citaRepo,
     sillaRepo,
     auditoria,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), anticipos, auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, crearContextoClientaFalso(), anticipos, auditoria, uow),
     solicitar: new SolicitarConfirmacionCitaUseCase(citaRepo, auditoria, uow),
     confirmar: new ConfirmarCitaUseCase(citaRepo, auditoria, uow),
     cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes, anticipos, crearContextoClientaFalso()),
-    reprogramar: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes, anticipos),
+    reprogramar: new ReprogramarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes, anticipos),
     noShow: new MarcarNoShowUseCase(citaRepo, auditoria, uow, incidentes, anticipos),
     completar: new CompletarCitaUseCase(citaRepo, auditoria, uow),
   };

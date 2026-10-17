@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { servidor } from '../../pruebas/servidor';
 import { montar } from '../../pruebas/montar';
+import { vigilarRechazosNoGestionados } from '../../pruebas/rechazos';
 import { MANICURISTA_ANA, SERVICIO_GELISH, SUCURSAL_LOMAS, cita, clienta, manicurista, perfil, servicio, solicitud, sucursal } from '../../pruebas/datos';
 import { ListaDeEspera } from './componentes/ListaDeEspera';
 
@@ -22,6 +23,7 @@ const basico = (solicitudes = [solicitud()]) =>
 const enMinutos = (minutos: number) => new Date(Date.now() + minutos * 60_000).toISOString();
 
 describe('Lista de espera (`DEC-039`)', () => {
+  vigilarRechazosNoGestionados();
   it('muestra la fila NUMERADA en orden de llegada (FIFO)', async () => {
     /**
      * El orden lo da el backend por `creado_en`, y **no hay columna `posicion`**: una posición

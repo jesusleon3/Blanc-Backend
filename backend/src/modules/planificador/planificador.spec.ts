@@ -38,6 +38,7 @@ import {
 import { AuditoriaPort } from '../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { DrizzleUnitOfWork } from '../../shared/persistence/drizzle-unit-of-work';
+import { SelectorDeSillaLibre } from '../../modules/agenda/domain/services/selector-de-silla';
 
 const DUEÑA: ClaimsUsuario = { sub: 'dueña-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-4111-8111-111111111111';
@@ -77,7 +78,7 @@ async function preparar({ sillas = 3 }: { sillas?: number } = {}) {
     new GenerarAnticipoUseCase(anticipoRepo, auditoria, uow),
     new RetenerAnticipoUseCase(anticipoRepo, auditoria, uow),
   );
-  const transicionarCita = new TransicionarCitaPorAnticipoUseCase(citaRepo, sillaRepo, motor, auditoria);
+  const transicionarCita = new TransicionarCitaPorAnticipoUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), auditoria);
   const transicionPort = new TransicionDeCitaAdapter(transicionarCita);
   const expirarAnticipo = new ExpirarAnticipoUseCase(anticipoRepo, transicionPort, auditoria, uow);
 
@@ -114,7 +115,7 @@ async function preparar({ sillas = 3 }: { sillas?: number } = {}) {
     recordatorios,
     barridoAnticipos,
     purgarMensajes,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, contextoClienta, anticipoPort, auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, contextoClienta, anticipoPort, auditoria, uow),
     confirmarPago: new ConfirmarPagoAnticipoUseCase(anticipoRepo, transicionPort, auditoria, uow),
     completarCita,
     planificador: new PlanificadorService(new CerrojoDeBarrido(db), avanzarFila, barridoAnticipos, cerrarCitas, recordatorios, purgarMensajes),

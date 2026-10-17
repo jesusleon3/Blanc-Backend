@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { servidor } from '../../pruebas/servidor';
 import { montar } from '../../pruebas/montar';
+import { vigilarRechazosNoGestionados } from '../../pruebas/rechazos';
 import { MANICURISTA_ANA, SUCURSAL_LOMAS, SUCURSAL_ZIBATA, manicurista, perfil, sucursal } from '../../pruebas/datos';
 import { PersonalAdmin } from './componentes/PersonalAdmin';
 import { SucursalesYSillas } from './componentes/SucursalesYSillas';
@@ -20,6 +21,12 @@ const contexto = () =>
   );
 
 describe('Backoffice — Personal', () => {
+  /**
+   * El `409 MANICURISTA_CON_CITAS_ACTIVAS` es el caso **esperado** de esta pantalla, no una
+   * anomalía: es la barrera funcionando. Con `await mutateAsync()` en el `onClick`, cada vez que
+   * funcionaba dejaba un rechazo de promesa sin gestionar — ver `vigilarRechazosNoGestionados`.
+   */
+  vigilarRechazosNoGestionados();
   it('EXPLICA el 409 MANICURISTA_CON_CITAS_ACTIVAS en vez de mostrar un conflicto genérico', async () => {
     /**
      * ## EL CASO QUE JUSTIFICA LA PANTALLA ENTERA

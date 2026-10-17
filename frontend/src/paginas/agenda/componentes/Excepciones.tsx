@@ -57,7 +57,9 @@ export function Excepciones({ sucursalId, fecha }: { sucursalId: string; fecha: 
     ]);
   };
 
-  const revocar = useMutation({ mutationFn: (id: string) => personalApi.revocar(id) });
+  // `mutate` + `onSuccess`: un `await mutateAsync()` en el `onClick` deja un rechazo sin gestionar
+  // cuando la revocación falla, porque React descarta la promesa del manejador.
+  const revocar = useMutation({ mutationFn: (id: string) => personalApi.revocar(id), onSuccess: refrescar });
 
   return (
     <div className="space-y-4">
@@ -103,10 +105,7 @@ export function Excepciones({ sucursalId, fecha }: { sucursalId: string; fecha: 
                   variante="fantasma"
                   className="ml-auto"
                   cargando={revocar.isPending}
-                  onClick={async () => {
-                    await revocar.mutateAsync(excepcion.id);
-                    await refrescar();
-                  }}
+                  onClick={() => revocar.mutate(excepcion.id)}
                 >
                   {/* Revocar no es "deshacer una falta": es corregir una captura equivocada. La
                       capacidad vuelve sola en cuanto desaparece el registro. */}

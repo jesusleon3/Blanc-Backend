@@ -290,6 +290,7 @@ export const resumenAnalitico = (extra: Partial<ResumenAnalitico> = {}): Resumen
     ],
     ingresoEstimadoCentavos: 1_800_000,
     completadasSinCotizar: 2,
+    garantiasCompletadas: 0,
     listaDeEspera: { inscritas: 12, notificadas: 8, aceptadas: 5, expiradas: 3 },
   },
   anticipos: {

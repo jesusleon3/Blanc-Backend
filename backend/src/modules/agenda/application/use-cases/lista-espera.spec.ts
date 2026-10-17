@@ -25,6 +25,7 @@ import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 import { crearAnticipoFalso } from '../../test-utils/anticipo-falso';
 import { crearRegistroDeIncidentesFalso } from '../../test-utils/registro-de-incidentes-falso';
+import { SelectorDeSillaLibre } from '../../../../modules/agenda/domain/services/selector-de-silla';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -62,7 +63,7 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso({ horario: horarioAbiertoSiempre() }));
   const resolutor = new ResolutorDeServicio(CATALOGO.port);
   const procesar = new ProcesarListaEsperaUseCase(listaEsperaRepo, motor, resolutor, notificacion, auditoria, uow);
-  const agendar = new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, crearContextoClientaFalso(), anticipos, auditoria, uow);
+  const agendar = new AgendarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, crearContextoClientaFalso(), anticipos, auditoria, uow);
 
   return {
     citaRepo,
@@ -77,7 +78,7 @@ async function preparar({ sillas = 1 }: { sillas?: number } = {}) {
     cancelarSolicitud: new CancelarSolicitudListaEsperaUseCase(listaEsperaRepo, auditoria, uow),
     consultarFila: new ConsultarListaEsperaUseCase(listaEsperaRepo),
     cancelarCita: new CancelarCitaUseCase(citaRepo, auditoria, uow, procesar, incidentes, anticipos, crearContextoClientaFalso()),
-    reprogramarCita: new ReprogramarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, auditoria, uow, procesar, incidentes, anticipos),
+    reprogramarCita: new ReprogramarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, auditoria, uow, procesar, incidentes, anticipos),
   };
 }
 

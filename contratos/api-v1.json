@@ -860,6 +860,7 @@
       "atendidasPorSucursal",
       "cancelacionesTardias",
       "completadasSinCotizar",
+      "garantiasCompletadas",
       "ingresoEstimadoCentavos",
       "listaDeEspera",
       "porEstado",

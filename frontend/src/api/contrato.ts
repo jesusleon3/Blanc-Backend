@@ -436,6 +436,14 @@ export interface ReporteDeAgenda {
   ingresoEstimadoCentavos: number;
   /** Completadas sin precio en plataforma (cotización manual): quedan FUERA de la suma. */
   completadasSinCotizar: number;
+  /**
+   * Cuántas de las completadas fueron **reposiciones por garantía** (`RN-GAR-01..06`).
+   *
+   * Van **incluidas** en `porEstado.completada` y en `atendidasPorManicurista`: ocuparon silla y
+   * hubo trabajo. Lo que aportan al ingreso es `$0`, así que sin este número el promedio por cita
+   * baja sin explicación — y rehacer un trabajo mal hecho **sube** la cifra de quien lo rehízo.
+   */
+  garantiasCompletadas: number;
   listaDeEspera: { inscritas: number; notificadas: number; aceptadas: number; expiradas: number };
 }
 

@@ -57,6 +57,7 @@ import { AnticipoAdapter } from '../integracion/anticipo.adapter';
 import { AuditoriaPort } from '../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { DrizzleUnitOfWork } from '../../shared/persistence/drizzle-unit-of-work';
+import { SelectorDeSillaLibre } from '../../modules/agenda/domain/services/selector-de-silla';
 
 const SUCURSAL = '11111111-1111-4111-8111-111111111111';
 const NUMERO = 'pn-lomas-001';
@@ -121,7 +122,7 @@ async function preparar(opciones: { interprete?: AgenteConversacionalPort; silla
     new RetenerAnticipoUseCase(anticipoRepo, auditoria, uow),
   );
 
-  const agendar = new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, contextoClienta, anticipoPort, auditoria, uow);
+  const agendar = new AgendarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, contextoClienta, anticipoPort, auditoria, uow);
 
   const herramientas = new HerramientasDelBot(
     conversacionRepo,

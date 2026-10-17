@@ -106,6 +106,20 @@ export class ResumenAnaliticoUseCase {
         `${citas.completadasSinCotizar} cita(s) completada(s) no tienen precio en la plataforma (servicios de cotización manual), así que NO están sumadas en el ingreso estimado.`,
       );
     }
+    /**
+     * Las reposiciones de garantía se **nombran** en vez de excluirse.
+     *
+     * Ocuparon una silla y hubo trabajo, así que para ocupación cuentan; pero entran en
+     * `porEstado.completada` y en el desglose por manicurista aportando `$0`, y sin decirlo el
+     * promedio por cita baja sin explicación — y rehacer un trabajo mal hecho **sube** la cifra de
+     * quien lo rehízo. La advertencia viaja en la respuesta por la misma razón que la del ingreso:
+     * quien lee el número tiene que ver el matiz en el mismo sitio.
+     */
+    if (citas.garantiasCompletadas > 0) {
+      advertencias.push(
+        `${citas.garantiasCompletadas} de las citas completadas fueron reposiciones por garantía: ocuparon silla y tiempo, pero su ingreso es $0. Cuentan en la ocupación y en el desglose por manicurista.`,
+      );
+    }
 
     return {
       rango: { desde: input.rango.inicio.toISOString(), hasta: input.rango.fin.toISOString() },

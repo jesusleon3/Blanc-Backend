@@ -1,11 +1,12 @@
-import { IsISO8601, IsOptional, IsUUID } from 'class-validator';
+import { IsOptional, IsUUID } from 'class-validator';
+import { EsInstanteIso } from '../../../../../shared/validacion/es-instante-iso.decorator';
 
 export class ConsultarResumenDto {
   /** ISO. El rango es obligatorio: una lectura sin acotar no está acotada. */
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   desde!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   hasta!: string;
 
   /**

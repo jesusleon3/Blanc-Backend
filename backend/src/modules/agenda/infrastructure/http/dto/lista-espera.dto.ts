@@ -1,5 +1,6 @@
-import { IsISO8601, IsInt, IsOptional, IsUUID, Matches, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, IsUUID, Matches, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EsInstanteIso } from '../../../../../shared/validacion/es-instante-iso.decorator';
 
 /** Tope de la ventana del turno: 24 horas. Más allá, la fila deja de avanzar en un día de trabajo. */
 export const MAXIMO_MINUTOS_DE_VENTANA = 1440;
@@ -16,8 +17,10 @@ export class InscribirEnListaEsperaDto {
 
   /**
    * Fecha de pared `YYYY-MM-DD` en la zona del negocio, **no un instante**: la clienta pide "el
-   * jueves". Se valida con un patrón y no con `@IsISO8601()` porque este último también aceptaría
-   * una fecha con hora, y aquí la hora no significa nada.
+   * jueves". Se valida con un patrón y no con `@EsInstanteIso()` porque son dos tipos distintos
+   * del dominio: una fecha de pared no lleva hora, y un instante **tiene que** llevarla con su
+   * zona. El `@IsISO8601()` que había antes en los campos de instante aceptaba las dos cosas, y de
+   * ahí salía un desplazamiento de seis horas en silencio — ver `es-instante-iso.decorator.ts`.
    */
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'fecha debe tener el formato YYYY-MM-DD' })
   fecha!: string;
@@ -39,7 +42,7 @@ export class AceptarOfertaDto {
    * (`RN-AGE-13`): entre el aviso y la respuesta la agenda pudo cambiar, y quien atiende la
    * llamada puede estar acordando otra hora del mismo día.
    */
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
   @IsOptional()

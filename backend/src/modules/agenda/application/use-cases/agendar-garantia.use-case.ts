@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Cita, validarRangoHorario } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
-import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { SelectorDeSillaLibre, esSillaOcupada } from '../../domain/services/selector-de-silla';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
@@ -61,13 +61,30 @@ export interface AgendarGarantiaInput {
  * Valida lo que es verificable: que la cita exista, esté `completada` (`RN-GAR-02`) y esté dentro
  * de la ventana (`RN-GAR-01`); que no se haya honrado ya; y que haya hueco real. **No valida si el
  * reclamo es legítimo** — eso es el juicio humano que `RN-GAR-03` reserva a una persona.
+ *
+ * ## LO QUE NO COMPRUEBA, Y ES UNA TENSIÓN ABIERTA (auditoría 2026-10-17)
+ *
+ * **No consulta el estado de riesgo de la clienta.** `AgendarCitaUseCase` rechaza a una clienta
+ * `bloqueada` con `CLIENTA_BLOQUEADA` (`RN-CRM-04`); aquí no hay esa comprobación, y la divergencia
+ * era silenciosa hasta que la auditoría la nombró.
+ *
+ * El argumento para dejarlo así es fuerte: el bloqueo frena **ventas nuevas**, y una garantía no es
+ * una venta — es reparar un trabajo que ya se cobró. Negarse a arreglar unas uñas mal hechas porque
+ * la clienta acumuló incidentes después sería quedarse con su dinero y con el problema.
+ *
+ * Pero la lectura contraria también es defendible, y **no es una decisión del sistema**: queda
+ * registrada en `PROJECT_STATUS.md` §16 como pendiente de la Dueña. Si decide que sí debe frenar,
+ * esto gana un `ContextoClientaPort` como el de `AgendarCitaUseCase`.
+ *
+ * Lo mismo con la clienta en `lista_roja`: su garantía nace `agendada` y **sin anticipo**, que no
+ * es una excepción a `RN-ANT-01` — el anticipo es el 40 % del servicio y el servicio cuesta cero.
  */
 @Injectable()
 export class AgendarGarantiaUseCase {
   constructor(
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
-    @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
     private readonly motorDisponibilidad: MotorDisponibilidad,
+    private readonly selectorDeSilla: SelectorDeSillaLibre,
     private readonly resolutorDeServicio: ResolutorDeServicio,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
@@ -148,10 +165,23 @@ export class AgendarGarantiaUseCase {
     const snapshot = {
       ...this.resolutorDeServicio.construirSnapshot(servicio, ahora),
       totalCentavos: 0,
-      esGarantia: true,
+      /**
+       * **`false`, aunque el servicio original exigiera cotización manual.**
+       *
+       * `requiereCotizacionManual` significa *"el precio lo tiene que fijar una persona"*
+       * (`DEC-033`). En una reposición ya está fijado: es cero. Dejarlo en `true` haría que el
+       * sistema afirmara que a una cita gratis le falta un precio — y la pantalla mostraría
+       * "precio por confirmar" sobre algo que nadie va a cobrar.
+       *
+       * Aquí NO se añade ningún campo propio de la garantía. La cita ya lleva `esGarantia` en
+       * primer nivel, que es donde el frontend lo lee y donde el contrato de `P8` lo ve; meterlo
+       * también dentro del snapshot lo persistía en el `jsonb` fuera del contrato, porque éste se
+       * deriva de `construirSnapshot` y no de este literal.
+       */
+      requiereCotizacionManual: false,
     };
 
-    const candidatas = await this.sillasCandidatas(original.sucursalId, rangoHorario);
+    const candidatas = await this.selectorDeSilla.libresEn(original.sucursalId, rangoHorario);
 
     for (const sillaId of candidatas) {
       const cita = Cita.crear({
@@ -198,7 +228,10 @@ export class AgendarGarantiaUseCase {
       } catch (error) {
         // Misma estrategia que `AgendarCitaUseCase`: si la silla se ocupó entre la consulta y la
         // escritura, se prueba la siguiente. La autoridad es la restricción `EXCLUDE`.
-        if (!esChoqueDeSilla(error)) throw error;
+        //
+        // `esSillaOcupada` compara el **código de negocio**, no el SQLSTATE: el repositorio ya
+        // tradujo el `23P01`. La versión anterior buscaba `'23P01'` y por tanto nunca reintentaba.
+        if (!esSillaOcupada(error)) throw error;
       }
     }
 
@@ -209,16 +242,5 @@ export class AgendarGarantiaUseCase {
     );
   }
 
-  /** Mismo criterio que `AgendarCitaUseCase`: activas, en orden estable. */
-  private async sillasCandidatas(sucursalId: string, rangoHorario: { inicio: Date; fin: Date }): Promise<string[]> {
-    const sillas = await this.sillaRepository.listarPorSucursal(sucursalId);
-    const activas = sillas.filter((silla) => silla.activa);
-    void rangoHorario;
-    return activas.map((silla) => silla.id);
-  }
 }
 
-/** `23P01` es la violación de la restricción `EXCLUDE`: la silla se ocupó en la carrera. */
-function esChoqueDeSilla(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23P01';
-}

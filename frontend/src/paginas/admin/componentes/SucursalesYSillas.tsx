@@ -57,8 +57,16 @@ export function SucursalesYSillas() {
     ]);
   };
 
-  const crear = useMutation({ mutationFn: (texto: string) => adminApi.crearSilla(sucursalId, texto) });
-  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarSilla(id) });
+  // `mutate` + `onSuccess`: ver la nota de `CatalogoAdmin`. El nombre se limpia **solo al éxito**,
+  // para no perder lo escrito si la petición falla.
+  const crear = useMutation({
+    mutationFn: (texto: string) => adminApi.crearSilla(sucursalId, texto),
+    onSuccess: async () => {
+      setNombre('');
+      await refrescar();
+    },
+  });
+  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarSilla(id), onSuccess: refrescar });
 
   const lista = sillas.data?.sillas ?? [];
   const activas = lista.filter((silla) => silla.activa);
@@ -133,10 +141,7 @@ export function SucursalesYSillas() {
                         className="ml-auto"
                         cargando={desactivar.isPending}
                         aria-label={`Dar de baja ${silla.nombre}`}
-                        onClick={async () => {
-                          await desactivar.mutateAsync(silla.id);
-                          await refrescar();
-                        }}
+                        onClick={() => desactivar.mutate(silla.id)}
                       >
                         Quitar de servicio
                       </Boton>
@@ -161,15 +166,13 @@ export function SucursalesYSillas() {
               </div>
               <Boton
                 cargando={crear.isPending}
-                onClick={async () => {
+                onClick={() => {
                   setInvalido(null);
                   if (nombre.trim() === '') {
                     setInvalido('La silla necesita un nombre para poder reconocerla en la agenda.');
                     return;
                   }
-                  await crear.mutateAsync(nombre.trim());
-                  setNombre('');
-                  await refrescar();
+                  crear.mutate(nombre.trim());
                 }}
               >
                 Añadir silla

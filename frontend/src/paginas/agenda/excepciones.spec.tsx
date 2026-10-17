@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { servidor } from '../../pruebas/servidor';
 import { montar } from '../../pruebas/montar';
+import { vigilarRechazosNoGestionados } from '../../pruebas/rechazos';
 import {
   MANICURISTA_ANA,
   SUCURSAL_LOMAS,
@@ -31,6 +32,7 @@ const basico = (excepciones = [excepcion()]) =>
   );
 
 describe('Ausencias y coberturas (`DEC-036`)', () => {
+  vigilarRechazosNoGestionados();
   it('lista las registradas del día y permite revocar una captura equivocada', async () => {
     /**
      * Revocar **no es "deshacer una falta"**: es corregir una captura equivocada. Y hasta esta

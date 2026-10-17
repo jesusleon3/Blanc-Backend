@@ -26,6 +26,7 @@ import { citaAJson } from '../agenda/infrastructure/http/cita.presenter';
 import { AuditoriaPort } from '../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../shared/persistence/test-utils/unit-of-work-falso';
+import { SelectorDeSillaLibre } from '../../modules/agenda/domain/services/selector-de-silla';
 
 const ENCARGADA: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const ANA = 'aaaaaaaa-0000-4000-8000-000000000001';
@@ -84,12 +85,12 @@ async function preparar({ sillas = 2 }: { sillas?: number } = {}) {
     clientaRepo,
     crearClienta,
     consultarClienta: new ConsultarClientaUseCase(clientaRepo),
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, contextoClienta, anticipos, auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, contextoClienta, anticipos, auditoria, uow),
     cancelar: new CancelarCitaUseCase(citaRepo, auditoria, uow, crearProcesarListaEsperaInerte(), incidentes, anticipos, contextoClienta),
     reprogramar: new ReprogramarCitaUseCase(
       citaRepo,
-      sillaRepo,
       motor,
+      new SelectorDeSillaLibre(sillaRepo, citaRepo),
       resolutor,
       auditoria,
       uow,

@@ -13,7 +13,13 @@ export interface ReporteDeAgenda {
   /** Canceladas a `<= 60 min` del inicio (`RN-CRM-06`). */
   cancelacionesTardias: number;
   atendidasPorSucursal: { sucursalId: string; completadas: number; noShow: number }[];
-  /** `manicuristaId` `null` agrupa las que se completaron sin asignar a nadie. */
+  /**
+   * `manicuristaId` `null` agrupa las que se completaron sin asignar a nadie.
+   *
+   * ⚠️ **`completadas` incluye las reposiciones de garantía**, que son trabajo real pero **no
+   * vendido**. Ver `garantiasCompletadas`: el total de reposiciones del periodo viaja aparte
+   * precisamente para que este desglose se pueda leer sabiendo que las contiene.
+   */
   atendidasPorManicurista: { manicuristaId: string | null; completadas: number }[];
   /**
    * Suma de `cotizacion_snapshot.totalCentavos` de las citas `completada`.
@@ -23,6 +29,27 @@ export interface ReporteDeAgenda {
   ingresoEstimadoCentavos: number;
   /** Cuántas `completada` no tienen total (cotización manual, `DEC-033`): quedan fuera de la suma. */
   completadasSinCotizar: number;
+  /**
+   * Cuántas de las `completada` fueron **reposiciones de garantía** (`RN-GAR-01..06`).
+   *
+   * ## POR QUÉ ESTE CAMPO EXISTE (auditoría 2026-10-17)
+   *
+   * Una garantía es una `Cita` con `totalCentavos: 0`. En el ingreso eso es correcto —suma cero, no
+   * lo infla— pero en los conteos era **invisible**: entraba en `porEstado.completada` y en
+   * `atendidasPorManicurista` como una cita cualquiera.
+   *
+   * Las dos consecuencias, y la segunda es la que obliga a nombrarlo:
+   *
+   * 1. *"20 completadas, $9.000"* sin saber que tres fueron gratis da un promedio por cita bajo
+   *    sin explicación visible.
+   * 2. **El desglose por manicurista es una medida de su trabajo**, y una reposición suele ser la
+   *    corrección de su propio trabajo. Contarla igual que una cita vendida hacía que rehacer uñas
+   *    despegadas **subiera** su cifra.
+   *
+   * **No se excluyen del conteo**: la silla se ocupó y hubo trabajo real, así que para ocupación y
+   * capacidad cuentan. Lo que faltaba era poder distinguirlas.
+   */
+  garantiasCompletadas: number;
   listaDeEspera: {
     inscritas: number;
     notificadas: number;
@@ -110,7 +137,12 @@ export class ReporteDeAgendaUseCase {
         SELECT
           -- El operador ->> da texto; el cast explicito evita que PostgreSQL sume como texto.
           COALESCE(SUM((c.cotizacion_snapshot->>'totalCentavos')::bigint), 0)::bigint AS centavos,
-          COUNT(*) FILTER (WHERE c.cotizacion_snapshot->>'totalCentavos' IS NULL)::int AS sin_cotizar
+          COUNT(*) FILTER (WHERE c.cotizacion_snapshot->>'totalCentavos' IS NULL)::int AS sin_cotizar,
+          -- Las reposiciones de garantia: trabajo real, ingreso cero. Se cuentan en la MISMA
+          -- consulta que el ingreso porque comparten el filtro exacto (completada, en el rango), y
+          -- separarlas seria una quinta consulta con el mismo WHERE.
+          -- SIN BACKTICKS EN ESTE COMENTARIO: cerrarian el template literal de sql.
+          COUNT(*) FILTER (WHERE c.es_garantia)::int AS garantias
         FROM agenda.citas c
         WHERE c.estado = 'completada' AND ${enElRango} ${deLaSucursal}
       `),
@@ -131,7 +163,7 @@ export class ReporteDeAgendaUseCase {
       filasDe<{ estado: string; total: number }>(espera).map((fila) => [fila.estado, Number(fila.total)]),
     );
     const sumaDeEspera = [...esperaPorEstado.values()].reduce((suma, valor) => suma + valor, 0);
-    const [filaDeIngresos] = filasDe<{ centavos: string | number; sin_cotizar: number }>(ingresos);
+    const [filaDeIngresos] = filasDe<{ centavos: string | number; sin_cotizar: number; garantias: number }>(ingresos);
 
     return {
       porEstado: porEstadoCompleto,
@@ -149,6 +181,7 @@ export class ReporteDeAgendaUseCase {
       // `bigint` llega como texto en `postgres-js`: `Number` explícito, no concatenación.
       ingresoEstimadoCentavos: Number(filaDeIngresos?.centavos ?? 0),
       completadasSinCotizar: Number(filaDeIngresos?.sin_cotizar ?? 0),
+      garantiasCompletadas: Number(filaDeIngresos?.garantias ?? 0),
       listaDeEspera: {
         // "Inscritas" es el total de solicitudes creadas en el periodo, en cualquier estado: es la
         // demanda que no cupo, que es lo que el indicador quiere medir.

@@ -204,6 +204,16 @@ function Resumen({
               ))}
             {citas.total === 0 ? <p className="py-2 text-xs text-texto-terciario">Ninguna cita en el periodo.</p> : null}
           </dl>
+          {citas.garantiasCompletadas > 0 ? (
+            <p className="mt-3 rounded border border-info/30 bg-info-suave px-2.5 py-2 text-xs text-info">
+              {/* `garantía` → `garantías` conserva la tilde (la lleva la í, no la sílaba final),
+                  así que aquí el plural sí es regular. Las dos formas van escritas enteras de todas
+                  formas, por la misma razón que en las cancelaciones. */}
+              {`${citas.garantiasCompletadas} de las completadas ${
+                citas.garantiasCompletadas === 1 ? 'fue una reposición' : 'fueron reposiciones'
+              } por garantía: ocuparon silla y tiempo, pero su ingreso es $0. Van incluidas arriba y en el desglose por manicurista.`}
+            </p>
+          ) : null}
           {citas.cancelacionesTardias > 0 ? (
             <p className="mt-3 text-xs text-aviso">
               {/* "cancelación" → "cancelaciones": el plural PIERDE la tilde. Concatenar "es" daba

@@ -1253,6 +1253,66 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
     });
   });
 
+  describe('validación de instantes y de query (auditoría 2026-10-17)', () => {
+    /**
+     * ## LOS DOS DEFECTOS QUE ESTAS PRUEBAS FIJAN
+     *
+     * 1. `@IsISO8601({ strict: true })` **acepta una fecha sin hora**. `inicio=2027-03-08` se
+     *    interpreta como medianoche UTC = **18:00 del día 7 en Querétaro**, así que consultar "el
+     *    día 8" devolvía la tarde del 7 y perdía las citas del 8 desde las 18:00. No fallaba:
+     *    desplazaba.
+     * 2. `GET /v1/agenda/disponibilidad` **no tenía DTO ninguno**. Sin `inicio`, `new Date(undefined)`
+     *    es `Invalid Date`, y `diaDeLaSemana` lanza un `RangeError` de `Intl` que no es un
+     *    `DomainError` → **500**. Con un `sucursalId` que no fuera uuid, PostgreSQL devolvía
+     *    `22P02`, que `HttpExceptionFilter` tampoco traduce → **500** también.
+     */
+    it.each([
+      ['una fecha de pared sin hora', '2027-03-08'],
+      ['una hora sin zona', '2027-03-08T11:00:00'],
+    ])('el GET de la agenda RECHAZA %s con 400', async (_caso, inicio) => {
+      await request(app.getHttpServer())
+        .get(RUTA)
+        .query({ sucursalId, inicio, fin: '2027-03-09T00:00:00Z' })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+    });
+
+    it('agendar RECHAZA una hora sin zona: se agendaría seis horas antes de lo pedido', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ sucursalId, servicioId: servicio.id, clientaId: CLIENTA, inicio: '2027-03-08T11:00:00' })
+        .expect(400);
+
+      expect(respuesta.body.error.message).toMatch(/zona/i);
+    });
+
+    it('disponibilidad SIN parámetros responde 400, no 500', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .get('/v1/agenda/disponibilidad')
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+
+      expect(respuesta.body.error.category).toBe('domain');
+    });
+
+    it('disponibilidad con un `sucursalId` que no es uuid responde 400, no 500', async () => {
+      await request(app.getHttpServer())
+        .get('/v1/agenda/disponibilidad')
+        .query({ sucursalId: 'la-de-lomas', inicio: '2027-03-08T17:00:00Z', fin: '2027-03-08T18:00:00Z' })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+    });
+
+    it('disponibilidad con una fecha de pared responde 400: el día se desplazaría', async () => {
+      await request(app.getHttpServer())
+        .get('/v1/agenda/disponibilidad')
+        .query({ sucursalId, inicio: '2027-03-08', fin: '2027-03-09' })
+        .set('Authorization', `Bearer ${encargada}`)
+        .expect(400);
+    });
+  });
+
   describe('GARANTÍAS (`RN-GAR-01..06`) — cierre de `P10`', () => {
     const GARANTIAS = `${RUTA}/garantias`;
 
@@ -1424,6 +1484,89 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
 
       const enLaAgenda = respuesta.body.citas.find((c: { id: string }) => c.id === garantia.id);
       expect(enLaAgenda).toMatchObject({ esGarantia: true, citaGarantizadaId: original.id });
+    });
+
+    it('REPROGRAMAR una garantía CONSERVA el vínculo y no habilita una segunda reposición', async () => {
+      /**
+       * ## EL DEFECTO QUE ESTA PRUEBA DESTAPÓ (auditoría 2026-10-17)
+       *
+       * `ReprogramarCitaUseCase` construía la cita nueva sin `esGarantia` ni `citaGarantizadaId`,
+       * porque `Cita.crear` los pone en `false`/`null` por defecto. Consecuencias reales:
+       *
+       * 1. La reposición dejaba de estar marcada: su `$0` pasaba a parecer un error de captura, y
+       *    la Manicurista perdía el aviso de que repone un trabajo.
+       * 2. **La grave**: el índice único parcial vive sobre `cita_garantizada_id WHERE
+       *    es_garantia`, así que al perderse la bandera **el hueco quedaba libre** y el mismo
+       *    servicio completado podía honrarse otra vez. Mover la cita de la reposición regalaba
+       *    una segunda reposición gratis, sin que nada fallara.
+       */
+      const original = await citaCompletadaHace(1);
+      const { body: garantia } = await agendarGarantia(original.id).expect(201);
+
+      const { body: movida } = await request(app.getHttpServer())
+        .post(`${RUTA}/${garantia.id}/reprogramar`)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ inicio: new Date(Date.now() + 2 * 86_400_000).toISOString() })
+        // `201`: reprogramar **crea** una cita, no actualiza la vieja (`DEC-042`).
+        .expect(201);
+
+      expect(movida.nueva).toMatchObject({ esGarantia: true, citaGarantizadaId: original.id });
+      // Y sigue sin costo: `RN-AGE-08` congela la cotización, mover la hora no es una venta nueva.
+      expect(movida.nueva.cotizacionSnapshot.totalCentavos).toBe(0);
+
+      // La puerta sigue cerrada: el servicio original ya se honró una vez.
+      await agendarGarantia(original.id, { inicio: new Date(Date.now() + 3 * 86_400_000).toISOString() }).expect(409);
+    });
+
+    it('agenda la garantía aunque la PRIMERA silla esté ocupada a esa hora', async () => {
+      /**
+       * ## EL SEGUNDO DEFECTO DE LA AUDITORÍA, Y NO ERA UNA CARRERA
+       *
+       * `AgendarGarantiaUseCase` recorría **todas** las sillas activas sin descartar las ocupadas
+       * (ignoraba el rango a propósito) y confiaba en reintentar con la siguiente cuando la
+       * `EXCLUDE` rechazara la primera. Pero su guarda comparaba `error.code === '23P01'`, y el
+       * repositorio **ya había traducido** ese SQLSTATE a `ConflictoDeNegocioError('SILLA_OCUPADA')`
+       * antes de llegar ahí: la condición era siempre falsa y el bucle **nunca reintentaba**.
+       *
+       * Resultado en producción: en una sucursal de varias sillas, una garantía solo se podía
+       * agendar si la primera silla del listado estaba libre. Con cualquier otra cita a esa hora
+       * respondía *"no hay lugar"* teniendo sillas vacías — y no hacía falta ninguna concurrencia
+       * para provocarlo.
+       */
+      const original = await citaCompletadaHace(1);
+      const horaDeLaGarantia = new Date(Date.now() + 86_400_000);
+
+      // Ocupa UNA silla a esa misma hora. La sucursal de prueba tiene dos.
+      await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ sucursalId, servicioId: servicio.id, clientaId: CLIENTA, inicio: horaDeLaGarantia.toISOString() })
+        .expect(201);
+
+      const respuesta = await agendarGarantia(original.id, { inicio: horaDeLaGarantia.toISOString() }).expect(201);
+
+      expect(respuesta.body.esGarantia).toBe(true);
+      expect(respuesta.body.sillaId).not.toBeNull();
+    });
+
+    it('el snapshot de la garantía NO inventa campos fuera del contrato', async () => {
+      /**
+       * El caso de uso añadía `esGarantia: true` **dentro** de `cotizacionSnapshot`. TypeScript lo
+       * aceptaba (la comprobación de propiedades en exceso no aplica a una variable) y el campo se
+       * persistía en el `jsonb` y volvía en la respuesta **sin estar en el contrato de `P8`**, que
+       * se deriva de `construirSnapshot` y por tanto no puede verlo.
+       *
+       * Es redundante además de invisible: la cita ya lleva `esGarantia` en primer nivel, que es
+       * donde el frontend lo lee. Y `requiereCotizacionManual` quedaba en el valor del servicio:
+       * decir que una reposición de `$0` "necesita que alguien le ponga precio" es falso.
+       */
+      const original = await citaCompletadaHace(1);
+      const { body: garantia } = await agendarGarantia(original.id).expect(201);
+
+      expect(Object.keys(garantia.cotizacionSnapshot).sort()).toEqual(
+        ['congeladoEn', 'incluyeModificadores', 'requiereCotizacionManual', 'servicio', 'totalCentavos', 'version'].sort(),
+      );
+      expect(garantia.cotizacionSnapshot.requiereCotizacionManual).toBe(false);
     });
 
     it('LA MANICURISTA TAMBIÉN VE `esGarantia`: tiene que saber que repone un trabajo', async () => {

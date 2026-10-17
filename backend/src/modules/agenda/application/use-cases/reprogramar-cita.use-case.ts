@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Cita, validarRangoHorario } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
-import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { SelectorDeSillaLibre } from '../../domain/services/selector-de-silla';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { ProcesarListaEsperaUseCase, ResultadoHuecoLiberado } from './lista-espera.use-cases';
 import { REGISTRO_DE_INCIDENTES_PORT, RegistroDeIncidentesPort } from '../../domain/ports/registro-de-incidentes.port';
@@ -65,8 +65,8 @@ export interface ReprogramarCitaInput {
 export class ReprogramarCitaUseCase {
   constructor(
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
-    @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
     private readonly motorDisponibilidad: MotorDisponibilidad,
+    private readonly selectorDeSilla: SelectorDeSillaLibre,
     private readonly resolutorDeServicio: ResolutorDeServicio,
     @Inject(AUDITORIA_PORT) private readonly auditoria: AuditoriaPort,
     @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWork,
@@ -116,6 +116,17 @@ export class ReprogramarCitaUseCase {
       // precio entretanto, la clienta conserva el que se le dijo. Recotizar aquí sería subirle el
       // precio por haber movido su cita.
       cotizacionSnapshot: original.cotizacionSnapshot,
+      /**
+       * **La condición de garantía VIAJA con la cita** (auditoría 2026-10-17).
+       *
+       * Sin estas dos líneas, `Cita.crear` las ponía en `false`/`null` por defecto y mover la hora
+       * de una reposición la convertía en una cita normal. Lo visible era que perdía su marca; lo
+       * grave es que el índice único parcial vive sobre `cita_garantizada_id WHERE es_garantia`, así
+       * que **al perderse la bandera el servicio original quedaba otra vez sin honrar** y se podía
+       * conceder una segunda reposición gratis. Reprogramar no es renunciar a la garantía.
+       */
+      esGarantia: original.esGarantia,
+      citaGarantizadaId: original.citaGarantizadaId,
     });
 
     original.cambiarEstado('reprogramada');
@@ -234,18 +245,13 @@ export class ReprogramarCitaUseCase {
    * fallaría consigo misma, y en una sucursal de una sola silla sería imposible reprogramar nada.
    */
   private async elegirSillaLibre(sucursalId: string, rango: RangoHorario, idAExcluir: string): Promise<string> {
-    const activas = (await this.sillaRepository.listarPorSucursal(sucursalId)).filter((silla) => silla.activa);
-    const ocupadas = new Set(
-      (await this.citaRepository.listarQueOcupanEnRango(sucursalId, rango)).filter((cita) => cita.id !== idAExcluir).map((cita) => cita.sillaId),
-    );
-
-    const libre = activas.find((silla) => !ocupadas.has(silla.id));
+    const [libre] = await this.selectorDeSilla.libresEn(sucursalId, rango, { excluirCitaId: idAExcluir });
     if (!libre) {
       throw new DomainError('HORARIO_NO_DISPONIBLE', 'No queda lugar en la sucursal para el nuevo horario.', 409, {
         sucursalId,
         inicio: rango.inicio.toISOString(),
       });
     }
-    return libre.id;
+    return libre;
   }
 }

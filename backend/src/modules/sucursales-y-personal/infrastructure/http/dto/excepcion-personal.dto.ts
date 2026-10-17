@@ -1,13 +1,14 @@
-import { IsISO8601, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { EsInstanteIso } from '../../../../../shared/validacion/es-instante-iso.decorator';
 
 export class RegistrarAusenciaDto {
   @IsUUID()
   manicuristaId!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   fin!: string;
 
   @IsOptional()
@@ -24,10 +25,10 @@ export class RegistrarCoberturaDto extends RegistrarAusenciaDto {
 
 /** Filtro del listado. El rango es obligatorio: una lectura sin acotar no está acotada. */
 export class ListarExcepcionesDto {
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   fin!: string;
 
   /**

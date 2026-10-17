@@ -1,12 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Cita, validarRangoHorario } from '../../domain/entities/cita.entity';
 import { CITA_REPOSITORY, CitaRepository } from '../../domain/ports/cita.repository';
-import { SILLA_REPOSITORY, SillaRepository } from '../../domain/ports/silla.repository';
 import { MotorDisponibilidad } from '../../domain/services/motor-disponibilidad';
+import { SelectorDeSillaLibre, esSillaOcupada } from '../../domain/services/selector-de-silla';
 import { ResolutorDeServicio } from '../../domain/services/resolutor-de-servicio';
 import { CONTEXTO_CLIENTA_PORT, ContextoClientaPort } from '../../domain/ports/contexto-clienta.port';
 import { ANTICIPO_PORT, AnticipoPort } from '../../domain/ports/anticipo.port';
-import { RangoHorario } from '../../../../database/schema';
 import { AUDITORIA_PORT, AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ConflictoDeNegocioError, DomainError, RecursoNoEncontradoError } from '../../../../shared/errors/domain-error';
 import { ClaimsUsuario } from '../../../../shared/auth/rol';
@@ -60,8 +59,8 @@ export interface AgendarCitaInput {
 export class AgendarCitaUseCase {
   constructor(
     @Inject(CITA_REPOSITORY) private readonly citaRepository: CitaRepository,
-    @Inject(SILLA_REPOSITORY) private readonly sillaRepository: SillaRepository,
     private readonly motorDisponibilidad: MotorDisponibilidad,
+    private readonly selectorDeSilla: SelectorDeSillaLibre,
     private readonly resolutorDeServicio: ResolutorDeServicio,
     @Inject(CONTEXTO_CLIENTA_PORT) private readonly clientas: ContextoClientaPort,
     @Inject(ANTICIPO_PORT) private readonly anticipos: AnticipoPort,
@@ -110,7 +109,7 @@ export class AgendarCitaUseCase {
     // saber si había manos para atenderlas.
     await this.motorDisponibilidad.exigirDisponibilidad(input.sucursalId, rangoHorario);
 
-    const candidatas = await this.sillasCandidatas(input.sucursalId, rangoHorario);
+    const candidatas = await this.selectorDeSilla.libresEn(input.sucursalId, rangoHorario);
     // Se congela una sola vez, fuera del bucle: reintentar en otra silla no recotiza nada.
     const cotizacionSnapshot = this.resolutorDeServicio.construirSnapshot(servicio);
     // Base de cálculo del anticipo. `null` con `DEC-033`: el monto lo fija una persona.
@@ -165,8 +164,9 @@ export class AgendarCitaUseCase {
         return cita;
       } catch (error) {
         // Que la manicurista esté ocupada NO se arregla cambiando de silla: es ella la que choca.
-        // Reintentar en otra silla solo tiene sentido ante un conflicto de silla.
-        if (!(error instanceof ConflictoDeNegocioError) || error.code !== 'SILLA_OCUPADA') throw error;
+        // Reintentar en otra silla solo tiene sentido ante un conflicto de silla — `esSillaOcupada`
+        // lo distingue, y compara el código de negocio porque el repositorio ya tradujo el `23P01`.
+        if (!esSillaOcupada(error)) throw error;
       }
     }
 
@@ -179,19 +179,4 @@ export class AgendarCitaUseCase {
   }
 
   /** Sillas activas de la sucursal que, según la foto actual, no tienen cita solapada. */
-  private async sillasCandidatas(sucursalId: string, rangoHorario: RangoHorario): Promise<string[]> {
-    const sillas = (await this.sillaRepository.listarPorSucursal(sucursalId)).filter((silla) => silla.activa);
-
-    if (sillas.length === 0) {
-      throw new DomainError('SUCURSAL_SIN_SILLAS', 'La sucursal no tiene ninguna silla activa configurada.', 409, {
-        sucursalId,
-      });
-    }
-
-    const ocupadas = new Set(
-      (await this.citaRepository.listarQueOcupanEnRango(sucursalId, rangoHorario)).map((cita) => cita.sillaId),
-    );
-
-    return sillas.map((silla) => silla.id).filter((id) => !ocupadas.has(id));
-  }
 }

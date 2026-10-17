@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { servidor } from '../../pruebas/servidor';
 import { montar } from '../../pruebas/montar';
+import { vigilarRechazosNoGestionados } from '../../pruebas/rechazos';
 import { SERVICIO_GELISH, modificador, perfil, servicio } from '../../pruebas/datos';
 import { CatalogoAdmin } from './componentes/CatalogoAdmin';
 import { ModificadoresAdmin } from './componentes/ModificadoresAdmin';
@@ -271,5 +272,50 @@ describe('Backoffice — Modificadores de diseño', () => {
     await elegirServicio(userEvent.setup());
 
     expect(await screen.findByRole('button', { name: 'Quitar Decoración francesa' })).toBeInTheDocument();
+  });
+});
+
+describe('Backoffice — los fallos no dejan promesas rechazadas sueltas', () => {
+  /**
+   * ## EL DEFECTO QUE ESTE BLOQUE DESTAPÓ (auditoría 2026-10-17)
+   *
+   * Seis manejadores del Backoffice hacían `await mutacion.mutateAsync()` sin `try/catch`. El error
+   * se mostraba —`useMutation` lo guarda y `AvisoDeError` lo pinta—, así que las pruebas de
+   * interfaz pasaban; lo que quedaba suelto era la promesa rechazada que React descarta.
+   *
+   * Importa por dos razones distintas: con un informador de errores conectado, cada `409` legítimo
+   * se reportaría como fallo del programa; y en las pruebas, Vitess marca el rechazo suelto como
+   * posible fuente de **falsos positivos**.
+   */
+  vigilarRechazosNoGestionados();
+
+  const conFallo = (ruta: string) =>
+    servidor.use(
+      http.post(ruta, () =>
+        HttpResponse.json({ error: { category: 'domain', code: 'SERVICIO_YA_INACTIVO', message: 'Ya estaba dado de baja.' } }, { status: 409 }),
+      ),
+    );
+
+  it('dar de baja un servicio que falla muestra el error y NO deja un rechazo suelto', async () => {
+    contexto();
+    conFallo(`${SERVICIOS}/${SERVICIO_GELISH}/desactivar`);
+
+    montar(<CatalogoAdmin />);
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Dar de baja Gelish manos' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ya estaba dado de baja.');
+  });
+
+  it('dar de baja un modificador que falla tampoco', async () => {
+    contexto();
+    servidor.use(http.get(MODIFICADORES, () => HttpResponse.json({ modificadoresDiseno: [modificador()] })));
+    conFallo(`${MODIFICADORES}/mod-1/desactivar`);
+
+    montar(<ModificadoresAdmin />);
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Dar de baja Decoración francesa' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ya estaba dado de baja.');
   });
 });

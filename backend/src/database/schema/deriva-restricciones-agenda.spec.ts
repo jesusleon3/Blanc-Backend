@@ -39,11 +39,61 @@ describe('Deriva de restricciones de `agenda.citas` (bloqueo 2)', () => {
     definiciones = new Map(filas.map((fila) => [fila.conname, fila.def]));
   });
 
-  it('las tres restricciones a mano existen en la base migrada', () => {
+  it('las CUATRO restricciones a mano existen en la base migrada', () => {
     // Si una desaparece, las comprobaciones siguientes pasarían por vacuidad.
+    //
+    // `citas_garantia_coherente` se añadió en la auditoría de 2026-10-17: entró con la migración
+    // `0016` y **nadie la vigilaba**. Es exactamente el riesgo que este archivo existe para cubrir
+    // —Drizzle no la tiene en su snapshot, así que una migración regenerada la perdería sin que
+    // nada fallara— y la guarda decía "las tres" mientras ya eran cuatro.
     expect([...definiciones.keys()].sort()).toEqual(
-      expect.arrayContaining(['citas_estado_valido', 'citas_manicurista_sin_solapamiento', 'citas_silla_sin_solapamiento']),
+      expect.arrayContaining([
+        'citas_estado_valido',
+        'citas_manicurista_sin_solapamiento',
+        'citas_silla_sin_solapamiento',
+        'citas_garantia_coherente',
+      ]),
     );
+  });
+
+  describe('garantías (`RN-GAR-01..06`) — restricciones de la migración `0016`/`0017`', () => {
+    it('`es_garantia` y `cita_garantizada_id` van juntos o ninguno', () => {
+      const definicion = definiciones.get('citas_garantia_coherente')!;
+
+      // Las dos ramas: ni una garantía sin la cita que honra, ni una cita normal apuntando a una.
+      expect(definicion).toContain('es_garantia');
+      expect(definicion).toContain('cita_garantizada_id');
+      // Y la entidad impide construir el estado ilegal antes de llegar aquí: el SQLSTATE de un
+      // `CHECK` es `23514`, que `HttpExceptionFilter` no traduce — saldría como un 500 opaco.
+    });
+
+    it('UNA SOLA GARANTÍA VIVA POR SERVICIO, y el índice EXCLUYE `reprogramada`', async () => {
+      /**
+       * ## EL DEFECTO QUE ESTE PREDICADO CORRIGE (auditoría 2026-10-17)
+       *
+       * La `0016` creó el índice con `WHERE es_garantia = true` a secas. Pero reprogramar en Blanc
+       * **no mueve la fila**: la original queda `reprogramada` y nace otra (`DEC-042`, porque la
+       * cadena es un dato de negocio con tope de 3). Las dos compartían `cita_garantizada_id` con
+       * la bandera puesta, así que el índice las rechazaba: **la clienta a la que se le estropeó el
+       * trabajo no podía cambiar la hora de su reposición**, y recibía un 500 porque el `23505` de
+       * este índice no tiene traducción de dominio.
+       *
+       * El `WHERE` completo se comprueba, y no solo que el índice exista: si alguien lo recreara
+       * sin la exclusión, el invariante seguiría pareciendo correcto y la reprogramación volvería
+       * a romperse.
+       */
+      const db = await crearBaseDeDatosDePrueba();
+      const indices = (await db.execute(
+        `SELECT indexdef FROM pg_indexes WHERE schemaname = 'agenda' AND tablename = 'citas'`,
+      )) as unknown as { indexdef: string }[];
+
+      const unaGarantia = indices.find((i) => i.indexdef.includes('citas_garantia_unica_por_origen'));
+      expect(unaGarantia).toBeDefined();
+      expect(unaGarantia!.indexdef).toContain('UNIQUE');
+      expect(unaGarantia!.indexdef).toContain('es_garantia');
+      // La exclusión de `reprogramada`, que es lo que hace reprogramable una garantía.
+      expect(unaGarantia!.indexdef).toMatch(/estado <> 'reprogramada'::text/);
+    });
   });
 
   it('el `CHECK` de estados coincide EXACTAMENTE con `ESTADOS_CITA`', () => {

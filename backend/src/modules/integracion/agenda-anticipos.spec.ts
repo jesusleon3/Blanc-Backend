@@ -31,6 +31,7 @@ import { crearRegistroDeIncidentesFalso } from '../agenda/test-utils/registro-de
 import { AuditoriaPort } from '../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { DrizzleUnitOfWork } from '../../shared/persistence/drizzle-unit-of-work';
+import { SelectorDeSillaLibre } from '../../modules/agenda/domain/services/selector-de-silla';
 
 const DUEÑA: ClaimsUsuario = { sub: 'dueña-1', rol: Rol.ADMINISTRADOR, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-4111-8111-111111111111';
@@ -79,7 +80,7 @@ async function preparar({ sillas = 1, catalogo = CATALOGO.port }: { sillas?: num
   const retener = new RetenerAnticipoUseCase(anticipoRepo, auditoria, uow);
   const anticipoPort = new AnticipoAdapter(consultarAnticipos, generar, retener);
 
-  const transicionar = new TransicionarCitaPorAnticipoUseCase(citaRepo, sillaRepo, motor, auditoria);
+  const transicionar = new TransicionarCitaPorAnticipoUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), auditoria);
   const transicionPort = new TransicionDeCitaAdapter(transicionar);
 
   const crearClienta = async (nombre: string, telefono: string, enListaRoja = false) => {
@@ -95,7 +96,7 @@ async function preparar({ sillas = 1, catalogo = CATALOGO.port }: { sillas?: num
     auditoria,
     crearClienta,
     consultarAnticipos,
-    agendar: new AgendarCitaUseCase(citaRepo, sillaRepo, motor, resolutor, contextoClienta, anticipoPort, auditoria, uow),
+    agendar: new AgendarCitaUseCase(citaRepo, motor, new SelectorDeSillaLibre(sillaRepo, citaRepo), resolutor, contextoClienta, anticipoPort, auditoria, uow),
     confirmarPago: new ConfirmarPagoAnticipoUseCase(anticipoRepo, transicionPort, auditoria, uow),
     expirarAnticipo: new ExpirarAnticipoUseCase(anticipoRepo, transicionPort, auditoria, uow),
     generarAnticipo: generar,
@@ -110,8 +111,8 @@ async function preparar({ sillas = 1, catalogo = CATALOGO.port }: { sillas?: num
     ),
     reprogramar: new ReprogramarCitaUseCase(
       citaRepo,
-      sillaRepo,
       motor,
+      new SelectorDeSillaLibre(sillaRepo, citaRepo),
       resolutor,
       auditoria,
       uow,

@@ -1,5 +1,6 @@
-import { IsBoolean, IsISO8601, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EsInstanteIso } from '../../../../../shared/validacion/es-instante-iso.decorator';
 
 export class AgendarCitaDto {
   @IsUUID()
@@ -12,7 +13,7 @@ export class AgendarCitaDto {
   clientaId!: string;
 
   /** Instante absoluto en ISO-8601 **con zona**. Ver `ZONA_HORARIA_NEGOCIO` sobre hora de pared. */
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
   /**
@@ -22,7 +23,7 @@ export class AgendarCitaDto {
    * otro tamaño del que el cliente creía.
    */
   @IsOptional()
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   fin?: string;
 
   /** Ausente = la clienta no eligió. La Encargada asigna al llegar (`DEC-031`). */
@@ -56,12 +57,12 @@ export class CancelarCitaDto {
 }
 
 export class ReprogramarCitaDto {
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
   /** Igual que en `AgendarCitaDto`: opcional, derivado del catálogo, rechazado si no coincide. */
   @IsOptional()
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   fin?: string;
 
   @IsOptional()
@@ -74,14 +75,33 @@ export class ReprogramarCitaDto {
   confirmacionDeEmpleado?: boolean;
 }
 
+/**
+ * Query de `GET /v1/agenda/disponibilidad`.
+ *
+ * ## ESTE DTO EXISTÍA Y EL CONTROLADOR NO LO USABA (auditoría 2026-10-17)
+ *
+ * La validación estaba escrita; `SillasController.disponibilidad` leía los tres parámetros como
+ * `@Query('...') x: string` sueltos y nunca pasaba por aquí. Tres formas de llegar a un
+ * `500 ERROR_INESPERADO`:
+ *
+ * - **Sin `inicio`**: `new Date(undefined)` es `Invalid Date`, y `diaDeLaSemana` lanza el
+ *   `RangeError` de `Intl` al formatearla. No es un `DomainError`, así que no se traduce.
+ * - **`sucursalId` que no es uuid**: llega a PostgreSQL y vuelve como `22P02`, que
+ *   `HttpExceptionFilter` tampoco traduce.
+ * - **Una fecha de pared**: no fallaba, que es peor — desplazaba la consulta seis horas.
+ *
+ * Era el único endpoint de la API sin DTO cableado, y conviene decir por qué importa más de lo que
+ * parece: lo va a consultar el bot para proponer horarios, así que un 500 aquí es un 500 en medio
+ * de una conversación con una clienta.
+ */
 export class ConsultarDisponibilidadDto {
   @IsUUID()
   sucursalId!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   fin!: string;
 }
 
@@ -112,10 +132,10 @@ export class ConsultarAgendaDto {
   @IsUUID()
   sucursalId!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   fin!: string;
 
   /**
@@ -146,7 +166,7 @@ export class AgendarGarantiaDto {
   @IsUUID()
   citaGarantizadaId!: string;
 
-  @IsISO8601({ strict: true })
+  @EsInstanteIso()
   inicio!: string;
 
   @IsOptional()
@@ -159,3 +179,4 @@ export class AgendarGarantiaDto {
   @MaxLength(500)
   motivo?: string;
 }
+

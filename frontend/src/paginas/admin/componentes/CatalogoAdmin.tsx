@@ -51,7 +51,16 @@ export function CatalogoAdmin() {
     ]);
   };
 
-  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarServicio(id) });
+  /**
+   * **`mutate` + `onSuccess`, nunca `await mutateAsync()` en el `onClick`.**
+   *
+   * React descarta la promesa que devuelve un manejador de evento, así que un `mutateAsync` que
+   * rechace —y rechaza en cada `409`— deja un rechazo sin gestionar. El error se vería igual
+   * (`useMutation` lo guarda y `AvisoDeError` lo pinta), pero con un informador de errores
+   * conectado cada conflicto legítimo se reportaría como un fallo del programa. Con `mutate` no hay
+   * promesa que descartar, y el refresco va donde corresponde: al éxito.
+   */
+  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarServicio(id), onSuccess: refrescar });
 
   const lista = servicios.data?.servicios ?? [];
 
@@ -140,10 +149,7 @@ export function CatalogoAdmin() {
                             variante="fantasma"
                             cargando={desactivar.isPending}
                             aria-label={`Dar de baja ${servicio.nombre}`}
-                            onClick={async () => {
-                              await desactivar.mutateAsync(servicio.id);
-                              await refrescar();
-                            }}
+                            onClick={() => desactivar.mutate(servicio.id)}
                           >
                             Dar de baja
                           </Boton>

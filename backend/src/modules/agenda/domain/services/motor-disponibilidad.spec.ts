@@ -12,6 +12,7 @@ import { AuditoriaPort } from '../../../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { crearUnitOfWorkFalso } from '../../../../shared/persistence/test-utils/unit-of-work-falso';
 import { crearAnticipoFalso } from '../../test-utils/anticipo-falso';
+import { SelectorDeSillaLibre } from '../../../../modules/agenda/domain/services/selector-de-silla';
 
 const ACTOR: ClaimsUsuario = { sub: 'encargada-1', rol: Rol.GERENTE, sucursales: 'GLOBAL', manicuristaId: null };
 const SUCURSAL = '11111111-1111-1111-1111-111111111111';
@@ -52,8 +53,8 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
     motor,
     agendar: new AgendarCitaUseCase(
       citaRepo,
-      sillaRepo,
       motor,
+      new SelectorDeSillaLibre(sillaRepo, citaRepo),
       new ResolutorDeServicio(CATALOGO.port),
       crearContextoClientaFalso(),
       anticipos,

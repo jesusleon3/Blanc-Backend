@@ -4,7 +4,7 @@ import { ClaimsUsuario, Rol } from '../../../../shared/auth/rol';
 import { CurrentUser } from '../../../../shared/auth/current-user.decorator';
 import { GestionarSillasUseCase } from '../../application/use-cases/gestionar-sillas.use-case';
 import { ConsultarDisponibilidadUseCase } from '../../application/use-cases/consultar-disponibilidad.use-case';
-import { CrearSillaDto } from './dto/agendar-cita.dto';
+import { ConsultarDisponibilidadDto, CrearSillaDto } from './dto/agendar-cita.dto';
 import { Silla } from '../../domain/entities/silla.entity';
 
 export const sillaAJson = (silla: Silla) => ({
@@ -50,12 +50,17 @@ export class SillasController {
     return sillaAJson(await this.gestionarSillas.desactivar({ sillaId: id }, usuario));
   }
 
+  /**
+   * **Con DTO, y no con tres `@Query` sueltos.** Ver `ConsultarDisponibilidadDto`: sin él, una
+   * query incompleta o un `sucursalId` que no fuera uuid respondían `500` en vez de `400`, y una
+   * fecha de pared desplazaba la consulta seis horas sin avisar.
+   */
   @Get('disponibilidad')
   @Roles(Rol.SUPER_ADMIN, Rol.ADMINISTRADOR, Rol.GERENTE)
-  async disponibilidad(@Query('sucursalId') sucursalId: string, @Query('inicio') inicio: string, @Query('fin') fin: string) {
+  async disponibilidad(@Query() query: ConsultarDisponibilidadDto) {
     return this.consultarDisponibilidad.ejecutar({
-      sucursalId,
-      rangoHorario: { inicio: new Date(inicio), fin: new Date(fin) },
+      sucursalId: query.sucursalId,
+      rangoHorario: { inicio: new Date(query.inicio), fin: new Date(query.fin) },
     });
   }
 }

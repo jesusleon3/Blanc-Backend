@@ -218,6 +218,7 @@ function formasDeAnalitica(): Record<string, string[]> {
     atendidasPorManicurista: 0,
     ingresoEstimadoCentavos: 0,
     completadasSinCotizar: 0,
+    garantiasCompletadas: 0,
     listaDeEspera: 0,
   } satisfies Record<keyof ReporteDeAgenda, number>;
 

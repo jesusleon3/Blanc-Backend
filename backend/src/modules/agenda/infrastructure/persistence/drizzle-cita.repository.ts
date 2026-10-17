@@ -161,6 +161,15 @@ export class DrizzleCitaRepository implements CitaRepository {
     return filas.length === 0 ? null : this.aEntidad(filas[0]);
   }
 
+  /**
+   * ¿Este servicio completado ya tiene una garantía?
+   *
+   * **Mira cualquier estado, a diferencia del índice único**, que desde la migración `0017` excluye
+   * `reprogramada`. La diferencia es deliberada y las dos son correctas para lo suyo: el índice
+   * impide que **dos filas vivas** reclamen la misma garantía (y por eso tiene que dejar pasar la
+   * fila muerta de una reprogramación); esta consulta responde *"¿ya se concedió?"*, y una garantía
+   * reprogramada sí se concedió — solo cambió de hora.
+   */
   async existeGarantiaDe(citaGarantizadaId: string): Promise<boolean> {
     const filas = await this.db
       .select({ id: citas.id })

@@ -120,6 +120,13 @@
       "when": 1792193966191,
       "tag": "0016_citas_de_garantia",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792278074130,
+      "tag": "0017_garantia_reprogramable",
+      "breakpoints": true
     }
   ]
 }

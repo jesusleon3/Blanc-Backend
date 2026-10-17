@@ -53,7 +53,24 @@ export function ListaDeEspera({ sucursalId, fecha }: { sucursalId: string; fecha
     ]);
   };
 
-  const avanzar = useMutation({ mutationFn: () => listaEsperaApi.avanzarTurno() });
+  /**
+   * `mutate` + `onSuccess`: un `await mutateAsync()` en el `onClick` deja un rechazo sin gestionar
+   * cuando el barrido falla, porque React descarta la promesa del manejador. El resumen se compone
+   * con el resultado que `onSuccess` recibe, que es el mismo dato.
+   */
+  const avanzar = useMutation({
+    mutationFn: () => listaEsperaApi.avanzarTurno(),
+    onSuccess: async (resultado) => {
+      await refrescar();
+      setResumenDeAvance(
+        `${resultado.expiradas.length} turno${resultado.expiradas.length === 1 ? '' : 's'} vencido${
+          resultado.expiradas.length === 1 ? '' : 's'
+        }, ${resultado.nuevasOfertas.length} oferta${resultado.nuevasOfertas.length === 1 ? '' : 's'} nueva${
+          resultado.nuevasOfertas.length === 1 ? '' : 's'
+        }.`,
+      );
+    },
+  });
   const [resumenDeAvance, setResumenDeAvance] = useState<string | null>(null);
 
   const fila = data?.solicitudes ?? [];
@@ -70,17 +87,7 @@ export function ListaDeEspera({ sucursalId, fecha }: { sucursalId: string; fecha
             variante="fantasma"
             className="ml-auto"
             cargando={avanzar.isPending}
-            onClick={async () => {
-              const resultado = await avanzar.mutateAsync();
-              await refrescar();
-              setResumenDeAvance(
-                `${resultado.expiradas.length} turno${resultado.expiradas.length === 1 ? '' : 's'} vencido${
-                  resultado.expiradas.length === 1 ? '' : 's'
-                }, ${resultado.nuevasOfertas.length} oferta${resultado.nuevasOfertas.length === 1 ? '' : 's'} nueva${
-                  resultado.nuevasOfertas.length === 1 ? '' : 's'
-                }.`,
-              );
-            }}
+            onClick={() => avanzar.mutate()}
           >
             {/* El planificador ya lo hace cada pocos minutos (`ADR-025`). Este botón existe para
                 cuando la Encargada no quiere esperar al siguiente barrido. */}

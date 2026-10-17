@@ -38,7 +38,9 @@ export function ModificadoresAdmin() {
   const servicios = useQuery({ queryKey: ['admin-servicios'], queryFn: () => adminApi.servicios() });
 
   const refrescar = () => cliente.invalidateQueries({ queryKey: ['admin-modificadores'] });
-  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarModificador(id) });
+  // `mutate` + `onSuccess`: ver la nota de `CatalogoAdmin`. Un `await mutateAsync()` en el
+  // `onClick` deja un rechazo sin gestionar en cada `409`.
+  const desactivar = useMutation({ mutationFn: (id: string) => adminApi.desactivarModificador(id), onSuccess: refrescar });
 
   const lista = modificadores.data?.modificadoresDiseno ?? [];
 
@@ -116,10 +118,7 @@ export function ModificadoresAdmin() {
                       variante="fantasma"
                       aria-label={`Dar de baja ${modificador.nombre}`}
                       cargando={desactivar.isPending}
-                      onClick={async () => {
-                        await desactivar.mutateAsync(modificador.id);
-                        await refrescar();
-                      }}
+                      onClick={() => desactivar.mutate(modificador.id)}
                     >
                       Dar de baja
                     </Boton>

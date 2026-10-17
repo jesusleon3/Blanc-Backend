@@ -239,6 +239,7 @@ export const CLAVES_DE_REPORTE_DE_AGENDA = completas<ReporteDeAgenda>()([
   'atendidasPorManicurista',
   'ingresoEstimadoCentavos',
   'completadasSinCotizar',
+  'garantiasCompletadas',
   'listaDeEspera',
 ]);
 

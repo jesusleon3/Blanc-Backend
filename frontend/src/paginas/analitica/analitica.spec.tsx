@@ -323,3 +323,36 @@ describe('Analítica — RBAC: exclusiva de Administración', () => {
     expect(await screen.findByRole('navigation', { name: 'Secciones' })).toBeInTheDocument();
   });
 });
+
+describe('Analítica — las reposiciones por garantía se nombran (auditoría 2026-10-17)', () => {
+  it('avisa de cuántas completadas fueron reposiciones sin costo', async () => {
+    /**
+     * Una garantía entra en `porEstado.completada` y en el desglose por manicurista aportando `$0`.
+     * Sin nombrarlas, la Dueña lee un promedio por cita más bajo sin saber por qué — y el desglose
+     * por manicurista **sube** cuando alguien rehace su propio trabajo.
+     */
+    basico(resumenAnalitico({ citas: { ...resumenAnalitico().citas, garantiasCompletadas: 2 } }));
+
+    montar(<Analitica />, { ruta: '/analitica' });
+
+    expect(await screen.findByText(/2 de las completadas fueron reposiciones por garantía/)).toBeInTheDocument();
+    expect(screen.getByText(/su ingreso es \$0/)).toBeInTheDocument();
+  });
+
+  it('en singular no dice «fueron reposiciones»', async () => {
+    basico(resumenAnalitico({ citas: { ...resumenAnalitico().citas, garantiasCompletadas: 1 } }));
+
+    montar(<Analitica />, { ruta: '/analitica' });
+
+    expect(await screen.findByText(/1 de las completadas fue una reposición por garantía/)).toBeInTheDocument();
+  });
+
+  it('sin garantías en el periodo NO muestra el aviso', async () => {
+    basico();
+
+    montar(<Analitica />, { ruta: '/analitica' });
+
+    await screen.findByText('Embudo de citas');
+    expect(screen.queryByText(/por garantía/)).not.toBeInTheDocument();
+  });
+});

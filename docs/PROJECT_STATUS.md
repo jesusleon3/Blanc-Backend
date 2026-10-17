@@ -1209,6 +1209,76 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-17 (b) — Auditoría adversarial de extremo a extremo: 9 defectos cazados en las costuras
+
+**Backend: 1284 pruebas en 80 suites** (+32). **Frontend: 233 pruebas en 14 suites** (+5). Los seis controles del backend y los cuatro del frontend en verde. Migración nueva: `0017_garantia_reprogramable.sql`.
+
+> **Dos de los nueve son de alta severidad y los dos los introduje yo en el commit anterior** (`0b5ddff`): una garantía reprogramada regalaba una segunda reposición gratis, y una garantía no se podía agendar si la primera silla estaba ocupada. Los dos tenían pruebas que pasaban.
+
+---
+
+#### Tabla de hallazgos
+
+| # | Dónde | Qué fallaba en producción | Cómo se reprodujo | Corrección |
+|---|---|---|---|---|
+| **1** | `reprogramar-cita.use-case.ts` | `Cita.crear` pone `esGarantia`/`citaGarantizadaId` en `false`/`null` por defecto, y reprogramar **no los copiaba**. Mover la hora de una reposición la convertía en cita normal: perdía su marca y, lo grave, **liberaba el índice único parcial** → el mismo servicio completado podía honrarse **otra vez**. Una reposición gratis por cada vez que alguien moviera la hora | E2E: agendar garantía → reprogramar → pedir una segunda garantía del mismo servicio (esperaba `409`, daba `201`) | Las dos columnas viajan con la cita. `RN-AGE-08` ya conservaba el snapshot, así que el `$0` nunca se perdió |
+| **2** | `agendar-garantia.use-case.ts` | Su guarda de reintento comparaba `error.code === '23P01'`, pero `DrizzleCitaRepository` **ya había traducido** ese SQLSTATE a `ConflictoDeNegocioError('SILLA_OCUPADA')`: la condición era siempre falsa y el bucle **nunca reintentaba**. Combinado con un `sillasCandidatas` que ignoraba el rango a propósito, **una garantía solo se podía agendar si la primera silla del listado estaba libre**. En Zibatá (5 sillas) cualquier otra cita a esa hora respondía *"no hay lugar"*. **No hacía falta concurrencia** | E2E: ocupar una silla a la hora de la garantía y agendarla (esperaba `201`, daba `409`) | **Un solo selector de silla** (`SelectorDeSillaLibre`) para los cuatro casos de uso que lo necesitaban, y `esSillaOcupada()` comparando el código de negocio. Ver abajo |
+| **3** | 17 campos en 5 DTO | `@IsISO8601({ strict: true })` **acepta una fecha sin hora**: `strict` solo exige que la fecha exista. `inicio=2027-03-08` se interpreta como medianoche UTC = **18:00 del día 7 en Querétaro**. Consultar "el día 8" devolvía la tarde del 7 y **perdía las citas del 8 desde las 18:00**; un reporte "de marzo" empezaba el 28 de febrero. Y una hora sin zona (`T11:00:00`) la resolvía en la zona **del proceso**, que en Railway es UTC: seis horas antes de lo pedido. **Nada fallaba: desplazaba** | 16 casos unitarios del validador + 3 E2E de rechazo (`400`) | `@EsInstanteIso()`, que exige hora **y** zona. Detecta además el 30 de febrero, que `new Date` desbordaba a marzo en silencio |
+| **4** | `sillas.controller.ts` | `GET /v1/agenda/disponibilidad` leía sus tres parámetros como `@Query()` sueltos. **El DTO existía y nadie lo había cableado.** Sin `inicio`, `new Date(undefined)` → `Invalid Date` → `RangeError` de `Intl` en `diaDeLaSemana` → **500**. Con un `sucursalId` no-uuid, `22P02` de PostgreSQL → **500** también. Era el único endpoint de la API sin DTO | 3 E2E que esperaban `400` y recibían `500` | Se cableó `ConsultarDisponibilidadDto` y se documentó en él por qué importa: **lo va a consultar el bot**, así que un 500 aquí es un 500 en medio de una conversación |
+| **5** | 8 manejadores del frontend | `onClick={async () => { await mutacion.mutateAsync(); … }}`. React **descarta** la promesa de un manejador de evento, así que cada `409` dejaba un **rechazo sin gestionar**. El error sí se veía en pantalla, y por eso ninguna prueba lo detectaba. En Personal el caso era peor: el `409 MANICURISTA_CON_CITAS_ACTIVAS` es el camino **esperado**, así que la barrera dejaba un rechazo cada vez que funcionaba | `vigilarRechazosNoGestionados()`, que engancha `process.on('unhandledRejection')` y falla si hay alguno | `mutate` + `onSuccess` en los 8: sin promesa que descartar. 6 eran míos del Backoffice; 2 venían de Fase 5 Parte 2 (`Excepciones`, `ListaDeEspera`) |
+| **6** | `cita.entity.ts` | `Cita.crear({ esGarantia: true })` sin `citaGarantizadaId` construía un estado que el `CHECK` de la base rechaza con **`23514`**, y `HttpExceptionFilter` solo traduce `23505` y `23P01`: salía como **500 ERROR_INESPERADO** sin decir qué faltaba | 4 casos unitarios de la entidad | `CITA_GARANTIA_INCOHERENTE` (400) en `crear`, y **no** en `reconstruir`: el camino de vuelta lee filas que el `CHECK` ya aprobó, y revalidarlas convertiría un dato histórico en una excepción al *leer* la agenda |
+| **7** | `agendar-garantia.use-case.ts` | El caso de uso metía `esGarantia: true` **dentro** de `cotizacionSnapshot`. TypeScript lo aceptaba (la comprobación de exceso no aplica a una variable) y el campo se persistía en el `jsonb` y volvía en la respuesta **fuera del contrato de `P8`**, que se deriva de `construirSnapshot` y no podía verlo. Además `requiereCotizacionManual` quedaba en el valor del servicio: decir que una reposición de `$0` "necesita precio" es falso | E2E comparando las claves exactas del snapshot | Se quitó el campo (la cita ya lo lleva en primer nivel) y `requiereCotizacionManual: false` |
+| **8** | `deriva-restricciones-agenda.spec.ts` | El detector decía *"las tres restricciones a mano"* cuando la `0016` ya había añadido una cuarta. `citas_garantia_coherente` y `citas_garantia_unica_por_origen` **no estaban vigiladas**: Drizzle no las tiene en su snapshot, así que una migración regenerada las habría perdido sin que nada fallara — exactamente el riesgo que ese archivo existe para cubrir | 2 casos nuevos sobre `pg_constraint` y `pg_indexes` | Las cuatro restricciones vigiladas, incluido el `WHERE` completo del índice (no solo su existencia) |
+| **9** | `reporte-de-agenda.use-case.ts` | Una garantía es una `Cita` con `totalCentavos: 0`. En el ingreso eso es correcto, pero en los **conteos** era invisible: entraba en `porEstado.completada` y en `atendidasPorManicurista` como una cita cualquiera. *"20 completadas, $9.000"* daba un promedio bajo sin explicación — y **el desglose por manicurista es una medida de su trabajo**, así que rehacer uñas despegadas **subía** su cifra | E2E: completar una cita + su garantía y comprobar que se distinguen | `garantiasCompletadas` en el reporte, con advertencia en la respuesta y aviso en la pantalla. **No se excluyen del conteo**: la silla se ocupó y hubo trabajo real — lo que faltaba era poder distinguirlas |
+
+---
+
+#### El hallazgo 2 merece su propio apartado: cuatro copias de "dame una silla libre"
+
+El defecto no fue un despiste aislado. `AgendarCitaUseCase`, `ReprogramarCitaUseCase`, `TransicionarCitaPorAnticipoUseCase` y `AgendarGarantiaUseCase` tenían **cada uno su propia versión** de la misma lógica, con matices distintos. Las tres primeras estaban bien; la cuarta —la más nueva— salió mal, y salió mal justo donde las otras tres ya habían acertado.
+
+Un parche habría sido cambiar `'23P01'` por `'SILLA_OCUPADA'` en una línea. La corrección de raíz es que **haya una sola implementación**: `SelectorDeSillaLibre` (servicio de dominio) con `libresEn(sucursalId, rango, { excluirCitaId })`, y `esSillaOcupada()` como única guarda de reintento. Los cuatro casos de uso la usan ahora, y `sillaRepository` desapareció de tres de ellos como dependencia inyectada.
+
+Lo que **no** cambió: sigue siendo consultivo (`DEC-035`). La autoridad final es la `EXCLUDE USING gist`, y los casos de uso siguen iterando y reintentando porque entre la consulta y la escritura otra reserva puede colarse.
+
+---
+
+#### Una decisión de invariante que la auditoría forzó: migración `0017`
+
+Al corregir el hallazgo 1 apareció el motivo por el que se había perdido la bandera: con las dos columnas copiadas, **la reprogramación chocaba con el índice único** y devolvía un `23505` sin traducción, es decir un 500. El índice de la `0016` decía `WHERE es_garantia = true` a secas, y reprogramar en Blanc **no mueve la fila**: la original queda `reprogramada` y nace otra (`DEC-042`, porque la cadena es un dato de negocio con tope de 3). Las dos compartían `cita_garantizada_id`.
+
+O sea: con el vínculo roto se regalaba una reposición, y con el vínculo intacto **la clienta a la que se le estropeó el trabajo no podía cambiar la hora de su reposición**. Las dos mitades del mismo error de modelado.
+
+La `0017` recrea el índice con `WHERE es_garantia = true AND estado <> 'reprogramada'`. Se excluye `reprogramada` y **solo** `reprogramada`: una garantía reprogramada no está sin honrar, está movida, y la fila nueva sigue ocupando el hueco y sigue contando. `existeGarantiaDe` se dejó mirando **cualquier** estado a propósito, y la divergencia con el índice está documentada en el repositorio: el índice impide que dos filas **vivas** reclamen la misma garantía; la consulta responde *"¿ya se concedió?"*, y una reprogramada sí se concedió.
+
+---
+
+#### Costuras auditadas que estaban bien protegidas
+
+| Costura | Qué se revisó, y por qué aguanta |
+|---|---|
+| **Transacciones abortadas (`25P02`)** | **Ningún `try/catch` dentro de un `unitOfWork.ejecutar`** en todo el backend (verificado recorriendo el cuerpo de cada bloque, no por grep). Los tres repositorios que capturan un `23505` lo **retraducen y relanzan**, así que la transacción aborta como debe; no lo silencian, que es lo que produciría el `25P02` en el `COMMIT` |
+| **Anidamiento de casos de uso** | `AceptarOfertaUseCase` envuelve `AgendarCitaUseCase` en su propia `UnitOfWork`, que se une a la transacción en curso. Su bucle de reintento **solo** entra ante una carrera real, porque las sillas ocupadas se descartan antes de insertar — no es el camino común, y por tanto el reintento sobre una transacción abortada no es alcanzable en la práctica. Queda anotado como la vigilancia a mantener si alguien quita el pre-filtrado |
+| **Teléfonos compartidos (mamá e hija)** | `clientas_nombre_telefono_unq` es sobre `(nombre, telefono)`, así que dos clientas **pueden** compartir número. Con dos candidatas, `identificarClienta` devuelve `null` **a propósito** y el contexto queda sin cita ni oferta: un *"sí, confirmo"* escala `fuera_de_alcance` en vez de confirmar la cita de la otra. No hay adivinanza, y una persona pregunta para quién es |
+| **Prioridad de los gatillos críticos** | La Capa 1 corre **antes** de `contextoDe` y antes del modelo. Una clienta con cita pendiente que escribe *"PROFECO"* escala sin consultar el LLM, sin gastar presupuesto (`ADR-030`) y **sin intentar agendar nada**. Verificado también el acuse diferenciado: a quien amenaza con una denuncia no se le contesta con el *"Claro"* genérico |
+| **RBAC de los ~85 endpoints** | El contrato derivado del código lo verifica transversalmente: **toda ruta declara sus roles** salvo 6 exentas nombradas una por una, y **ninguna escritura** admite `MANICURISTA` ni `SOLO_LECTURA`. Las rutas nuevas de garantía y del Backoffice las cubre esa comprobación sin tocarla |
+| **Opacidad hacia la Manicurista** | El filtro de *"solo mis citas"* vive en `ConsultarAgendaUseCase` y el id sale de **sus permisos resueltos contra PostgreSQL** (`P9`), nunca de la query. `enListaRojaPorClienta` no se filtra al salir: **para ella no se consulta en absoluto**. Y el contrato exige que su forma de `Cita` sea subconjunto **estricto** de la de operación |
+| **Fechas en el frontend** | Toda construcción desde una fecha de pared usa `-06:00` explícito (`instanteDesdeHoraLocal`, `rangoDelDia`), y `fechaLocalDeHoy`/`fechaMenosDias` formatean con `Intl` en `America/Mexico_City` en vez de recortar un `toISOString()`. **El riesgo estaba en el backend, no aquí** |
+| **Invalidaciones de TanStack Query** | Revisadas las 24 llamadas a `invalidateQueries` contra las 47 declaraciones de `queryKey` del proyecto (38 claves distintas). Las que tienen `staleTime` largo (`['servicios']` 10 min, `['manicuristas']` 5 min, `['sucursales']` 10 min) están todas invalidadas por quien las muta. Los tres huecos entre pantallas (anticipos→agenda, lista roja→agenda, lista de espera→disponibilidad) quedan acotados por el `staleTime: 5_000` global y el refetch al montar: se corrigen solos en cinco segundos, así que se dejan documentados en vez de añadir invalidaciones que darían una falsa sensación de precisión |
+| **Contrato de error backend ↔ frontend** | `{ error: { category, code, message, correlationId, details } }` en los dos lados, y `ErrorDeApi` ramifica por `code`, nunca por el texto. El cliente conserva el estado HTTP incluso cuando el cuerpo no tiene la forma de `ADR-013` |
+
+---
+
+#### Tensiones de negocio abiertas (requieren decisión humana)
+
+1. **¿Una garantía cancelada deja la obligación en pie?** Hoy `cancelada`, `expirada` y `no_show` siguen bloqueando una segunda reposición: el índice solo excluye `reprogramada`. Si a una clienta se le concede la reposición y luego la cancela, el sistema **no** permite concederle otra, y no hay forma de anularlo desde el panel. Es el lado conservador, pero puede ser el equivocado: `RN-GAR-04` reserva el beneficio a la Dueña, y esta es precisamente una decisión suya. **No se decidió aquí**: cambiarlo es ampliar el predicado del índice, no tocar código.
+
+2. **¿Una clienta `bloqueada` tiene derecho a garantía?** `AgendarCitaUseCase` rechaza a una clienta bloqueada con `CLIENTA_BLOQUEADA` (`RN-CRM-04`); `AgendarGarantiaUseCase` **no consulta su estado**. La divergencia era silenciosa y ahora está nombrada en el código. Hay un argumento fuerte para dejarlo así —el bloqueo frena **ventas nuevas**, y una garantía no es una venta: es reparar un trabajo ya cobrado— pero la Dueña debería confirmarlo, porque la lectura contraria también es defendible.
+
+3. **Los modificadores de diseño siguen sin sumarse** (`FL-COT-03` diferido). Sin cambios desde el commit anterior; la decisión pendiente sigue siendo si los minutos extra se añaden al final de la cita o se reserva el hueco mayor desde el principio.
+
+---
+
 ### 2026-10-17 — Plataforma completa (Parte 2/2): Backoffice Administrativo, palabras clave críticas, sembrado de catálogo y `P10` Garantías. **🏁 `P10` CERRADO · CIERRE 100 % DE CÓDIGO**
 
 **Backend: 1252 pruebas en 79 suites** (+48). **Frontend: 228 pruebas en 14 suites** (+48). Los seis controles del backend y los cuatro del frontend en verde.
