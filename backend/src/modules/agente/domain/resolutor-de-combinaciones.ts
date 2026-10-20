@@ -1,4 +1,5 @@
 import { normalizarTexto } from './deteccion-de-escalamiento';
+import type { CodigoDeServicio } from '../../catalogo-y-cotizacion/domain/codigos-de-servicio';
 
 /**
  * Traduce lo que la clienta escribió al **renglón exacto** de la matriz oficial de la Dueña.
@@ -22,7 +23,14 @@ import { normalizarTexto } from './deteccion-de-escalamiento';
  * decide esta función contra la matriz, y **cuánto dura** lo decide la fila del catálogo en
  * PostgreSQL, que la Dueña edita desde el Backoffice.
  *
- * Por eso devuelve un **nombre de servicio**, no una duración. La duración es del catálogo.
+ * Por eso devuelve un **código de servicio**, no un nombre ni una duración:
+ *
+ * - **El nombre no**, y eso cambió el 2026-10-21. La Dueña puede renombrar cualquier fila desde
+ *   `/admin`, y resolver por nombre significaba que renombrar *"Rubber + gel"* dejaba al bot sin
+ *   poder agendarlo: escalaba en vez de agendar, y nadie entendía por qué porque la pantalla seguía
+ *   mostrando el servicio. El `codigo` es inmutable — ni el alta ni la edición lo aceptan.
+ * - **La duración tampoco**: sale de la fila del catálogo en PostgreSQL, que la Dueña edita sin
+ *   desplegar nada. Esta función decide **qué fila**, no cuánto dura.
  *
  * ## LO QUE DEVUELVE, Y POR QUÉ SON TRES COSAS DISTINTAS
  *
@@ -33,7 +41,7 @@ import { normalizarTexto } from './deteccion-de-escalamiento';
  *   su camino normal y acaba escalando. Devolver una fila aproximada sería inventar un bloque de
  *   tiempo, y equivocarse por abajo mete una cita encima de otra.
  */
-export type ResultadoDeCombinacion = { servicio: string } | { escalar: 'cotizacion_compleja' };
+export type ResultadoDeCombinacion = { codigo: CodigoDeServicio } | { escalar: 'cotizacion_compleja' };
 
 /**
  * Las piezas que la matriz combina. **No son servicios**: son los componentes cuya presencia
@@ -55,11 +63,16 @@ type Componente =
   | 'diseno_estandar';
 
 /**
- * Los tres diseños que el bot **sí** puede agendar, y sus formas habituales en WhatsApp.
+ * Las formas en que la gente escribe los tres diseños estándar en WhatsApp.
  *
- * El registro oficial es `DISENOS_ESTANDAR` en el catálogo; aquí están las variantes con las que
- * la gente los escribe. Separar las dos listas es deliberado: una es la política de negocio y la
- * otra es vocabulario.
+ * El registro oficial es `DISENOS_ESTANDAR` (en `codigos-de-servicio.ts`); aquí están sus variantes
+ * de escritura. Separar las dos listas es deliberado: una es la política de negocio —qué diseños
+ * autorizó la Dueña— y la otra es vocabulario, y no tienen por qué cambiar juntas.
+ *
+ * **No se importa la constante oficial aquí a propósito**: esta lista no es una traducción
+ * mecánica de ella (`'Puntos / Polka dots'` son tres formas de escribirlo). El vínculo lo
+ * garantiza una prueba que recorre `DISENOS_ESTANDAR` y falla si el resolutor no sabe leer alguno
+ * — que es la comprobación que de verdad importa, y la que un `import` no daría.
  */
 const DISENOS_ESTANDAR_EN_TEXTO = [
   'frances',
@@ -126,52 +139,70 @@ const RELLENO = '(?:\\s+(?:de|del|el|la|los|las|mi|mis|me|un|una))*\\s+';
  * por separado y que la tabla **no junta**: no hay fila, así que el turno escala y una persona
  * decide. Inventar 120 (el de extensiones) o 180 (sumando) serían dos invenciones distintas.
  */
-const MATRIZ: Readonly<Record<string, string>> = {
+const MATRIZ: Readonly<Record<string, CodigoDeServicio>> = {
   // ── Retiro a secas: una hora, no importa el material ──
-  retiro_generico: 'Retiro de gel, acrílico o rubber',
-  retiro_gel: 'Retiro de gel, acrílico o rubber',
-  retiro_acrilico: 'Retiro de gel, acrílico o rubber',
+  retiro_generico: 'RETIRO',
+  retiro_gel: 'RETIRO',
+  retiro_acrilico: 'RETIRO',
 
   // ── Servicios individuales: todo cabe en una hora ──
-  gel: 'Gel',
-  rubber: 'Rubber',
-  manicure: 'Manicure',
-  'gel+rubber': 'Rubber + gel',
-  'gel+manicure+rubber': 'Rubber + gel + manicure',
+  gel: 'GEL',
+  rubber: 'RUBBER',
+  manicure: 'MANICURE',
+  'gel+rubber': 'RUBBER-GEL',
+  'gel+manicure+rubber': 'RUBBER-GEL-MANICURE',
 
   // ── Extensiones y cobertura: dos horas ──
-  extensiones: 'Extensiones',
-  bano_acrilico: 'Baño de acrílico',
-  'extensiones+gel': 'Extensiones + gel',
-  'bano_acrilico+gel': 'Baño de acrílico + gel',
-  'extensiones+gel+manicure': 'Extensiones + gel + manicure',
-  'bano_acrilico+gel+manicure': 'Baño de acrílico + gel + manicure',
+  extensiones: 'EXT',
+  bano_acrilico: 'BANO',
+  'extensiones+gel': 'EXT-GEL',
+  'bano_acrilico+gel': 'BANO-GEL',
+  'extensiones+gel+manicure': 'EXT-GEL-MANICURE',
+  'bano_acrilico+gel+manicure': 'BANO-GEL-MANICURE',
 
-  // ── Con retiro de GEL: se absorbe, sigue siendo UNA hora ──
-  'retiro_gel+rubber': 'Retiro de gel + rubber, gel o manicure',
-  'gel+retiro_gel': 'Retiro de gel + rubber, gel o manicure',
-  'manicure+retiro_gel': 'Retiro de gel + rubber, gel o manicure',
+  /**
+   * ── Con retiro de GEL: se absorbe, sigue siendo UNA hora ──
+   *
+   * Cinco entradas que reflejan **exactamente** las cinco combinaciones de la familia de 60
+   * minutos. Hasta el desglose del 2026-10-21 eran tres entradas apuntando a un solo renglón
+   * agrupado: el tiempo era exacto, pero las tres compartían precio y no había forma de separarlas
+   * desde `/admin`.
+   */
+  'gel+retiro_gel': 'RGEL-GEL',
+  'retiro_gel+rubber': 'RGEL-RUBBER',
+  'manicure+retiro_gel': 'RGEL-MANICURE',
+  'gel+retiro_gel+rubber': 'RGEL-RUBBER-GEL',
+  'gel+manicure+retiro_gel+rubber': 'RGEL-RUBBER-GEL-MANICURE',
 
   // ── Con retiro de ACRÍLICO o RUBBER: añade bloque, DOS horas ──
-  'retiro_acrilico+rubber': 'Retiro de acrílico o rubber + rubber, gel o manicure',
-  'gel+retiro_acrilico': 'Retiro de acrílico o rubber + rubber, gel o manicure',
-  'manicure+retiro_acrilico': 'Retiro de acrílico o rubber + rubber, gel o manicure',
+  'gel+retiro_acrilico': 'RACR-GEL',
+  'retiro_acrilico+rubber': 'RACR-RUBBER',
+  'manicure+retiro_acrilico': 'RACR-MANICURE',
+  'gel+retiro_acrilico+rubber': 'RACR-RUBBER-GEL',
+  'gel+manicure+retiro_acrilico+rubber': 'RACR-RUBBER-GEL-MANICURE',
 
-  // ── Retiro de acrílico + extensiones o baño: TRES horas ──
-  'extensiones+retiro_acrilico': 'Retiro de acrílico o rubber + extensiones o baño de acrílico',
-  'bano_acrilico+retiro_acrilico': 'Retiro de acrílico o rubber + extensiones o baño de acrílico',
+  // ── Retiro de acrílico + extensiones o baño: TRES horas, y ya no comparten precio ──
+  'extensiones+retiro_acrilico': 'RACR-EXT',
+  'bano_acrilico+retiro_acrilico': 'RACR-BANO',
   // El manicure se absorbe dentro de las tres horas: no son tres y media.
-  'extensiones+manicure+retiro_acrilico': 'Retiro de acrílico o rubber + extensiones o baño de acrílico + manicure',
-  'bano_acrilico+manicure+retiro_acrilico': 'Retiro de acrílico o rubber + extensiones o baño de acrílico + manicure',
+  'extensiones+manicure+retiro_acrilico': 'RACR-EXT-MANICURE',
+  'bano_acrilico+manicure+retiro_acrilico': 'RACR-BANO-MANICURE',
 
   // ── Diseños estándar: caben en la hora del servicio base ──
-  'diseno_estandar+gel': 'Gel + diseño estándar',
-  'diseno_estandar+rubber': 'Rubber + diseño estándar',
-  'diseno_estandar+manicure+rubber': 'Manicure + rubber + diseño estándar',
-  // Sobre extensiones el diseño NO se absorbe: 120 + 60.
-  'diseno_estandar+extensiones': 'Extensiones o baño de acrílico + diseño estándar',
-  'bano_acrilico+diseno_estandar': 'Extensiones o baño de acrílico + diseño estándar',
+  'diseno_estandar+gel': 'GEL-DISENO',
+  'diseno_estandar+rubber': 'RUBBER-DISENO',
+  'diseno_estandar+manicure+rubber': 'MANICURE-RUBBER-DISENO',
+  // Sobre extensiones o baño el diseño NO se absorbe (120 + 60), y los dos no cuestan lo mismo.
+  'diseno_estandar+extensiones': 'EXT-DISENO',
+  'bano_acrilico+diseno_estandar': 'BANO-DISENO',
 };
+
+/**
+ * Los códigos que la matriz puede devolver. Lo consume la prueba que comprueba que **todos están
+ * en el catálogo oficial**: una entrada que apuntara a un código inexistente dejaría al bot
+ * escalando una combinación que la Dueña sí ofrece, y nada fallaría al compilar.
+ */
+export const CODIGOS_QUE_LA_MATRIZ_RESUELVE: readonly CodigoDeServicio[] = [...new Set(Object.values(MATRIZ))];
 
 export function resolverCombinacion(texto: string): ResultadoDeCombinacion | null {
   const normalizado = normalizarTexto(texto);
@@ -194,8 +225,8 @@ export function resolverCombinacion(texto: string): ResultadoDeCombinacion | nul
   if (tieneDisenoEstandar) componentes.add('diseno_estandar');
   if (componentes.size === 0) return null;
 
-  const servicio = MATRIZ[[...componentes].sort().join('+')];
-  return servicio ? { servicio } : null;
+  const codigo = MATRIZ[[...componentes].sort().join('+')];
+  return codigo ? { codigo } : null;
 }
 
 /**

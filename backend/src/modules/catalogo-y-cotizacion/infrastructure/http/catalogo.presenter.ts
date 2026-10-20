@@ -13,6 +13,15 @@ export function servicioAJson(servicio: Servicio) {
   return {
     id: servicio.id,
     nombre: servicio.nombre,
+    /**
+     * La clave estable. Viaja al cliente **para que el Backoffice pueda mostrarla como solo
+     * lectura** y así se vea qué filas son oficiales: una con código es parte de la matriz que el
+     * bot resuelve, una con `null` la creó alguien desde el panel.
+     *
+     * No es un secreto ni una decisión: es un identificador. Y no hay endpoint que lo acepte como
+     * entrada, ni al crear ni al editar.
+     */
+    codigo: servicio.codigo,
     categoria: servicio.categoria,
     duracionBaseMinutos: servicio.duracionBaseMinutos,
     precioBaseCentavos: servicio.precioBaseCentavos,

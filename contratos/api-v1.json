@@ -797,6 +797,7 @@
     "Servicio": [
       "activo",
       "categoria",
+      "codigo",
       "duracionBaseMinutos",
       "id",
       "nombre",

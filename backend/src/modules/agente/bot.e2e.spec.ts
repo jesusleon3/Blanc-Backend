@@ -249,7 +249,7 @@ describe('Bot IA — flujo completo E2E (webhook de Meta → bot → PostgreSQL)
       await manicuristaRepo.asignarASucursal(registro.id, sucursalId);
     }
 
-    servicio = Servicio.crear({ nombre: 'Gel', categoria: 'Servicios individuales', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
+    servicio = Servicio.crear({ codigo: 'GEL', nombre: 'Gel', categoria: 'Servicios individuales', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
     await new DrizzleServicioRepository(dbDePrueba).guardar(servicio);
 
     clienta = Clienta.registrar({ nombre: 'Andrea Ramírez', telefono: TELEFONO });

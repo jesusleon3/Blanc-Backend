@@ -103,40 +103,47 @@ Deja listo:
 - **Las 3 sucursales** — Zibatá, Lomas, Álamos — con el horario real: **L-V 9:00–12:00 y 15:00–18:00, sábado 9:00–15:00, domingo cerrado** (`RN-AGE-12`).
 - **Las sillas virtuales**: Zibatá 5, Lomas 3, **Álamos 1** (`DEC-031`).
 - **El Super Admin** vinculado a su cuenta de Supabase, con alcance `GLOBAL`.
-- **El catálogo OFICIAL de la Dueña**: 21 renglones en sus cinco categorías reales, con los tiempos definitivos.
+- **El catálogo OFICIAL de la Dueña**: 32 renglones en sus cinco categorías reales, con los tiempos definitivos y un **código estable** cada uno.
 
-| Categoría | Renglones | Bloque |
+| Categoría | Códigos | Bloque |
 |---|---|---|
-| **Retiro** | Retiro de gel, acrílico o rubber *(solo retiro, drill o acetona)* | 60 min |
-| **Servicios individuales** | Gel · Rubber · Rubber + gel · Manicure · Rubber + gel + manicure | 60 min |
-| **Extensiones y cobertura** | Extensiones · Baño de acrílico · (+ gel) · (+ gel + manicure) | 120 min |
-| **Combinaciones con retiro** | Retiro de **gel** + rubber, gel o manicure | **60 min** |
-| | Retiro de **acrílico o rubber** + rubber, gel o manicure | 120 min |
-| | Retiro de acrílico o rubber + extensiones o baño de acrílico *(± manicure)* | 180 min |
-| **Diseños y efectos** | Gel / Rubber / Manicure + rubber, **+ diseño estándar** | 60 min |
-| | Extensiones o baño de acrílico + diseño estándar | 180 min |
-| | Diseño especial *(cotización manual)* | 60 min |
+| **Retiro** | `RETIRO` | 60 min |
+| **Servicios individuales** | `GEL` · `RUBBER` · `RUBBER-GEL` · `MANICURE` · `RUBBER-GEL-MANICURE` | 60 min |
+| **Extensiones y cobertura** | `EXT` · `BANO` · `EXT-GEL` · `BANO-GEL` · `EXT-GEL-MANICURE` · `BANO-GEL-MANICURE` | 120 min |
+| **Combinaciones con retiro de gel** | `RGEL-GEL` · `RGEL-RUBBER` · `RGEL-MANICURE` · `RGEL-RUBBER-GEL` · `RGEL-RUBBER-GEL-MANICURE` | **60 min** |
+| **Combinaciones con retiro de acrílico/rubber** | `RACR-GEL` · `RACR-RUBBER` · `RACR-MANICURE` · `RACR-RUBBER-GEL` · `RACR-RUBBER-GEL-MANICURE` | 120 min |
+| | `RACR-EXT` · `RACR-BANO` · `RACR-EXT-MANICURE` · `RACR-BANO-MANICURE` | 180 min |
+| **Diseños y efectos** | `GEL-DISENO` · `RUBBER-DISENO` · `MANICURE-RUBBER-DISENO` | 60 min |
+| | `EXT-DISENO` · `BANO-DISENO` | 180 min |
+| | `DISENO-ESPECIAL` *(cotización manual)* | 60 min |
 
 > ## LOS TIEMPOS SE ABSORBEN, NO SE SUMAN — Y ESO HAY QUE SABERLO ANTES DE TOCAR NADA
 >
-> `Rubber + gel + manicure` es **una hora**, no tres: los tres trabajos caben en la misma hora porque se hacen sobre la misma mano. El **retiro de gel** se absorbe dentro de esa hora; el de **acrílico o rubber** añade su propio bloque. No hay fórmula que produzca eso — hay una tabla, y es la de arriba.
+> `RUBBER-GEL-MANICURE` es **una hora**, no tres: los tres trabajos caben en la misma hora porque se hacen sobre la misma mano. El **retiro de gel** se absorbe dentro de esa hora (`RGEL-*` son 60 min); el de **acrílico o rubber** añade su propio bloque (`RACR-*` son 120 o 180). No hay fórmula que produzca eso — hay una tabla, y es la de arriba.
 >
-> **Cada combinación es su propio renglón del catálogo**, con su duración exacta. Por eso no existe un "motor de combinaciones" (`FL-COT-03`) y no hace falta.
+> **Cada combinación es su propio renglón del catálogo**, con su duración y su precio exactos. Por eso no existe un "motor de combinaciones" (`FL-COT-03`) y no hace falta.
 >
-> Las duraciones caen en bloques de **60, 120 y 180 minutos**, que encajan con el horario de la sucursal. Consecuencia operativa que conviene anticipar: **una cita de tres horas solo cabe empezando a las 9:00 o a las 15:00.** A las 10:00 el sistema responde `FUERA_DEL_HORARIO_DE_SUCURSAL`, y es correcto — no es un hueco que se niegue a vender, es un hueco que no existe (`RN-AGE-10`).
+> Las duraciones caen en bloques de **60, 120 y 180 minutos**, que encajan con el horario de la sucursal. Consecuencia operativa que conviene anticipar: **una cita de tres horas solo cabe empezando a las 9:00 o a las 15:00** de lunes a viernes (el sábado, también a las 10:00, 11:00 y 12:00). A las 10:00 el sistema responde `FUERA_DEL_HORARIO_DE_SUCURSAL`, y es correcto — no es un hueco que se niegue a vender, es un hueco que no existe (`RN-AGE-10`).
+
+> ## EL `codigo` ES LO QUE HACE SEGURO EDITAR EL CATÁLOGO
+>
+> El bot reconoce cada combinación por su **código**, que es fijo y **no se puede editar desde ninguna parte** (ni el alta ni la edición lo aceptan; el backend responde `400` si llega). El nombre es para la clienta y para la Dueña.
+>
+> La consecuencia práctica, y es la que importa: **se puede renombrar cualquier servicio y cambiarle el precio sin afectar al bot.** Llamar `RUBBER-GEL` *"Nivelación con rubber y gel semipermanente"* es seguro. Antes no lo era — el bot dejaba de poder agendarlo, y sin un solo error: escalaba a una persona y la pantalla seguía mostrando el servicio perfectamente.
+>
+> Lo que **sí** cambia el comportamiento del bot es **dar de baja** una fila: entonces deja de agendarla y escala, que es lo correcto porque la Dueña dejó de ofrecerla.
+>
+> Un servicio que se cree desde el panel nace **sin código** (columna «Código» con un guion). No es un dato que falte: significa que no es parte de la matriz oficial y que el bot no la va a ofrecer por su cuenta. Se puede agendar desde el mostrador con normalidad.
 
 > ## ⚠️ LOS TIEMPOS SON OFICIALES; LOS PRECIOS, PROVISIONALES
 >
-> La Dueña entregó la matriz de **tiempos** (2026-10-19), y están sembrados tal cual. Los **importes** no: son estimaciones coherentes con cada bloque, puestas para que el sistema arranque operable.
+> La Dueña entregó la matriz de **tiempos** (2026-10-19), y están sembrados tal cual. Los **importes** no: son estimaciones coherentes con cada bloque y con el trabajo que añade cada pieza.
 >
 > **Hay que confirmar los precios con la Dueña antes de cobrarle a la primera clienta.** El precio es lo que se cobra y la base del 40 % del anticipo (`RN-ANT-01`).
 >
-> Dos avisos más, que no son lo mismo:
+> Desde el desglose del 2026-10-21, **cada combinación tiene su propio precio**: `RGEL-GEL`, `RGEL-RUBBER` y `RGEL-MANICURE` duran lo mismo y pueden costar distinto. Antes compartían un renglón y era imposible separarlos.
 >
-> 1. **Cuatro renglones cubren varias combinaciones a la vez** (los de "retiro + …"), porque comparten bloque de tiempo. Para el tiempo es exacto; para el precio significa **un solo importe para tres combinaciones** que probablemente no cuesten lo mismo. Cuando la Dueña dé los precios, esos renglones se desdoblan desde el Backoffice.
-> 2. **Cambiar una duración cambia lo que el bot vende.** Si se ajusta un renglón, el bot y el mostrador lo respetan desde la siguiente cita, sin desplegar nada.
->
-> Todo se corrige en **Configuración → Catálogo y tiempos** del panel, o por `PATCH /v1/catalogo-y-cotizacion/servicios/:id`. El seed **no vuelve a pisar** lo que alguien ya corrigió.
+> Todo se corrige en **Configuración → Catálogo y tiempos** del panel, o por `PATCH /v1/catalogo-y-cotizacion/servicios/:id`. El seed **no vuelve a pisar** lo que alguien ya corrigió, y desde que la idempotencia es por código, **renombrar una fila ya no la duplica** en el siguiente `db:seed`.
 
 **Es idempotente**: correrlo dos veces no duplica ni falla. Y es más fino que eso — **no reimpone valores de fábrica**: si alguien ajustó el horario de una sucursal desde el panel o desactivó una silla por reparación, el seed **no lo pisa**. Volver a correrlo es seguro siempre.
 
@@ -146,7 +153,7 @@ Si falta algún dato del Super Admin, **falla antes de escribir nada** y dice qu
 
 - **Manicuristas** y su asignación a sucursal → **Configuración → Personal** del panel, o `POST /v1/sucursales-y-personal/manicuristas`
 - **Usuarios de las Encargadas** → `POST /v1/identidad-y-accesos/usuarios` + vincular su `UID` de Supabase
-- **Los precios reales del catálogo** → el seed deja los 21 renglones con los **tiempos oficiales** y con **precios provisionales** (ver el aviso de §2.2); confirmar los importes con la Dueña es parte de la puesta en marcha, no algo posterior
+- **Los precios reales del catálogo** → el seed deja los 32 renglones con los **tiempos oficiales** y con **precios provisionales** (ver el aviso de §2.2); confirmar los importes con la Dueña es parte de la puesta en marcha, no algo posterior
 
 Van por API y no por seed porque **son datos que cambian** (alta y baja de personal, cambios de precio) y tienen su RBAC. El seed cubre solo el arranque en frío: deja el sistema arrancable, no configurado.
 

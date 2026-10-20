@@ -1,5 +1,6 @@
-import { DISENOS_ESTANDAR } from '../../../database/seed/catalogo-de-blanc';
-import { resolverCombinacion } from './resolutor-de-combinaciones';
+import { SERVICIOS_DE_BLANC } from '../../../database/seed/catalogo-de-blanc';
+import { CODIGOS_DE_SERVICIO, DISENOS_ESTANDAR } from '../../catalogo-y-cotizacion/domain/codigos-de-servicio';
+import { CODIGOS_QUE_LA_MATRIZ_RESUELVE, resolverCombinacion } from './resolutor-de-combinaciones';
 
 /**
  * ## LO QUE ESTE ARCHIVO PROTEGE
@@ -16,21 +17,21 @@ import { resolverCombinacion } from './resolutor-de-combinaciones';
  * Por eso cada caso de abajo fija la combinación **y el bloque** que le corresponde.
  */
 describe('`resolverCombinacion` — la matriz oficial de la Dueña', () => {
-  /** Atajo legible: devuelve el nombre del servicio resuelto, o el motivo de escalamiento. */
+  /** Atajo legible: devuelve el **código** del servicio resuelto, o el motivo de escalamiento. */
   const resolver = (texto: string) => {
     const resultado = resolverCombinacion(texto);
-    return resultado === null ? null : 'servicio' in resultado ? resultado.servicio : `ESCALA:${resultado.escalar}`;
+    return resultado === null ? null : 'codigo' in resultado ? resultado.codigo : `ESCALA:${resultado.escalar}`;
   };
 
   describe('servicios individuales — todo cabe en una hora', () => {
     it.each([
-      ['quiero gel', 'Gel'],
-      ['me pongo rubber', 'Rubber'],
-      ['solo manicure por favor', 'Manicure'],
-      ['rubber con gel', 'Rubber + gel'],
+      ['quiero gel', 'GEL'],
+      ['me pongo rubber', 'RUBBER'],
+      ['solo manicure por favor', 'MANICURE'],
+      ['rubber con gel', 'RUBBER-GEL'],
       // El caso que la orden nombra explícitamente: tres trabajos, UNA hora.
-      ['rubber con gel y manicure', 'Rubber + gel + manicure'],
-      ['quiero manicure, rubber y gel', 'Rubber + gel + manicure'],
+      ['rubber con gel y manicure', 'RUBBER-GEL-MANICURE'],
+      ['quiero manicure, rubber y gel', 'RUBBER-GEL-MANICURE'],
     ])('«%s» → %s', (texto, esperado) => {
       expect(resolver(texto)).toBe(esperado);
     });
@@ -38,54 +39,77 @@ describe('`resolverCombinacion` — la matriz oficial de la Dueña', () => {
 
   describe('extensiones y cobertura — dos horas', () => {
     it.each([
-      ['quiero extensiones', 'Extensiones'],
-      ['un baño de acrilico', 'Baño de acrílico'],
-      ['extensiones con gel', 'Extensiones + gel'],
-      ['baño de acrílico con gel', 'Baño de acrílico + gel'],
-      ['extensiones con gel y manicure', 'Extensiones + gel + manicure'],
-      ['baño de acrilico con gel y manicure', 'Baño de acrílico + gel + manicure'],
+      ['quiero extensiones', 'EXT'],
+      ['un baño de acrilico', 'BANO'],
+      ['extensiones con gel', 'EXT-GEL'],
+      ['baño de acrílico con gel', 'BANO-GEL'],
+      ['extensiones con gel y manicure', 'EXT-GEL-MANICURE'],
+      ['baño de acrilico con gel y manicure', 'BANO-GEL-MANICURE'],
     ])('«%s» → %s', (texto, esperado) => {
       expect(resolver(texto)).toBe(esperado);
     });
   });
 
   describe('combinaciones con retiro — aquí está la trampa de la tabla', () => {
+    /**
+     * ## CADA COMBINACIÓN TIENE SU PROPIO CÓDIGO DESDE EL DESGLOSE (2026-10-21)
+     *
+     * Antes, las tres variantes de *retiro de gel + algo* resolvían al **mismo** renglón agrupado.
+     * Para el tiempo era exacto —las tres son una hora— pero compartían precio, y no había forma de
+     * separarlas desde `/admin`. Ahora cada una es su propia fila con su propio importe, y estas
+     * pruebas fijan que el resolutor las distingue.
+     */
     it.each([
-      // El retiro de GEL se absorbe: una hora.
-      ['retiro de gel y manicure', 'Retiro de gel + rubber, gel o manicure'],
-      ['quiero retiro de gel con rubber', 'Retiro de gel + rubber, gel o manicure'],
-      // El retiro de ACRÍLICO no se absorbe: dos horas.
-      ['retiro de acrilico y manicure', 'Retiro de acrílico o rubber + rubber, gel o manicure'],
-      ['retiro de rubber con gel', 'Retiro de acrílico o rubber + rubber, gel o manicure'],
-      // Y con extensiones, el bloque de tres horas.
-      ['retiro de acrílico y extensiones', 'Retiro de acrílico o rubber + extensiones o baño de acrílico'],
-      ['quitarme el acrilico y baño de acrilico', 'Retiro de acrílico o rubber + extensiones o baño de acrílico'],
-      // El manicure se absorbe dentro de las tres horas: es el caso que la orden nombra.
-      [
-        'retiro de acrílico y baño de acrílico con manicure',
-        'Retiro de acrílico o rubber + extensiones o baño de acrílico + manicure',
-      ],
+      // El retiro de GEL se absorbe: una hora, y un código por destino.
+      ['retiro de gel con gel', 'RGEL-GEL'],
+      ['quiero retiro de gel con rubber', 'RGEL-RUBBER'],
+      ['retiro de gel y manicure', 'RGEL-MANICURE'],
+      ['retiro de gel con rubber y gel', 'RGEL-RUBBER-GEL'],
+      ['retiro de gel con rubber, gel y manicure', 'RGEL-RUBBER-GEL-MANICURE'],
+      // El retiro de ACRÍLICO no se absorbe: dos horas, mismo desglose por destino.
+      ['retiro de acrilico con gel', 'RACR-GEL'],
+      ['retiro de rubber con rubber', 'RACR-RUBBER'],
+      ['retiro de acrilico y manicure', 'RACR-MANICURE'],
+      ['retiro de acrilico con rubber y gel', 'RACR-RUBBER-GEL'],
+      ['retiro de acrilico con rubber, gel y manicure', 'RACR-RUBBER-GEL-MANICURE'],
+      // Y con extensiones o baño, el bloque de tres horas — ahora separados, porque no cuestan igual.
+      ['retiro de acrílico y extensiones', 'RACR-EXT'],
+      ['quitarme el acrilico y baño de acrilico', 'RACR-BANO'],
+      ['retiro de acrílico con extensiones y manicure', 'RACR-EXT-MANICURE'],
+      ['retiro de acrílico y baño de acrílico con manicure', 'RACR-BANO-MANICURE'],
     ])('«%s» → %s', (texto, esperado) => {
       expect(resolver(texto)).toBe(esperado);
     });
 
+    it('DISTINGUE el destino, que es lo que el desglose vino a arreglar', () => {
+      /**
+       * La prueba de fondo del desglose: las tres resuelven a **códigos distintos** aunque las tres
+       * duren lo mismo. Mientras compartían renglón, darle a *retiro + gel* un precio distinto del
+       * de *retiro + manicure* era imposible.
+       */
+      const codigos = ['retiro de gel con gel', 'retiro de gel con rubber', 'retiro de gel con manicure'].map(resolver);
+
+      expect(new Set(codigos).size).toBe(3);
+    });
+
     it('un retiro A SECAS es su propio servicio, no una combinación', () => {
-      expect(resolver('solo quiero retiro')).toBe('Retiro de gel, acrílico o rubber');
-      expect(resolver('nada mas retirarme el acrilico')).toBe('Retiro de gel, acrílico o rubber');
+      expect(resolver('solo quiero retiro')).toBe('RETIRO');
+      expect(resolver('nada mas retirarme el acrilico')).toBe('RETIRO');
     });
   });
 
   describe('diseños estándar (`DEC-033`) — los tres que el bot SÍ agenda', () => {
     it.each([
-      ['quiero gel con frances', 'Gel + diseño estándar'],
-      ['gel con francés', 'Gel + diseño estándar'],
-      ['rubber con ojo de gato', 'Rubber + diseño estándar'],
-      ['rubber con puntos', 'Rubber + diseño estándar'],
-      ['rubber con polka dots', 'Rubber + diseño estándar'],
-      ['manicure y rubber con frances', 'Manicure + rubber + diseño estándar'],
-      // Sobre extensiones el diseño NO se absorbe: 120 + 60.
-      ['extensiones con ojo de gato', 'Extensiones o baño de acrílico + diseño estándar'],
-      ['baño de acrílico con frances', 'Extensiones o baño de acrílico + diseño estándar'],
+      ['quiero gel con frances', 'GEL-DISENO'],
+      ['gel con francés', 'GEL-DISENO'],
+      ['rubber con ojo de gato', 'RUBBER-DISENO'],
+      ['rubber con puntos', 'RUBBER-DISENO'],
+      ['rubber con polka dots', 'RUBBER-DISENO'],
+      ['manicure y rubber con frances', 'MANICURE-RUBBER-DISENO'],
+      // Sobre extensiones el diseño NO se absorbe: 120 + 60. Y extensiones y baño van separados
+      // desde el desglose, porque no cuestan lo mismo.
+      ['extensiones con ojo de gato', 'EXT-DISENO'],
+      ['baño de acrílico con frances', 'BANO-DISENO'],
     ])('«%s» → %s', (texto, esperado) => {
       expect(resolver(texto)).toBe(esperado);
     });
@@ -95,7 +119,7 @@ describe('`resolverCombinacion` — la matriz oficial de la Dueña', () => {
       // la constante es el registro oficial y el resolutor tiene que saber leerla entera.
       for (const diseno of DISENOS_ESTANDAR) {
         const palabra = diseno.toLowerCase().split(' / ')[0]!;
-        expect(resolver(`gel con ${palabra}`)).toBe('Gel + diseño estándar');
+        expect(resolver(`gel con ${palabra}`)).toBe('GEL-DISENO');
       }
     });
   });
@@ -154,12 +178,57 @@ describe('`resolverCombinacion` — la matriz oficial de la Dueña', () => {
 
   describe('robustez del texto real de WhatsApp', () => {
     it.each([
-      ['MAYÚSCULAS Y ACENTOS: RUBBER CON GEL Y MANICURE', 'Rubber + gel + manicure'],
-      ['sin acentos: bano de acrilico con gel', 'Baño de acrílico + gel'],
-      ['con relleno: hola, me gustaria agendar rubber con gel por favor', 'Rubber + gel'],
-      ['plural y diminutivo: quiero extensiones con gelito', 'Extensiones + gel'],
+      ['MAYÚSCULAS Y ACENTOS: RUBBER CON GEL Y MANICURE', 'RUBBER-GEL-MANICURE'],
+      ['sin acentos: bano de acrilico con gel', 'BANO-GEL'],
+      ['con relleno: hola, me gustaria agendar rubber con gel por favor', 'RUBBER-GEL'],
+      ['plural y diminutivo: quiero extensiones con gelito', 'EXT-GEL'],
     ])('%s', (texto, esperado) => {
       expect(resolver(texto)).toBe(esperado);
+    });
+  });
+
+  describe('la matriz, los códigos y el catálogo no pueden separarse', () => {
+    /**
+     * ## POR QUÉ ESTAS TRES PRUEBAS VALEN MÁS QUE CUALQUIER CASO INDIVIDUAL
+     *
+     * El vínculo entre lo que la clienta dice y lo que se agenda pasa por tres piezas que viven en
+     * archivos distintos: la **matriz** (texto → código), la **lista de códigos** (el vocabulario) y
+     * el **catálogo sembrado** (código → nombre, duración, precio). `tsc` ya garantiza que la matriz
+     * no inventa códigos, porque el tipo es una unión de literales.
+     *
+     * Lo que `tsc` **no** puede ver es si un código existe en el vocabulario pero nadie lo siembra:
+     * la matriz resolvería a una fila que no está en la base, el bot escalaría una combinación que
+     * la Dueña sí ofrece, y **nada fallaría al compilar ni al correr las pruebas de la matriz**. Eso
+     * es lo que se cubre aquí.
+     */
+    it('TODO código que la matriz resuelve está en el catálogo oficial', () => {
+      const sembrados = new Set(SERVICIOS_DE_BLANC.map((servicio) => servicio.codigo));
+      const huerfanos = CODIGOS_QUE_LA_MATRIZ_RESUELVE.filter((codigo) => !sembrados.has(codigo));
+
+      expect(huerfanos).toEqual([]);
+    });
+
+    it('TODO código sembrado está en el vocabulario, y no hay duplicados', () => {
+      const codigos = SERVICIOS_DE_BLANC.map((servicio) => servicio.codigo);
+
+      expect(new Set(codigos).size).toBe(codigos.length);
+      expect(codigos.filter((codigo) => !CODIGOS_DE_SERVICIO.includes(codigo))).toEqual([]);
+    });
+
+    it('la ÚNICA fila que la matriz nunca resuelve es la de cotización manual', () => {
+      /**
+       * `DISENO-ESPECIAL` existe para el mostrador, no para el bot: cuando escala un diseño
+       * complejo, alguien tiene que poder agendarlo con un precio que fije una persona. Que el bot
+       * **no** pueda llegar a ella es la regla de `DEC-033` funcionando, no un hueco.
+       *
+       * Si alguna vez apareciera otra fila sin entrada en la matriz, esta prueba lo diría — y sería
+       * una combinación que la Dueña ofrece y el bot no sabe vender.
+       */
+      const sinEntradaEnLaMatriz = SERVICIOS_DE_BLANC.map((servicio) => servicio.codigo).filter(
+        (codigo) => !CODIGOS_QUE_LA_MATRIZ_RESUELVE.includes(codigo),
+      );
+
+      expect(sinEntradaEnLaMatriz).toEqual(['DISENO-ESPECIAL']);
     });
   });
 });

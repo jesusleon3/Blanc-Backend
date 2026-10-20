@@ -58,6 +58,7 @@ import { AuditoriaPort } from '../../shared/auditoria/auditoria.port';
 import { ClaimsUsuario, Rol } from '../../shared/auth/rol';
 import { DrizzleUnitOfWork } from '../../shared/persistence/drizzle-unit-of-work';
 import { SelectorDeSillaLibre } from '../../modules/agenda/domain/services/selector-de-silla';
+import type { CotizacionSnapshot } from '../agenda/domain/services/resolutor-de-servicio';
 
 const SUCURSAL = '11111111-1111-4111-8111-111111111111';
 const NUMERO = 'pn-lomas-001';
@@ -107,20 +108,29 @@ async function preparar(opciones: { interprete?: AgenteConversacionalPort; silla
    * existe. `Rubber + gel + manicure` está aquí porque es **el caso que la matriz añade**: tres
    * servicios pedidos a la vez son UNA cita de una hora, no tres ni tres horas.
    */
-  const gel = Servicio.crear({ nombre: 'Gel', categoria: 'Servicios individuales', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
+  const gel = Servicio.crear({
+    codigo: 'GEL',
+    nombre: 'Gel',
+    categoria: 'Servicios individuales',
+    duracionBaseMinutos: 60,
+    precioBaseCentavos: 45000,
+  });
   const combinado = Servicio.crear({
+    codigo: 'RUBBER-GEL-MANICURE',
     nombre: 'Rubber + gel + manicure',
     categoria: 'Servicios individuales',
     duracionBaseMinutos: 60,
     precioBaseCentavos: 55000,
   });
   const tresHoras = Servicio.crear({
-    nombre: 'Retiro de acrílico o rubber + extensiones o baño de acrílico',
+    codigo: 'RACR-BANO',
+    nombre: 'Retiro de acrílico o rubber + baño de acrílico',
     categoria: 'Combinaciones con retiro',
     duracionBaseMinutos: 180,
     precioBaseCentavos: 110000,
   });
   const diseno = Servicio.crear({
+    codigo: 'DISENO-ESPECIAL',
     nombre: 'Diseño especial',
     categoria: 'Diseños y efectos',
     duracionBaseMinutos: 60,
@@ -223,6 +233,7 @@ async function preparar(opciones: { interprete?: AgenteConversacionalPort; silla
     citaRepo,
     listaEsperaRepo,
     servicios: { gel, combinado, tresHoras, diseno },
+    servicioRepo,
     herramientas,
     orquestador,
     presupuesto,
@@ -502,6 +513,97 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
         await crearClienta('Ana');
 
         await entra(`quiero extensiones con rubber el ${FECHA} a las 13:00`);
+
+        expect((await conversacion()).modo).toBe('humano');
+        const citas = await citaRepo.listarParaConsulta(
+          SUCURSAL,
+          { inicio: new Date(`${FECHA}T00:00:00-06:00`), fin: new Date(`${FECHA}T23:59:00-06:00`) },
+          { limite: 50, desplazamiento: 0 },
+        );
+        expect(citas).toHaveLength(0);
+      });
+    });
+
+    describe('INMUNIDAD AL RENOMBRADO: la Dueña edita `/admin` y el bot sigue agendando', () => {
+      /**
+       * ## EL RIESGO OPERATIVO QUE ESTO CIERRA
+       *
+       * Hasta el 2026-10-21 el resolutor encontraba la fila del catálogo **por su nombre**. La
+       * consecuencia era que una operación perfectamente normal del Backoffice —renombrar un
+       * servicio para que la clienta lo entienda mejor— **rompía la resolución del bot**. Y lo hacía
+       * de la peor forma posible: sin error. El bot escalaba a una persona, la pantalla seguía
+       * mostrando el servicio, y nadie tenía por qué relacionar las dos cosas.
+       *
+       * Ahora resuelve por `codigo`, que es inmutable. Estas pruebas recorren el camino completo:
+       * se edita la fila como lo haría la Dueña desde `/admin`, y después se agenda por WhatsApp.
+       */
+      it('RENOMBRA Y RECOTIZA un servicio, y el bot lo agenda igual y con el precio NUEVO', async () => {
+        const { entra, crearClienta, citaRepo, servicios, servicioRepo, ultimoTextoEnviado } = await preparar();
+        await crearClienta('Ana');
+
+        // Lo que la Dueña hace en Configuración → Catálogo y tiempos.
+        const nombreNuevo = 'Nivelación con rubber y gel semipermanente';
+        servicios.combinado.actualizarDatos({ nombre: nombreNuevo, precioBaseCentavos: 62000 });
+        await servicioRepo.guardar(servicios.combinado);
+
+        const resultado = await entra(`quiero rubber con gel y manicure el ${FECHA} a las 13:00`);
+
+        expect(resultado.atendidaPorElBot).toBe(true);
+        expect(resultado.escalada).toBe(false);
+
+        const citas = await citaRepo.listarParaConsulta(
+          SUCURSAL,
+          { inicio: new Date(`${FECHA}T00:00:00-06:00`), fin: new Date(`${FECHA}T23:59:00-06:00`) },
+          { limite: 50, desplazamiento: 0 },
+        );
+        expect(citas).toHaveLength(1);
+        // La MISMA fila: el id no cambió porque renombrar no crea nada.
+        expect(citas[0]!.servicioId).toBe(servicios.combinado.id);
+        // Y la cotización congelada lleva el nombre y el precio NUEVOS, no los de fábrica.
+        // `cotizacionSnapshot` es `unknown` en la entidad —es un `jsonb` versionado— así que el
+        // tipo se afirma aquí, que es donde se sabe qué forma tiene.
+        const snapshot = citas[0]!.cotizacionSnapshot as CotizacionSnapshot;
+        expect(snapshot.servicio.nombre).toBe(nombreNuevo);
+        expect(snapshot.totalCentavos).toBe(62000);
+        // Lo que la clienta lee también es el nombre nuevo.
+        expect(ultimoTextoEnviado()).toContain(nombreNuevo);
+      });
+
+      it('la duración NUEVA manda: si la Dueña la cambia, el hueco cambia con ella', async () => {
+        /**
+         * La otra mitad de la promesa de `/admin`: *"editable sin tocar código"* incluye el tiempo.
+         * La fila de `GEL` pasa de 60 a 120 minutos y la cita del bot ocupa dos horas — sin
+         * desplegar nada, y sin que el resolutor sepa nada de duraciones.
+         */
+        const { entra, crearClienta, citaRepo, servicios, servicioRepo } = await preparar();
+        await crearClienta('Ana');
+
+        servicios.gel.actualizarDatos({ duracionBaseMinutos: 120 });
+        await servicioRepo.guardar(servicios.gel);
+
+        await entra(`quiero cita de gel el ${FECHA} a las 13:00`);
+
+        const citas = await citaRepo.listarParaConsulta(
+          SUCURSAL,
+          { inicio: new Date(`${FECHA}T00:00:00-06:00`), fin: new Date(`${FECHA}T23:59:00-06:00`) },
+          { limite: 50, desplazamiento: 0 },
+        );
+        expect(citas[0]!.rangoHorario.fin.toISOString()).toBe(new Date(`${FECHA}T15:00:00-06:00`).toISOString());
+      });
+
+      it('DAR DE BAJA la fila sí deja al bot sin agendarla, y eso es correcto', async () => {
+        /**
+         * La distinción que importa: renombrar es una edición cosmética y el bot la ignora;
+         * **dar de baja es una decisión de negocio** —la Dueña dejó de ofrecer esa combinación— y el
+         * bot tiene que respetarla escalando, no buscando la fila más parecida.
+         */
+        const { entra, crearClienta, conversacion, citaRepo, servicios, servicioRepo } = await preparar();
+        await crearClienta('Ana');
+
+        servicios.combinado.desactivar();
+        await servicioRepo.guardar(servicios.combinado);
+
+        await entra(`quiero rubber con gel y manicure el ${FECHA} a las 13:00`);
 
         expect((await conversacion()).modo).toBe('humano');
         const citas = await citaRepo.listarParaConsulta(

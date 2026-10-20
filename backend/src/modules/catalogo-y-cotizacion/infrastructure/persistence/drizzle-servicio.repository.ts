@@ -4,6 +4,7 @@ import { Database } from '../../../../database/connection';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
 import { servicioModificadoresAplicables, servicios } from '../../../../database/schema';
 import { Servicio } from '../../domain/entities/servicio.entity';
+import { CodigoDeServicio } from '../../domain/codigos-de-servicio';
 import { ServicioRepository } from '../../domain/ports/servicio.repository';
 import { validarImporteEnCentavos } from '../../domain/value-objects/centavos';
 import { TransactionContext } from '../../../../shared/persistence/transaction-context';
@@ -24,6 +25,7 @@ export class DrizzleServicioRepository implements ServicioRepository {
       .values({
         id: servicio.id,
         nombre: servicio.nombre,
+        codigo: servicio.codigo,
         categoria: servicio.categoria,
         duracionBaseMinutos: servicio.duracionBaseMinutos,
         precioBaseCentavos: servicio.precioBaseCentavos,
@@ -32,6 +34,9 @@ export class DrizzleServicioRepository implements ServicioRepository {
       })
       .onConflictDoUpdate({
         target: servicios.id,
+        // `codigo` NO entra en el `set`: es inmutable, y un upsert que lo reescribiera sería la
+        // puerta de atrás que `Servicio.actualizarDatos` cierra por delante. La fila conserva el que
+        // tuviera al nacer.
         set: {
           nombre: servicio.nombre,
           categoria: servicio.categoria,
@@ -119,6 +124,9 @@ export class DrizzleServicioRepository implements ServicioRepository {
     return Servicio.reconstruir({
       id: fila.id,
       nombre: fila.nombre,
+      // La columna es `varchar` libre; el tipo del dominio es una unión de literales. El `as` es la
+      // frontera: lo que esté en la base se lee tal cual, y la unión protege lo que se escribe.
+      codigo: (fila.codigo as CodigoDeServicio | null) ?? null,
       categoria: fila.categoria,
       duracionBaseMinutos: fila.duracionBaseMinutos,
       precioBaseCentavos: validarImporteEnCentavos(fila.precioBaseCentavos, 'SERVICIO_PRECIO_BASE'),

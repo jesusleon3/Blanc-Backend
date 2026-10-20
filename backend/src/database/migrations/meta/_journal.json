@@ -134,6 +134,13 @@
       "when": 1792456298543,
       "tag": "0018_garantia_tras_cancelacion",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792457805732,
+      "tag": "0019_codigo_estable_de_servicio",
+      "breakpoints": true
     }
   ]
 }

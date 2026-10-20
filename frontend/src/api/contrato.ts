@@ -331,6 +331,21 @@ export interface ResultadoDeReprogramacion {
 export interface Servicio {
   id: string;
   nombre: string;
+  /**
+   * Clave **estable e inmutable** de las filas del catálogo oficial de la Dueña, o `null` para las
+   * que alguien creó desde el Backoffice.
+   *
+   * ## PARA QUÉ LA NECESITA LA INTERFAZ
+   *
+   * Para **distinguir las filas oficiales y decir que su nombre se puede cambiar sin miedo**. El
+   * bot resuelve las combinaciones por este código, no por el nombre, así que renombrar
+   * *"Rubber + gel"* es seguro — y antes no lo era: dejaba al bot sin poder agendarlo, sin un solo
+   * error por ninguna parte.
+   *
+   * **Ningún endpoint lo acepta como entrada**, ni al crear ni al editar: el `ValidationPipe` del
+   * backend responde `400` si llega. Aquí se muestra, nunca se envía.
+   */
+  codigo: string | null;
   categoria: string;
   duracionBaseMinutos: number;
   precioBaseCentavos: number;

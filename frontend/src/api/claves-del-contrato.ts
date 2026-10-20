@@ -168,6 +168,7 @@ export const CLAVES_DE_EXCEPCION = completas<ExcepcionPersonal>()([
 export const CLAVES_DE_SERVICIO = completas<Servicio>()([
   'id',
   'nombre',
+  'codigo',
   'categoria',
   'duracionBaseMinutos',
   'precioBaseCentavos',

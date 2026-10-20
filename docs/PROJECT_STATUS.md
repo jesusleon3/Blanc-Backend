@@ -1209,6 +1209,113 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-21 — Clave estable (`codigo`) en servicios y desglose de las filas agrupadas
+
+**Backend: 1388 pruebas en 81 suites** (+27). **Frontend: 238 pruebas en 14 suites** (+4). Los seis controles del backend y los cuatro del frontend en verde. Migración nueva: `0019_codigo_estable_de_servicio.sql`.
+
+> Cierra los **dos riesgos operativos** que quedaron señalados al entregar la matriz de la Dueña: que renombrar un servicio rompía al bot, y que cuatro familias compartían precio sin forma de separarlas.
+
+---
+
+#### 1. El catálogo final: 32 renglones con su código estable
+
+| Categoría | Código | Nombre sembrado | Bloque |
+|---|---|---|---|
+| **Retiro** | `RETIRO` | Retiro de gel, acrílico o rubber | 60 |
+| **Servicios individuales** | `GEL` | Gel | 60 |
+| | `RUBBER` | Rubber | 60 |
+| | `RUBBER-GEL` | Rubber + gel | 60 |
+| | `MANICURE` | Manicure | 60 |
+| | `RUBBER-GEL-MANICURE` | Rubber + gel + manicure | 60 |
+| **Extensiones y cobertura** | `EXT` | Extensiones | 120 |
+| | `BANO` | Baño de acrílico | 120 |
+| | `EXT-GEL` | Extensiones + gel | 120 |
+| | `BANO-GEL` | Baño de acrílico + gel | 120 |
+| | `EXT-GEL-MANICURE` | Extensiones + gel + manicure | 120 |
+| | `BANO-GEL-MANICURE` | Baño de acrílico + gel + manicure | 120 |
+| **Combinaciones con retiro** | `RGEL-GEL` | Retiro de gel + gel | **60** |
+| *(retiro de gel: se absorbe)* | `RGEL-RUBBER` | Retiro de gel + rubber | **60** |
+| | `RGEL-MANICURE` | Retiro de gel + manicure | **60** |
+| | `RGEL-RUBBER-GEL` | Retiro de gel + rubber + gel | **60** |
+| | `RGEL-RUBBER-GEL-MANICURE` | Retiro de gel + rubber + gel + manicure | **60** |
+| *(retiro de acrílico: añade bloque)* | `RACR-GEL` | Retiro de acrílico o rubber + gel | 120 |
+| | `RACR-RUBBER` | Retiro de acrílico o rubber + rubber | 120 |
+| | `RACR-MANICURE` | Retiro de acrílico o rubber + manicure | 120 |
+| | `RACR-RUBBER-GEL` | Retiro de acrílico o rubber + rubber + gel | 120 |
+| | `RACR-RUBBER-GEL-MANICURE` | Retiro de acrílico o rubber + rubber + gel + manicure | 120 |
+| | `RACR-EXT` | Retiro de acrílico o rubber + extensiones | 180 |
+| | `RACR-BANO` | Retiro de acrílico o rubber + baño de acrílico | 180 |
+| | `RACR-EXT-MANICURE` | Retiro de acrílico o rubber + extensiones + manicure | 180 |
+| | `RACR-BANO-MANICURE` | Retiro de acrílico o rubber + baño de acrílico + manicure | 180 |
+| **Diseños y efectos** | `GEL-DISENO` | Gel + diseño estándar | 60 |
+| | `RUBBER-DISENO` | Rubber + diseño estándar | 60 |
+| | `MANICURE-RUBBER-DISENO` | Manicure + rubber + diseño estándar | 60 |
+| | `EXT-DISENO` | Extensiones + diseño estándar | 180 |
+| | `BANO-DISENO` | Baño de acrílico + diseño estándar | 180 |
+| | `DISENO-ESPECIAL` | Diseño especial *(cotización manual)* | 60 |
+
+**El desglose no inventó combinaciones.** Pasó de 21 a 32 filas separando lo que ya estaba dentro de un paréntesis, y **las duraciones no se tocaron**. Las cinco filas de `RGEL-*` reflejan exactamente las cinco combinaciones de la familia de 60 minutos (gel, rubber, manicure, rubber+gel, rubber+gel+manicure), ni una más; las cinco de `RACR-*` las mismas, con un bloque más.
+
+---
+
+#### 2. Cómo el `codigo` elimina el riesgo del renombrado
+
+**El nombre es para la clienta y para la Dueña; el código es para el sistema.** El resolutor del bot devuelve un `codigo` y `HerramientasDelBot` busca la fila por él.
+
+**La inmutabilidad se impone en cuatro sitios, y hacen falta los cuatro:**
+
+| Dónde | Qué impide |
+|---|---|
+| `Servicio.actualizarDatos()` no acepta `codigo` | Que el dominio lo cambie |
+| `onConflictDoUpdate` del repositorio no lo lleva en el `set` | Que un upsert lo reescriba por la puerta de atrás |
+| `CrearServicioDto` / `ActualizarServicioDto` no lo declaran | Que entre por HTTP — con `forbidNonWhitelisted`, el intento es un `400` y no un campo ignorado en silencio |
+| Índice único parcial `servicios_codigo_unico` | Dos filas con el mismo código |
+
+> **Por qué el alta tampoco lo acepta, que es menos obvio.** Si se pudiera elegir el código al crear un servicio, cualquiera con acceso a `/admin` podría dar de alta un `Gel pirata` con `codigo: 'GEL'` y **secuestrar** la combinación que el bot agenda. El índice único impediría el duplicado exacto, pero no la suplantación si la fila original se diera de baja. Solo el seed asigna códigos.
+
+**Nulable a propósito.** Un servicio creado desde el panel nace **sin código**, y la tabla lo muestra con un guion. No es un dato que falte: tener código significa *"esta fila es de la matriz oficial y el bot sabe resolverla"*, y afirmarlo de una fila inventada sería falso. Se agenda desde el mostrador con normalidad.
+
+**Dónde vive el vocabulario:** `modules/catalogo-y-cotizacion/domain/codigos-de-servicio.ts`, como una **unión de literales**. Así un código mal escrito en la matriz o en el seed **no compila** — mismo criterio que `ESTADOS_CITA`. Está en el dominio del Catálogo y no en el seed porque es identidad, no datos de arranque: el seed aporta nombres, duraciones y precios, todos editables.
+
+**Tres pruebas cubren lo que `tsc` no puede ver**: que todo código de la matriz esté sembrado (si no, el bot escalaría una combinación que la Dueña sí ofrece, sin que nada fallara), que no haya códigos sembrados fuera del vocabulario ni duplicados, y que la **única** fila sin entrada en la matriz sea `DISENO-ESPECIAL` — si apareciera otra, sería una combinación que el bot no sabe vender.
+
+---
+
+#### 3. La prueba de renombrado: resultado
+
+Tres casos de integración sobre PostgreSQL real, recorriendo el camino completo (editar como lo haría la Dueña en `/admin` → agendar por WhatsApp):
+
+| Caso | Resultado |
+|---|---|
+| Renombrar `RUBBER-GEL-MANICURE` a *"Nivelación con rubber y gel semipermanente"* y subir su precio a $620 | ✅ El bot **agenda igual**. La cita apunta al **mismo `servicioId`** (renombrar no crea nada) y su `cotizacionSnapshot` congela el **nombre y el precio nuevos**. La clienta lee el nombre nuevo |
+| Cambiar la duración de `GEL` de 60 a 120 minutos | ✅ La cita del bot ocupa **dos horas**, sin desplegar nada. El resolutor no sabe nada de duraciones: solo elige la fila |
+| **Dar de baja** `RUBBER-GEL-MANICURE` | ✅ El bot **escala** y no agenda nada — y eso es correcto: dar de baja es una decisión de negocio, no una edición cosmética |
+
+Y en el seed: **renombrar una fila ya no la duplica.** Con la idempotencia por nombre, el siguiente `db:seed` recreaba el servicio renombrado y la Dueña acababa con dos filas activas y vendibles —la suya con su precio y una nueva con el de fábrica— sin un solo error. Ahora la clave es el `codigo`, y el nombre pasa a ser lo que siempre debió ser: una etiqueta editable.
+
+---
+
+#### 4. 🐛 Una prueba dependiente del reloj, encontrada de paso
+
+`analitica.e2e.spec.ts` calculaba las horas de sus citas como `AHORA_REAL - 24 h + N h`, es decir *"ayer a esta misma hora, más N"*. **El resultado dependía de a qué hora se corriera la suite**: ejecutándola a las 19:00, `horaDeCita(4)` caía a las 23:00 y la cita de 60 minutos cruzaba la medianoche → `CITA_CRUZA_DIAS` (`409`). La suite pasaba toda la mañana y fallaba por la noche sin que nada hubiera cambiado en el código.
+
+Apareció en esta sesión porque se corrió de tarde. Corregido ancándolo a la **hora de pared** de Querétaro: `horaDeCita(16)` son las 16:00 de ayer, pase lo que pase — que además es lo que las pruebas ya querían decir, porque los llamantes pasaban `'16'` y `'18'` como si fueran horas del día.
+
+---
+
+#### 5. Con qué te vas a tropezar
+
+| Si vas a… | Ten en cuenta |
+|---|---|
+| Renombrar o recotizar un servicio oficial | **Es seguro.** El bot lo reconoce por su código. La columna «Código» en `/admin` dice qué filas son oficiales |
+| Dar de baja una fila oficial | **Sí cambia al bot**: deja de agendarla y escala. Queda un `warn` en el log nombrando el código |
+| Añadir una combinación nueva | Tres sitios: el código en `codigos-de-servicio.ts`, la fila en `catalogo-de-blanc.ts` y su entrada en `MATRIZ`. Si falta la tercera, el mostrador la vende y el bot no la reconoce; si falta la segunda, la prueba de consistencia lo dice |
+| Cambiar un `codigo` existente | **No es una edición: es dar de baja la fila y sembrar otra.** Un código que cambia no es un código estable, y el sistema no ofrece forma de editarlo |
+| Sembrar sobre una base anterior a la migración `0019` | Sus filas no tienen código. El seed tiene una red de seguridad por nombre para no duplicarlas, pero **el bot no las resolverá** hasta que se les asigne el código — lo más simple es dejar que la `0019` desactive las agrupadas y que el seed cree las nuevas |
+| Agendar una cita de 3 horas | Solo cabe a las 9:00 o a las 15:00 de lunes a viernes; el sábado también a las 10:00, 11:00 y 12:00 |
+
+---
+
 ### 2026-10-19 — Catálogo oficial de la Dueña, resolución de combinaciones en el bot y cierre de las tensiones de Garantías
 
 **Backend: 1361 pruebas en 81 suites** (+77). **Frontend: 234 pruebas en 14 suites** (+1). Los seis controles del backend y los cuatro del frontend en verde. Migración nueva: `0018_garantia_tras_cancelacion.sql`.

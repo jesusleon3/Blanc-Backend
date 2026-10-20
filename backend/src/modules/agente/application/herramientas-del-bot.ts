@@ -286,6 +286,18 @@ export class HerramientasDelBot {
   /**
    * Qué servicio del catálogo corresponde a lo que pidió la clienta.
    *
+   * ## SE RESUELVE POR `codigo`, NUNCA POR NOMBRE (2026-10-21)
+   *
+   * La matriz devuelve un **código estable** y aquí se busca la fila por ese código. Antes se
+   * buscaba por nombre, y eso convertía una operación inocente del Backoffice en una avería: la
+   * Dueña renombraba *"Rubber + gel"* a *"Nivelación con rubber y gel semipermanente"* y el bot
+   * dejaba de poder agendarlo. Escalaba en vez de agendar, y nadie entendía por qué — la pantalla
+   * seguía mostrando el servicio perfectamente.
+   *
+   * Con el código, **renombrar y cambiar el precio desde `/admin` son seguros por construcción**:
+   * el nombre es para la clienta y para la Dueña, el código es para el sistema, y nada permite
+   * editarlo (`Servicio.actualizarDatos` no lo acepta y el upsert del repositorio no lo reescribe).
+   *
    * ## SOLO LA MATRIZ. SE QUITÓ EL RESPALDO POR NOMBRE, Y ESO ES UNA CORRECCIÓN
    *
    * Hasta esta entrega había un segundo camino: buscar en el catálogo un servicio cuyo nombre
@@ -315,25 +327,24 @@ export class HerramientasDelBot {
     if ('escalar' in deLaMatriz) return deLaMatriz;
 
     const activos = (await this.servicios.ejecutar()).filter((servicio) => servicio.activo);
-    const fila = activos.find((servicio) => servicio.nombre === deLaMatriz.servicio);
+    const fila = activos.find((servicio) => servicio.codigo === deLaMatriz.codigo);
 
     if (!fila) {
       /**
-       * La matriz nombró una fila que el catálogo no ofrece: alguien la dio de baja, o la renombró
-       * desde el Backoffice.
+       * La matriz resolvió a un código que el catálogo no ofrece **activo**.
        *
-       * Se escala en vez de buscar la más parecida, y se **avisa en el log** porque es un desajuste
-       * de configuración que nadie vería de otra forma: la clienta recibiría un escalamiento
-       * correcto y el bot parecería simplemente torpe. El aviso dice qué fila falta.
+       * Desde que se resuelve por `codigo`, esto ya no puede pasar por un renombrado: solo quedan
+       * dos causas, y las dos son legítimas. (1) Alguien **dio de baja** esa fila desde el
+       * Backoffice — y entonces escalar es lo correcto, porque la Dueña dejó de ofrecer esa
+       * combinación. (2) La base no está sembrada con el catálogo oficial completo.
        *
-       * ⚠️ El vínculo entre la matriz y el catálogo es **por nombre**, y los nombres se editan desde
-       * `/admin`. Renombrar una fila oficial deja al bot sin poder resolver esa combinación.
-       * Resolverlo de raíz pediría una clave estable en `servicios`, que hoy no existe; mientras no
-       * exista, este aviso es lo que lo hace diagnosticable.
+       * Se escala en vez de buscar la fila más parecida, y se **avisa en el log** porque el segundo
+       * caso nadie lo vería de otra forma: la clienta recibiría un escalamiento correcto y el bot
+       * parecería simplemente torpe. El aviso dice qué código falta.
        */
       this.logger.warn(
-        `La matriz de combinaciones resolvió a «${deLaMatriz.servicio}», que no está activo en el catálogo. ` +
-          'El turno escala. Revisa si la fila se dio de baja o se renombró desde el Backoffice.',
+        `La matriz de combinaciones resolvió al código «${deLaMatriz.codigo}», que no está activo en el catálogo. ` +
+          'El turno escala. Revisa si la fila se dio de baja desde el Backoffice o si falta sembrar el catálogo oficial.',
       );
       return null;
     }

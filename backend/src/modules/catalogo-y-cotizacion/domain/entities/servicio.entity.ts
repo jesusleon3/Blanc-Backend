@@ -1,10 +1,16 @@
 import { randomUUID } from 'crypto';
 import { DomainError } from '../../../../shared/errors/domain-error';
 import { Centavos, validarImporteEnCentavos } from '../value-objects/centavos';
+import { CodigoDeServicio } from '../codigos-de-servicio';
 
 export interface ServicioProps {
   id: string;
   nombre: string;
+  /**
+   * Clave **estable e inmutable** de las filas del catálogo oficial, o `null` para las que la Dueña
+   * cree desde el Backoffice. Ver `codigos-de-servicio.ts`.
+   */
+  codigo: CodigoDeServicio | null;
   /** Incluye `retiro` como categoría propia (`RN-COT-02`), no como variante de una aplicación. */
   categoria: string;
   duracionBaseMinutos: number;
@@ -36,6 +42,13 @@ export class Servicio {
     duracionBaseMinutos: number;
     precioBaseCentavos: number;
     requiereCotizacionManual?: boolean;
+    /**
+     * Solo lo pasa el **seed del catálogo oficial**. Ni `CrearServicioUseCase` ni el DTO de alta lo
+     * aceptan: dejar que alguien eligiera el código por HTTP permitiría **secuestrar** una
+     * combinación oficial —crear un servicio con `codigo: 'GEL'` y hacer que el bot agende ése— y
+     * el índice único solo impediría el duplicado, no la suplantación del primero.
+     */
+    codigo?: CodigoDeServicio;
   }): Servicio {
     const nombre = input.nombre.trim();
     const categoria = input.categoria.trim();
@@ -50,6 +63,7 @@ export class Servicio {
     return new Servicio({
       id: randomUUID(),
       nombre,
+      codigo: input.codigo ?? null,
       categoria,
       duracionBaseMinutos: validarDuracionEnMinutos(input.duracionBaseMinutos, 'SERVICIO'),
       precioBaseCentavos: validarImporteEnCentavos(input.precioBaseCentavos, 'SERVICIO_PRECIO_BASE'),
@@ -64,6 +78,17 @@ export class Servicio {
     return new Servicio(props);
   }
 
+  /**
+   * ## `codigo` NO ESTÁ AQUÍ, Y ES EL PUNTO DE TODA LA COLUMNA
+   *
+   * `actualizarDatos` acepta nombre, categoría, duración, precio y la bandera de cotización manual
+   * — todo lo que la Dueña necesita poder cambiar. **El código no**, y su ausencia es lo que hace
+   * seguro lo demás: el bot resuelve por `codigo`, así que mientras nadie pueda editarlo, renombrar
+   * y recotizar cualquier fila desde `/admin` es una operación que no puede romper la resolución.
+   *
+   * Si algún día hiciera falta cambiarlo, no sería una edición: sería dar de baja la fila y sembrar
+   * otra, porque un código que cambia no es un código estable.
+   */
   actualizarDatos(input: {
     nombre?: string;
     categoria?: string;
@@ -111,6 +136,14 @@ export class Servicio {
   }
   get nombre(): string {
     return this.props.nombre;
+  }
+  /**
+   * Clave estable, o `null` si la fila no es del catálogo oficial.
+   *
+   * **No hay `set` ni forma de cambiarlo**: ver la nota de `actualizarDatos`.
+   */
+  get codigo(): CodigoDeServicio | null {
+    return this.props.codigo;
   }
   get categoria(): string {
     return this.props.categoria;

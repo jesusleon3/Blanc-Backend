@@ -40,6 +40,77 @@ describe('Backoffice — Catálogo y tiempos', () => {
     expect(screen.getByText(/precios siguen siendo provisionales/)).toBeInTheDocument();
   });
 
+  describe('el código estable y el renombrado seguro', () => {
+    /**
+     * ## POR QUÉ ESTO SE PRUEBA EN LA INTERFAZ Y NO SOLO EN EL BACKEND
+     *
+     * El `codigo` resuelve un problema técnico —que renombrar no rompa al bot— pero el riesgo real
+     * era **humano**: la Dueña no renombraba nada por miedo, o lo renombraba y el bot se volvía
+     * tonto sin que nadie supiera por qué. La columna y el aviso son lo que convierte la garantía
+     * técnica en algo que ella puede usar.
+     */
+    it('muestra el código de las filas oficiales y un guion en las creadas a mano', async () => {
+      contexto([servicio({ nombre: 'Rubber + gel', codigo: 'RUBBER-GEL' }), servicio({ id: 'propio', nombre: 'Pedicure spa', codigo: null })]);
+
+      montar(<CatalogoAdmin />);
+
+      const tabla = await screen.findByRole('table', { name: 'Servicios del catálogo' });
+      expect(within(tabla).getByText('RUBBER-GEL')).toBeInTheDocument();
+      // La creada desde el panel no tiene código, y decirlo con un guion es más honesto que
+      // dejar la celda vacía: no es un dato que falte, es que no le corresponde.
+      expect(within(tabla).getByText('—')).toBeInTheDocument();
+    });
+
+    it('DICE que renombrar es seguro, y por qué', async () => {
+      contexto();
+
+      montar(<CatalogoAdmin />);
+
+      expect(await screen.findByText(/Renombrar un servicio es seguro/)).toBeInTheDocument();
+      expect(screen.getByText(/el bot las reconoce por ese código y no por el nombre/)).toBeInTheDocument();
+      expect(screen.getByText(/El código no se\s+puede editar/)).toBeInTheDocument();
+    });
+
+    it('al editar una fila oficial recuerda que el código no se toca', async () => {
+      contexto([servicio({ nombre: 'Rubber + gel', codigo: 'RUBBER-GEL' })]);
+
+      montar(<CatalogoAdmin />);
+
+      await userEvent.setup().click(await screen.findByRole('button', { name: 'Editar Rubber + gel' }));
+
+      expect(screen.getByText(/El código no se edita/)).toBeInTheDocument();
+    });
+
+    it('el formulario NO envía el código: el backend lo rechazaría con 400', async () => {
+      /**
+       * La prueba de que la interfaz no puede secuestrar una combinación oficial. El `codigo` viaja
+       * **hacia** el cliente y nunca de vuelta; el `ValidationPipe` del backend responde `400` ante
+       * un campo que el DTO no declara, así que enviarlo rompería la edición entera.
+       */
+      contexto([servicio({ nombre: 'Rubber + gel', codigo: 'RUBBER-GEL' })]);
+      let enviado: Record<string, unknown> | null = null;
+      servidor.use(
+        http.patch(`${SERVICIOS}/${SERVICIO_GELISH}`, async ({ request }) => {
+          enviado = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(servicio({ nombre: 'Nivelación con rubber y gel', codigo: 'RUBBER-GEL' }));
+        }),
+      );
+
+      montar(<CatalogoAdmin />);
+
+      const usuario = userEvent.setup();
+      await usuario.click(await screen.findByRole('button', { name: 'Editar Rubber + gel' }));
+      const nombre = screen.getByLabelText('Nombre');
+      await usuario.clear(nombre);
+      await usuario.type(nombre, 'Nivelación con rubber y gel');
+      await usuario.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+      await waitFor(() => expect(enviado).not.toBeNull());
+      expect(enviado).toEqual({ nombre: 'Nivelación con rubber y gel' });
+      expect(enviado).not.toHaveProperty('codigo');
+    });
+  });
+
   it('muestra la DURACIÓN de cada servicio en la tabla, no escondida en un detalle', async () => {
     /**
      * De `duracionBaseMinutos` sale el fin de cada cita (`DEC-033`), y de ahí el `tstzrange` que

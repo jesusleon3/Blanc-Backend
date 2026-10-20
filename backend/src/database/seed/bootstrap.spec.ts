@@ -6,7 +6,7 @@ import { DrizzleSillaRepository } from '../../modules/agenda/infrastructure/pers
 import { DrizzleUsuarioRepository } from '../../modules/identidad-y-accesos/infrastructure/persistence/drizzle-usuario.repository';
 import { DrizzleConversacionRepository } from '../../modules/conversaciones/infrastructure/persistence/drizzle-conversacion.repository';
 import { DrizzleServicioRepository } from '../../modules/catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
-import { CATEGORIAS_DE_BLANC, SERVICIOS_DE_BLANC } from './catalogo-de-blanc';
+import { CATEGORIAS_DE_BLANC, FILAS_AGRUPADAS_SUSTITUIDAS, SERVICIOS_DE_BLANC } from './catalogo-de-blanc';
 import { Rol } from '../../shared/auth/rol';
 
 /** El `sub` de Supabase es un **uuid**, y `usuarios.supabase_user_id` es una columna `uuid`. */
@@ -289,24 +289,30 @@ describe('Bootstrap de producción (idempotente)', () => {
      */
     it.each([
       // Tres trabajos en la MISMA hora: la prueba de que no se suman.
-      ['Rubber + gel + manicure', 60],
-      // El retiro de gel se absorbe dentro de la hora...
-      ['Retiro de gel + rubber, gel o manicure', 60],
+      ['RUBBER-GEL-MANICURE', 60],
+      // El retiro de gel se absorbe dentro de la hora, destino por destino...
+      ['RGEL-GEL', 60],
+      ['RGEL-MANICURE', 60],
+      ['RGEL-RUBBER-GEL-MANICURE', 60],
       // ...pero el de acrílico o rubber añade su propio bloque.
-      ['Retiro de acrílico o rubber + rubber, gel o manicure', 120],
-      // Y sobre extensiones, el bloque completo de tres horas.
-      ['Retiro de acrílico o rubber + extensiones o baño de acrílico', 180],
+      ['RACR-GEL', 120],
+      ['RACR-RUBBER-GEL-MANICURE', 120],
+      // Y sobre extensiones o baño, el bloque completo de tres horas.
+      ['RACR-EXT', 180],
+      ['RACR-BANO', 180],
       // El manicure también se absorbe: sigue siendo 180, no 240.
-      ['Retiro de acrílico o rubber + extensiones o baño de acrílico + manicure', 180],
+      ['RACR-EXT-MANICURE', 180],
+      ['RACR-BANO-MANICURE', 180],
       // Un diseño estándar cabe en la hora del servicio base...
-      ['Gel + diseño estándar', 60],
-      // ...pero sobre extensiones añade su hora: 120 + 60.
-      ['Extensiones o baño de acrílico + diseño estándar', 180],
-    ])('«%s» dura exactamente %i minutos', async (nombre, minutos) => {
+      ['GEL-DISENO', 60],
+      // ...pero sobre extensiones o baño añade su hora: 120 + 60.
+      ['EXT-DISENO', 180],
+      ['BANO-DISENO', 180],
+    ])('«%s» dura exactamente %i minutos', async (codigo, minutos) => {
       const { db } = await repos();
       await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
-      const servicio = (await new DrizzleServicioRepository(db).listar()).find((candidato) => candidato.nombre === nombre);
+      const servicio = (await new DrizzleServicioRepository(db).listar()).find((candidato) => candidato.codigo === codigo);
 
       // `expect` de Jest no acepta mensaje: el nombre del caso ya lo dice.
       expect(servicio).toBeDefined();
@@ -326,6 +332,90 @@ describe('Bootstrap de producción (idempotente)', () => {
       const duraciones = (await new DrizzleServicioRepository(db).listar()).map((servicio) => servicio.duracionBaseMinutos);
 
       expect([...new Set(duraciones)].sort((a, b) => a - b)).toEqual([60, 120, 180]);
+    });
+
+    describe('el `codigo` estable (migración `0019`)', () => {
+      it('cada fila oficial nace con su código, y son todos distintos', async () => {
+        const { db } = await repos();
+        await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+        const servicios = await new DrizzleServicioRepository(db).listar();
+        const codigos = servicios.map((servicio) => servicio.codigo);
+
+        expect(codigos.every((codigo) => codigo !== null)).toBe(true);
+        expect(new Set(codigos).size).toBe(servicios.length);
+      });
+
+      it('RENOMBRAR Y RECOTIZAR una fila NO la duplica en el siguiente seed', async () => {
+        /**
+         * ## EL DEFECTO QUE ESTA PRUEBA CIERRA
+         *
+         * Con la idempotencia por **nombre**, renombrar un servicio desde `/admin` hacía que el
+         * siguiente `db:seed` lo volviera a crear: la Dueña acababa con su fila renombrada (con su
+         * precio) **y** una recién sembrada con el nombre y el precio de fábrica, las dos activas y
+         * vendibles, sin un solo error por ninguna parte.
+         *
+         * El código es inmutable, así que una fila renombrada sigue siendo la misma fila.
+         */
+        const { db } = await repos();
+        await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+        const servicioRepo = new DrizzleServicioRepository(db);
+        const antes = (await servicioRepo.listar()).length;
+        const rubberGel = (await servicioRepo.listar()).find((servicio) => servicio.codigo === 'RUBBER-GEL')!;
+        rubberGel.actualizarDatos({ nombre: 'Nivelación con rubber y gel semipermanente', precioBaseCentavos: 52000 });
+        await servicioRepo.guardar(rubberGel);
+
+        const segunda = await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+        expect(segunda.serviciosCreados).toBe(0);
+        const despues = await servicioRepo.listar();
+        expect(despues.length).toBe(antes);
+
+        // La fila sigue siendo una, con el nombre y el precio de la Dueña, y su código intacto.
+        const laSuya = despues.filter((servicio) => servicio.codigo === 'RUBBER-GEL');
+        expect(laSuya).toHaveLength(1);
+        expect(laSuya[0]!.nombre).toBe('Nivelación con rubber y gel semipermanente');
+        expect(laSuya[0]!.precioBaseCentavos).toBe(52000);
+      });
+
+      it('el código es INMUTABLE: `actualizarDatos` no lo acepta ni por error', async () => {
+        const { db } = await repos();
+        await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+        const servicioRepo = new DrizzleServicioRepository(db);
+        const gel = (await servicioRepo.listar()).find((servicio) => servicio.codigo === 'GEL')!;
+
+        // Si alguien añadiera `codigo` a `actualizarDatos`, este `as` dejaría de ser necesario y la
+        // prueba seguiría pasando — por eso además se comprueba el valor después de guardar.
+        gel.actualizarDatos({ codigo: 'RUBBER' } as unknown as { nombre: string });
+        await servicioRepo.guardar(gel);
+
+        const despues = (await servicioRepo.listar()).find((servicio) => servicio.id === gel.id)!;
+        expect(despues.codigo).toBe('GEL');
+      });
+
+      it('las CUATRO FILAS AGRUPADAS viejas quedan DESACTIVADAS, no borradas', async () => {
+        /**
+         * Las sustituyeron renglones individuales con precio propio. Dejarlas activas significaría
+         * que el mostrador puede vender *"Retiro de gel + rubber, gel o manicure"* con el precio
+         * único viejo mientras el bot vende las filas nuevas — dos fuentes de verdad para lo mismo.
+         *
+         * Se **desactivan** y no se borran: una cita que ya las usó conserva su `cotizacionSnapshot`
+         * con el nombre y el precio congelados, así que sigue siendo legible.
+         *
+         * Aquí se comprueba sobre una base recién migrada, donde esas filas no existen — lo que se
+         * fija es que el seed **no las recrea** y que el catálogo activo son exactamente las nuevas.
+         */
+        const { db } = await repos();
+        await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+        const activos = (await new DrizzleServicioRepository(db).listar()).filter((servicio) => servicio.activo);
+
+        for (const nombreViejo of FILAS_AGRUPADAS_SUSTITUIDAS) {
+          expect(activos.map((servicio) => servicio.nombre)).not.toContain(nombreViejo);
+        }
+      });
     });
 
     it('«Diseño especial» es la ÚNICA fila de cotización manual (`DEC-033`)', async () => {
@@ -362,14 +452,14 @@ describe('Bootstrap de producción (idempotente)', () => {
       await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       const servicioRepo = new DrizzleServicioRepository(db);
-      const gel = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gel')!;
+      const gel = (await servicioRepo.listar()).find((servicio) => servicio.codigo === 'GEL')!;
       gel.actualizarDatos({ precioBaseCentavos: 42000, duracionBaseMinutos: 120 });
       await servicioRepo.guardar(gel);
 
       const segunda = await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       expect(segunda.serviciosCreados).toBe(0);
-      const despues = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gel')!;
+      const despues = (await servicioRepo.listar()).find((servicio) => servicio.codigo === 'GEL')!;
       expect(despues.precioBaseCentavos).toBe(42000);
       expect(despues.duracionBaseMinutos).toBe(120);
     });
@@ -380,15 +470,14 @@ describe('Bootstrap de producción (idempotente)', () => {
       await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       const servicioRepo = new DrizzleServicioRepository(db);
-      const nombre = 'Retiro de gel, acrílico o rubber';
-      const retiro = (await servicioRepo.listar()).find((servicio) => servicio.nombre === nombre)!;
+      const retiro = (await servicioRepo.listar()).find((servicio) => servicio.codigo === 'RETIRO')!;
       retiro.desactivar();
       await servicioRepo.guardar(retiro);
 
       const segunda = await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       expect(segunda.serviciosCreados).toBe(0);
-      expect((await servicioRepo.listar()).find((servicio) => servicio.nombre === nombre)!.activo).toBe(false);
+      expect((await servicioRepo.listar()).find((servicio) => servicio.codigo === 'RETIRO')!.activo).toBe(false);
     });
   });
 });

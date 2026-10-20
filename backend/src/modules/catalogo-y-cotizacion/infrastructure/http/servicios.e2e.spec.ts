@@ -202,6 +202,9 @@ describe('Catálogo — Servicios E2E (HTTP) — FL-COT-01', () => {
       expect(respuesta.body).toEqual({
         id: expect.any(String),
         nombre: 'Acrílico',
+        // `null`: tener código significa "esta fila es de la matriz oficial de la Dueña y el bot
+        // sabe resolverla". Una creada desde el panel no lo es (migración `0019`).
+        codigo: null,
         categoria: 'aplicacion',
         duracionBaseMinutos: 90,
         precioBaseCentavos: 78000,
@@ -729,6 +732,66 @@ describe('Catálogo — Servicios E2E (HTTP) — FL-COT-01', () => {
         .get(RUTA_CATEGORIAS)
         .set('Authorization', `Bearer ${token(Rol.GERENTE, 'gerente-cat')}`)
         .expect(200);
+    });
+  });
+
+  describe('el `codigo` estable (migración `0019`)', () => {
+    const autorizacion = () => `Bearer ${token(Rol.ADMINISTRADOR, 'admin-codigo')}`;
+
+    /**
+     * ## LAS DOS MITADES DE LA PROMESA, Y LAS DOS SE PRUEBAN POR HTTP
+     *
+     * El `codigo` solo sirve si **sale** en las respuestas (para que el Backoffice pueda mostrarlo
+     * como solo lectura) y **no entra** por ninguna parte. Lo segundo es lo que importa: si el alta
+     * aceptara un código, cualquiera con acceso a `/admin` podría crear un servicio con
+     * `codigo: 'GEL'` y **secuestrar** la combinación que el bot agenda. El índice único impediría
+     * el duplicado exacto, pero no la suplantación si la original se diera de baja.
+     */
+    it('un servicio creado desde el panel NACE SIN código, y eso es correcto', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', autorizacion())
+        .send({ nombre: 'Pedicure spa', categoria: 'Pies', duracionBaseMinutos: 60, precioBaseCentavos: 40000 })
+        .expect(201);
+
+      // Tener código significa "esta fila es de la matriz oficial y el bot sabe resolverla". Una
+      // fila inventada en el panel no lo es, así que afirmarlo sería falso.
+      expect(respuesta.body.codigo).toBeNull();
+    });
+
+    it('el alta IGNORA un `codigo` enviado a mano: no se puede secuestrar una combinación oficial', async () => {
+      const respuesta = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', autorizacion())
+        .send({ nombre: 'Gel pirata', categoria: 'Pies', duracionBaseMinutos: 60, precioBaseCentavos: 10, codigo: 'GEL' })
+        // El `ValidationPipe` corre con `forbidNonWhitelisted`, así que un campo que el DTO no
+        // declara es un `400` y no un campo ignorado en silencio. Mejor: el intento se nombra.
+        .expect(400);
+
+      expect(JSON.stringify(respuesta.body)).toMatch(/codigo/);
+    });
+
+    it('la edición tampoco lo acepta: el nombre y el precio sí, el código NO', async () => {
+      const { body: creado } = await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', autorizacion())
+        .send({ nombre: 'Servicio editable', categoria: 'Pies', duracionBaseMinutos: 60, precioBaseCentavos: 30000 })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .patch(`${RUTA}/${creado.id}`)
+        .set('Authorization', autorizacion())
+        .send({ codigo: 'RUBBER' })
+        .expect(400);
+
+      // Y lo que sí es editable sigue funcionando, que es el punto: el código no estorba.
+      const { body: editado } = await request(app.getHttpServer())
+        .patch(`${RUTA}/${creado.id}`)
+        .set('Authorization', autorizacion())
+        .send({ nombre: 'Servicio renombrado', precioBaseCentavos: 44000 })
+        .expect(200);
+
+      expect(editado).toMatchObject({ nombre: 'Servicio renombrado', precioBaseCentavos: 44000, codigo: null });
     });
   });
 });

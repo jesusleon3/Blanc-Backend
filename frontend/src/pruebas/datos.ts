@@ -142,6 +142,7 @@ export const sucursal = (extra: Partial<Sucursal> = {}): Sucursal => ({
 export const servicio = (extra: Partial<Servicio> = {}): Servicio => ({
   id: SERVICIO_GELISH,
   nombre: 'Gelish manos',
+  codigo: 'GEL',
   categoria: 'manos',
   duracionBaseMinutos: 60,
   precioBaseCentavos: 45000,

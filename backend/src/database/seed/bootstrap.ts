@@ -182,15 +182,35 @@ async function sembrarCatalogo(
   repo: DrizzleServicioRepository,
   registrar: (mensaje: string) => void,
 ): Promise<{ creados: number; existentes: number }> {
-  // `listar` devuelve activos e inactivos, así que un servicio de baja cuenta como existente.
-  const existentes = new Set((await repo.listar()).map((servicio) => servicio.nombre.toLowerCase()));
+  /**
+   * ## LA IDEMPOTENCIA ES POR `codigo`, Y ANTES ERA POR NOMBRE (2026-10-21)
+   *
+   * El cambio importa más de lo que parece. Con la clave por nombre, **renombrar un servicio desde
+   * `/admin` hacía que el siguiente `db:seed` lo volviera a crear**: la Dueña acababa con
+   * *"Nivelación con rubber y gel"* (la suya, con su precio) y *"Rubber + gel"* (recién sembrada,
+   * con el precio de fábrica), las dos activas y vendibles, sin un solo error por ninguna parte.
+   *
+   * El código es inmutable, así que una fila renombrada sigue siendo la misma fila y el seed la
+   * reconoce. El nombre deja de ser una identidad y pasa a ser lo que siempre debió ser: una
+   * etiqueta editable.
+   *
+   * `listar` devuelve activos e inactivos, así que un servicio **dado de baja cuenta como
+   * existente** y no se recrea — incluidas las cuatro filas agrupadas que la migración `0019`
+   * desactivó.
+   */
+  const filas = await repo.listar();
+  const codigosExistentes = new Set(filas.map((servicio) => servicio.codigo).filter((codigo) => codigo !== null));
+  // Red de seguridad para una base sembrada ANTES de que existiera la columna: sus filas no tienen
+  // código, y sin esto se duplicarían todas.
+  const nombresExistentes = new Set(filas.map((servicio) => servicio.nombre.toLowerCase()));
   let creados = 0;
 
   for (const definicion of SERVICIOS_DE_BLANC) {
-    if (existentes.has(definicion.nombre.toLowerCase())) continue;
+    if (codigosExistentes.has(definicion.codigo) || nombresExistentes.has(definicion.nombre.toLowerCase())) continue;
 
     await repo.guardar(
       Servicio.crear({
+        codigo: definicion.codigo,
         nombre: definicion.nombre,
         categoria: definicion.categoria,
         duracionBaseMinutos: definicion.duracionBaseMinutos,

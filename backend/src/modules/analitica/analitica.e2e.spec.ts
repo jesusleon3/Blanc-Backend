@@ -83,8 +83,29 @@ const haceDias = (dias: number) => new Date(AHORA_REAL - dias * 86_400_000).toIS
 const enDias = (dias: number) => new Date(AHORA_REAL + dias * 86_400_000).toISOString();
 const DESDE = haceDias(30);
 const HASTA = enDias(1);
-/** Hora de una cita sembrada: ayer, para que sea actividad pasada realista. */
-const horaDeCita = (horasDesplazadas: number) => new Date(AHORA_REAL - 86_400_000 + horasDesplazadas * 3_600_000).toISOString();
+/**
+ * Hora de una cita sembrada: **ayer, a una hora de pared fija**.
+ *
+ * ## ESTO ERA UNA PRUEBA DEPENDIENTE DEL RELOJ (corregido 2026-10-21)
+ *
+ * La versión anterior calculaba `AHORA_REAL - 24 h + N h`, es decir *"ayer a esta misma hora, más
+ * N"*. El resultado dependía de **a qué hora se corriera la suite**: ejecutándola a las 19:00,
+ * `horaDeCita(4)` caía a las 23:00 y la cita de 60 minutos cruzaba la medianoche → `CITA_CRUZA_DIAS`
+ * (`409`). La suite pasaba toda la mañana y fallaba por la noche, sin que nada hubiera cambiado en
+ * el código.
+ *
+ * Ahora el desplazamiento se interpreta como **la hora de pared de Querétaro**: `horaDeCita(16)`
+ * son las 16:00 de ayer, pase lo que pase. Es además lo que las pruebas querían decir — los
+ * llamantes ya pasaban `'16'` y `'18'` como si fueran horas del día.
+ */
+const AYER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Mexico_City',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date(AHORA_REAL - 86_400_000));
+const horaDeCita = (horaDePared: number) =>
+  new Date(`${AYER}T${String(horaDePared).padStart(2, '0')}:00:00-06:00`).toISOString();
 
 let dbDePrueba: Database;
 
@@ -368,7 +389,7 @@ describe('Analítica — resumen ejecutivo E2E (Fase 6)', () => {
         .set('Authorization', `Bearer ${encargada}`)
         // Otra hora: la misma clienta a la misma hora en dos sucursales choca consigo misma, y el
         // sujeto de esta prueba es el filtro, no esa validación.
-        .send({ sucursalId: otraSucursalId, servicioId: servicio.id, clientaId: clienta.id, inicio: horaDeCita(4) })
+        .send({ sucursalId: otraSucursalId, servicioId: servicio.id, clientaId: clienta.id, inicio: horaDeCita(11) })
         .expect(201);
 
       expect((await resumen()).citas.total).toBe(2);

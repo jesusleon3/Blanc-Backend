@@ -81,6 +81,11 @@ export function CatalogoAdmin() {
           Los <strong>precios siguen siendo provisionales</strong>: hay que confirmarlos antes de cobrar. Los tiempos ya están
           confirmados.
         </p>
+        <p className="mt-1">
+          <strong>Renombrar un servicio es seguro.</strong> Las filas oficiales llevan un código fijo (la columna «Código»), y el
+          bot las reconoce por ese código y no por el nombre: puedes llamarlas como mejor las entienda la clienta. El código no se
+          puede editar, y es justamente eso lo que lo hace seguro.
+        </p>
       </div>
 
       <section className="rounded-lg border border-borde bg-fondo-elevado p-4">
@@ -126,6 +131,7 @@ export function CatalogoAdmin() {
             <thead>
               <tr className="border-b border-borde text-left text-xs uppercase tracking-wide text-texto-terciario">
                 <th className="px-4 py-2.5 font-medium">Servicio</th>
+                <th className="px-4 py-2.5 font-medium">Código</th>
                 <th className="px-4 py-2.5 font-medium">Categoría</th>
                 <th className="px-4 py-2.5 font-medium">Duración</th>
                 <th className="px-4 py-2.5 font-medium">Precio</th>
@@ -138,6 +144,17 @@ export function CatalogoAdmin() {
                 <Fragment key={servicio.id}>
                   <tr className={servicio.activo ? '' : 'opacity-60'}>
                     <td className="px-4 py-3 font-medium text-texto">{servicio.nombre}</td>
+                    <td className="px-4 py-3">
+                      {/* El código es **solo lectura** y se muestra para que se vea qué filas son
+                          oficiales. El bot resuelve por él, así que el nombre de una fila con código
+                          se puede cambiar sin miedo — que es justo lo contrario de lo que pasaba
+                          antes de que existiera. */}
+                      {servicio.codigo ? (
+                        <span className="font-mono text-[11px] text-texto-terciario">{servicio.codigo}</span>
+                      ) : (
+                        <span className="text-[11px] text-texto-terciario">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-texto-secundario">{servicio.categoria}</td>
                     <td className="px-4 py-3 text-texto">{servicio.duracionBaseMinutos} min</td>
                     <td className="px-4 py-3 text-texto">
@@ -176,7 +193,7 @@ export function CatalogoAdmin() {
                   </tr>
                   {editando === servicio.id ? (
                     <tr>
-                      <td colSpan={6} className="bg-fondo-apagado px-4 py-4">
+                      <td colSpan={7} className="bg-fondo-apagado px-4 py-4">
                         <FormularioDeServicio
                           servicio={servicio}
                           categorias={categorias.data?.categorias ?? []}
@@ -287,6 +304,12 @@ export function FormularioDeServicio({
   return (
     <div>
       <p className="text-sm font-semibold text-texto">{esEdicion ? `Editar ${servicio.nombre}` : 'Nuevo servicio'}</p>
+      {esEdicion && servicio.codigo ? (
+        <p className="mt-1 text-[11px] text-texto-terciario">
+          Fila oficial <span className="font-mono">{servicio.codigo}</span>. El código no se edita: es lo que permite que
+          cambiarle el nombre y el precio no afecte al bot.
+        </p>
+      ) : null}
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>

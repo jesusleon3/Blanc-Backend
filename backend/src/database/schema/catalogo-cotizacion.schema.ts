@@ -15,7 +15,7 @@
  *
  * Dinero: todos los importes son enteros en centavos (`RN-COT-07`), nunca decimales ni flotantes.
  */
-import { boolean, integer, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, integer, pgSchema, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const catalogoCotizacionSchema = pgSchema('catalogo_cotizacion');
@@ -24,6 +24,24 @@ export const catalogoCotizacionSchema = pgSchema('catalogo_cotizacion');
 export const servicios = catalogoCotizacionSchema.table('servicios', {
   id: uuid('id').primaryKey().defaultRandom(),
   nombre: text('nombre').notNull(),
+  /**
+   * Clave **estable e inmutable** de las filas del catálogo oficial (`codigos-de-servicio.ts`).
+   *
+   * ## POR QUÉ EXISTE, Y POR QUÉ ES NULABLE
+   *
+   * El resolutor del bot encontraba la fila **por su nombre**, y la Dueña puede renombrar cualquier
+   * servicio desde `/admin`. Renombrar *"Rubber + gel"* dejaba al bot sin poder agendarlo: escalaba
+   * en vez de agendar y nadie entendía por qué, porque la pantalla seguía mostrando el servicio.
+   *
+   * **Nulable a propósito.** Tener código significa *"esta fila es parte de la matriz oficial y el
+   * bot sabe resolverla"*. Un servicio que la Dueña invente desde el Backoffice no está en la
+   * matriz, así que el bot no puede resolverlo de todas formas: darle un código generado afirmaría
+   * algo falso.
+   *
+   * Lo impone un **índice único parcial** (`servicios_codigo_unico`, migración `0019`), escrito a
+   * mano porque Drizzle no sabe expresarlo y **no está en su snapshot**.
+   */
+  codigo: varchar('codigo', { length: 48 }),
   /** Incluye `retiro` como categoría propia (`RN-COT-02`), no como variante de una aplicación. */
   categoria: text('categoria').notNull(),
   duracionBaseMinutos: integer('duracion_base_minutos').notNull(),
