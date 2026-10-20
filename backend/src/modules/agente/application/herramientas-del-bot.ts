@@ -2,6 +2,13 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Conversacion } from '../../conversaciones/domain/entities/conversacion.entity';
 import { CONVERSACION_REPOSITORY, ConversacionRepository } from '../../conversaciones/domain/ports/conversacion.repository';
 import { ObtenerServiciosUseCase } from '../../catalogo-y-cotizacion/application/use-cases/obtener-servicios.use-case';
+/**
+ * El tipo de la entidad del catálogo. Legítimo aquí y **no** una violación de `P5`:
+ * `modules/agente` es un **adaptador conductor**, no un Bounded Context — importa a los BC y
+ * ninguno lo importa a él, que es lo que mantiene `madge --circular` en 0. Es el mismo permiso por
+ * el que puede importar `ObtenerServiciosUseCase` cinco líneas arriba.
+ */
+import { Servicio } from '../../catalogo-y-cotizacion/domain/entities/servicio.entity';
 import { ConsultarDisponibilidadUseCase } from '../../agenda/application/use-cases/consultar-disponibilidad.use-case';
 import { AgendarCitaUseCase } from '../../agenda/application/use-cases/agendar-cita.use-case';
 import { ConfirmarCitaUseCase } from '../../agenda/application/use-cases/confirmar-cita.use-case';
@@ -15,6 +22,7 @@ import { CLIENTA_REPOSITORY, ClientaRepository } from '../../crm-y-clientas/doma
 import { ConsultarAnticiposUseCase } from '../../anticipos/application/use-cases/anticipos.use-cases';
 import { MotivoDeEscalamiento } from '../../../database/schema';
 import { Intencion } from '../domain/intencion';
+import { resolverCombinacion } from '../domain/resolutor-de-combinaciones';
 import { ClaimsUsuario, Rol } from '../../../shared/auth/rol';
 import { DomainError } from '../../../shared/errors/domain-error';
 import { ZONA_HORARIA_NEGOCIO } from '../../../shared/tiempo/zona-horaria-negocio';
@@ -165,15 +173,19 @@ export class HerramientasDelBot {
    * sucursal y, si la clienta está en lista roja, **la cita nace en `en_espera_pago` con su
    * anticipo del 40% generado** (`RN-ANT-01`). El bot no reimplementa nada de eso.
    */
-  async intentarAgendar(conversacion: Conversacion, intencion: Intencion): Promise<RespuestaDeHerramienta> {
+  async intentarAgendar(conversacion: Conversacion, intencion: Intencion, textoDeLaClienta = ''): Promise<RespuestaDeHerramienta> {
     const contexto = await this.contextoDe(conversacion);
     if (!contexto.clientaId) {
       // Sin identificar —o con dos clientas en el teléfono— no se agenda: ver `identificarClienta`.
       return { texto: '', escalar: 'solicitud_humana' };
     }
 
-    const servicio = await this.resolverServicio(intencion);
-    if (!servicio) return { texto: '', escalar: 'fuera_de_alcance' };
+    const servicio = await this.resolverServicio(textoDeLaClienta);
+    // `null` puede venir de dos sitios y los dos escalan, pero por motivos distintos: la matriz
+    // pidió escalar (diseño complejo) o no se reconoció nada. El primero lo resuelve
+    // `resolverServicio` devolviendo el motivo; aquí solo queda el segundo.
+    if (servicio === null) return { texto: '', escalar: 'fuera_de_alcance' };
+    if ('escalar' in servicio) return { texto: '', escalar: servicio.escalar };
     if (servicio.requiereCotizacionManual) {
       // `DEC-033`: el precio lo fija una persona, así que la cita también.
       return { texto: '', escalar: 'cotizacion_compleja' };
@@ -271,19 +283,62 @@ export class HerramientasDelBot {
   }
 
   /** Resuelve el servicio mencionado contra el catálogo real, por coincidencia de nombre. */
-  private async resolverServicio(intencion: Intencion) {
-    const mencionado = intencion.servicioMencionado?.toLowerCase().trim();
-    if (!mencionado) return null;
+  /**
+   * Qué servicio del catálogo corresponde a lo que pidió la clienta.
+   *
+   * ## SOLO LA MATRIZ. SE QUITÓ EL RESPALDO POR NOMBRE, Y ESO ES UNA CORRECCIÓN
+   *
+   * Hasta esta entrega había un segundo camino: buscar en el catálogo un servicio cuyo nombre
+   * contuviera la palabra que la clienta dijo. Con el catálogo oficial, **ese camino es el
+   * peligroso**, y una prueba lo demostró: *"extensiones con rubber"* es una combinación que la
+   * matriz **no junta** —y por tanto cuya duración nadie conoce—, pero la palabra `extensiones`
+   * aparece dentro de `Retiro de acrílico o rubber + extensiones o baño de acrílico`. El respaldo
+   * encontraba **una** coincidencia y agendaba **tres horas** para una clienta que había pedido
+   * dos servicios de una.
+   *
+   * Que en el catálogo completo haya cinco filas con la palabra `extensiones` —y que por tanto el
+   * respaldo devolviera `null` por ambigüedad— no es una protección: es una casualidad del número
+   * de filas. Dar de baja tres de ellas la haría desaparecer.
+   *
+   * Así que si la matriz no reconoce la combinación, **el turno escala**. Una persona pregunta y
+   * decide, que es lo que `RN-COT-01` exige cuando no hay fila: *"la duración de un compuesto sale
+   * de una tabla de combinaciones específicas y nunca de sumar las partes"* — y tampoco de parecerse
+   * al nombre de otra.
+   *
+   * **La matriz devuelve un nombre, no una duración.** La duración sale de la fila del catálogo en
+   * PostgreSQL, editable desde el Backoffice sin tocar código: si la Dueña decide que las
+   * extensiones pasan a 150 minutos, el bot lo respeta sin desplegar nada.
+   */
+  private async resolverServicio(textoDeLaClienta: string): Promise<Servicio | { escalar: 'cotizacion_compleja' } | null> {
+    const deLaMatriz = resolverCombinacion(textoDeLaClienta);
+    if (deLaMatriz === null) return null;
+    if ('escalar' in deLaMatriz) return deLaMatriz;
 
     const activos = (await this.servicios.ejecutar()).filter((servicio) => servicio.activo);
-    // Coincidencia por inclusión en los dos sentidos: la clienta dice "gelish" y el catálogo
-    // "Gelish manos", o al revés. Si hay más de una coincidencia no se elige — eso sería adivinar.
-    const coincidencias = activos.filter(
-      (servicio) =>
-        servicio.nombre.toLowerCase().includes(mencionado) || mencionado.includes(servicio.nombre.toLowerCase()),
-    );
+    const fila = activos.find((servicio) => servicio.nombre === deLaMatriz.servicio);
 
-    return coincidencias.length === 1 ? coincidencias[0] : null;
+    if (!fila) {
+      /**
+       * La matriz nombró una fila que el catálogo no ofrece: alguien la dio de baja, o la renombró
+       * desde el Backoffice.
+       *
+       * Se escala en vez de buscar la más parecida, y se **avisa en el log** porque es un desajuste
+       * de configuración que nadie vería de otra forma: la clienta recibiría un escalamiento
+       * correcto y el bot parecería simplemente torpe. El aviso dice qué fila falta.
+       *
+       * ⚠️ El vínculo entre la matriz y el catálogo es **por nombre**, y los nombres se editan desde
+       * `/admin`. Renombrar una fila oficial deja al bot sin poder resolver esa combinación.
+       * Resolverlo de raíz pediría una clave estable en `servicios`, que hoy no existe; mientras no
+       * exista, este aviso es lo que lo hace diagnosticable.
+       */
+      this.logger.warn(
+        `La matriz de combinaciones resolvió a «${deLaMatriz.servicio}», que no está activo en el catálogo. ` +
+          'El turno escala. Revisa si la fila se dio de baja o se renombró desde el Backoffice.',
+      );
+      return null;
+    }
+
+    return fila;
   }
 
   /** Rango a partir de la fecha y hora que el modelo extrajo. `null` si no hay suficiente. */

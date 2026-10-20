@@ -127,6 +127,13 @@
       "when": 1792278074130,
       "tag": "0017_garantia_reprogramable",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792456298543,
+      "tag": "0018_garantia_tras_cancelacion",
+      "breakpoints": true
     }
   ]
 }

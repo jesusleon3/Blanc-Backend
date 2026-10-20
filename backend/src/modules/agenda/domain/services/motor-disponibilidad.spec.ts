@@ -31,6 +31,9 @@ const LUNES_8_9 = { inicio: local('2027-03-08T08:00:00'), fin: local('2027-03-08
 const LUNES_17_19 = { inicio: local('2027-03-08T17:00:00'), fin: local('2027-03-08T19:00:00') };
 const LUNES_16_17 = { inicio: local('2027-03-08T16:00:00'), fin: local('2027-03-08T17:00:00') };
 const DOMINGO_10_11 = { inicio: local('2027-03-14T10:00:00'), fin: local('2027-03-14T11:00:00') };
+/** El bloque de TRES horas del catálogo oficial, encajado exacto en la mañana y desplazado una hora. */
+const LUNES_9_12 = { inicio: local('2027-03-08T09:00:00'), fin: local('2027-03-08T12:00:00') };
+const LUNES_10_13 = { inicio: local('2027-03-08T10:00:00'), fin: local('2027-03-08T13:00:00') };
 
 async function preparar(opciones: { sillas?: number; manicuristas?: string[] } = {}) {
   const db = await crearBaseDeDatosDePrueba();
@@ -80,7 +83,7 @@ async function preparar(opciones: { sillas?: number; manicuristas?: string[] } =
  * El `servicioId` se elige según el tamaño del rango que la prueba quiere ocupar: el fin lo deriva
  * el catálogo, así que pedir dos horas exige un servicio de dos horas.
  */
-const CATALOGO = crearCatalogoPorDuraciones([30, 60, 120]);
+const CATALOGO = crearCatalogoPorDuraciones([30, 60, 120, 180]);
 
 const reserva = (rangoHorario = LUNES_10_11, extra = {}) => ({
   sucursalId: SUCURSAL,
@@ -122,6 +125,60 @@ describe('MotorDisponibilidad — RN-AGE-10 y RN-AGE-12 (horario de sucursal)', 
   it('ACEPTA el bloque de la tarde (16:00–17:00)', async () => {
     const { agendar } = await preparar();
     await expect(agendar.ejecutar(reserva(LUNES_16_17), ACTOR)).resolves.toBeDefined();
+  });
+
+  describe('el bloque de TRES HORAS del catálogo oficial de la Dueña', () => {
+    /**
+     * ## POR QUÉ ESTAS DOS PRUEBAS SON LA VALIDACIÓN DE LA TABLA ENTERA
+     *
+     * La matriz de la Dueña tiene renglones de 180 minutos (retiro de acrílico + extensiones, con o
+     * sin manicure). El horario de la sucursal son bloques de **exactamente tres horas**
+     * (09:00–12:00 y 15:00–18:00), así que esas combinaciones **solo caben empezando en el primer
+     * minuto de un bloque**. No es una casualidad de la tabla: es lo que la hace operable.
+     *
+     * La consecuencia práctica, que conviene que esté escrita en alguna parte: **una cita de tres
+     * horas se agenda a las 9:00 o a las 15:00, y a ninguna otra hora.** Quien atienda el mostrador
+     * va a ver `FUERA_DEL_HORARIO_DE_SUCURSAL` cada vez que lo intente a las 10:00, y eso es
+     * correcto — no es un hueco que el sistema se niegue a vender, es un hueco que no existe.
+     */
+    it('CABE EXACTO en la mañana empezando a las 9:00', async () => {
+      const { agendar } = await preparar();
+
+      // 09:00 → 12:00 llena el bloque matutino al minuto. El rango es `[inicio, fin)`, así que
+      // terminar en el instante del corte no lo invade.
+      await expect(agendar.ejecutar(reserva(LUNES_9_12), ACTOR)).resolves.toBeDefined();
+    });
+
+    it('SE RECHAZA empezando a las 10:00: cruzaría el corte de las 12:00 (`RN-AGE-10`)', async () => {
+      const { agendar } = await preparar();
+
+      // Una sola hora de desplazamiento la saca del bloque. No hay forma de "medio caber".
+      await expect(agendar.ejecutar(reserva(LUNES_10_13), ACTOR)).rejects.toMatchObject({
+        code: 'FUERA_DEL_HORARIO_DE_SUCURSAL',
+      });
+    });
+
+    it('CABE EXACTO en la tarde empezando a las 15:00', async () => {
+      const { agendar } = await preparar();
+      const tarde = { inicio: local('2027-03-08T15:00:00'), fin: local('2027-03-08T18:00:00') };
+
+      await expect(agendar.ejecutar(reserva(tarde), ACTOR)).resolves.toBeDefined();
+    });
+
+    it('el SÁBADO cabe a las 9:00 y también a las 12:00: su bloque es de 09:00 a 15:00', async () => {
+      /**
+       * El sábado es un bloque único de seis horas, así que ahí sí hay más de una hora de inicio
+       * posible para una cita de tres. Lo contrario —que el sábado se comportara como un día de
+       * semana— sería perder media jornada de capacidad en el día más cargado.
+       */
+      const { agendar } = await preparar();
+      // 2027-03-13 es sábado.
+      const sabadoTemprano = { inicio: local('2027-03-13T09:00:00'), fin: local('2027-03-13T12:00:00') };
+      const sabadoMediodia = { inicio: local('2027-03-13T12:00:00'), fin: local('2027-03-13T15:00:00') };
+
+      await expect(agendar.ejecutar(reserva(sabadoTemprano), ACTOR)).resolves.toBeDefined();
+      await expect(agendar.ejecutar(reserva(sabadoMediodia), ACTOR)).resolves.toBeDefined();
+    });
   });
 });
 

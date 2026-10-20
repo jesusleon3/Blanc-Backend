@@ -183,7 +183,16 @@ export class OrquestadorDeBotUseCase implements OrquestadorDeBotPort {
       }
 
       case 'agendar': {
-        const respuesta = await this.herramientas.intentarAgendar(turno.conversacion, intencion);
+        /**
+         * **El texto literal de la clienta viaja a la herramienta**, y no es un atajo.
+         *
+         * La matriz oficial de la Dueña se consulta sobre lo que ella escribió, no sobre lo que el
+         * modelo entendió. Es la frontera de `RN-CONV-01` llevada a su conclusión: el LLM dice
+         * *"quiere agendar"* y **nada más**; qué servicio y de cuántos minutos lo decide una
+         * función determinista del backend contra una tabla, y la duración la decide la fila del
+         * catálogo. El modelo no tiene dónde escribir una duración aunque quisiera.
+         */
+        const respuesta = await this.herramientas.intentarAgendar(turno.conversacion, intencion, turno.texto ?? '');
         if (respuesta.escalar) {
           // Si la herramienta trajo texto, es información que la clienta necesita (p. ej. el monto
           // del anticipo de lista roja). No se audita el texto: `RN-AUD-01`.

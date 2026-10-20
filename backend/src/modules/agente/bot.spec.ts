@@ -99,16 +99,37 @@ async function preparar(opciones: { interprete?: AgenteConversacionalPort; silla
   }
   await conversacionRepo.registrarNumeroDeSucursal({ phoneNumberId: NUMERO, sucursalId: SUCURSAL, telefonoVisible: '4420000001' });
 
-  // Catálogo real: estos son los precios que el bot tendrá que repetir, y los únicos.
-  const gelish = Servicio.crear({ nombre: 'Gelish manos', categoria: 'manos', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
+  /**
+   * Catálogo con los **nombres oficiales de la Dueña**, no con nombres de conveniencia.
+   *
+   * Importa desde que existe `resolutor-de-combinaciones.ts`: la matriz resuelve a un nombre
+   * exacto del catálogo, así que un fixture con nombres inventados probaría un mundo que no
+   * existe. `Rubber + gel + manicure` está aquí porque es **el caso que la matriz añade**: tres
+   * servicios pedidos a la vez son UNA cita de una hora, no tres ni tres horas.
+   */
+  const gel = Servicio.crear({ nombre: 'Gel', categoria: 'Servicios individuales', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
+  const combinado = Servicio.crear({
+    nombre: 'Rubber + gel + manicure',
+    categoria: 'Servicios individuales',
+    duracionBaseMinutos: 60,
+    precioBaseCentavos: 55000,
+  });
+  const tresHoras = Servicio.crear({
+    nombre: 'Retiro de acrílico o rubber + extensiones o baño de acrílico',
+    categoria: 'Combinaciones con retiro',
+    duracionBaseMinutos: 180,
+    precioBaseCentavos: 110000,
+  });
   const diseno = Servicio.crear({
-    nombre: 'Diseño artístico',
-    categoria: 'manos',
-    duracionBaseMinutos: 90,
+    nombre: 'Diseño especial',
+    categoria: 'Diseños y efectos',
+    duracionBaseMinutos: 60,
     precioBaseCentavos: 80000,
     requiereCotizacionManual: true,
   });
-  await servicioRepo.guardar(gelish);
+  await servicioRepo.guardar(gel);
+  await servicioRepo.guardar(combinado);
+  await servicioRepo.guardar(tresHoras);
   await servicioRepo.guardar(diseno);
 
   const motor = new MotorDisponibilidad(citaRepo, sillaRepo, crearContextoPersonalFalso({ horario: horarioAbiertoSiempre() }));
@@ -201,7 +222,7 @@ async function preparar(opciones: { interprete?: AgenteConversacionalPort; silla
     conversacionRepo,
     citaRepo,
     listaEsperaRepo,
-    servicios: { gelish, diseno },
+    servicios: { gel, combinado, tresHoras, diseno },
     herramientas,
     orquestador,
     presupuesto,
@@ -268,7 +289,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
     });
 
     it('un mensaje normal NO dispara el filtro', () => {
-      expect(detectarEscalamientoPorTexto('hola, quiero agendar gelish')).toBeNull();
+      expect(detectarEscalamientoPorTexto('hola, quiero agendar gel')).toBeNull();
     });
 
     it('el catálogo de frases cubre las tres categorías que `DEC-040` obliga a escalar', () => {
@@ -313,7 +334,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       const texto = ultimoTextoEnviado();
       // $450.00 es `precioBaseCentavos: 45000` del catálogo sembrado arriba. Si el bot
       // improvisara, este número no coincidiría.
-      expect(texto).toContain('Gelish manos');
+      expect(texto).toContain('Gel');
       expect(texto).toContain('$450.00');
       expect(texto).toContain('60 min');
     });
@@ -326,8 +347,8 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
 
       await entra('que precios tienen?');
 
-      expect(ultimoTextoEnviado()).toContain('Diseño artístico');
-      expect(ultimoTextoEnviado()).toMatch(/Diseño artístico: desde \$800\.00 \(precio exacto a confirmar/);
+      expect(ultimoTextoEnviado()).toContain('Diseño especial');
+      expect(ultimoTextoEnviado()).toMatch(/Diseño especial: desde \$800\.00 \(precio exacto a confirmar/);
     });
 
     it('con la única silla OCUPADA responde que no hay lugar', async () => {
@@ -337,7 +358,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       // Se ocupa la única silla a las 11:00 locales con una cita real.
       const otra = await crearClienta('Beatriz', '4429998877');
       await agendar.ejecutar(
-        { sucursalId: SUCURSAL, servicioId: servicios.gelish.id, clientaId: otra.id, inicio: new Date(`${FECHA}T11:00:00-06:00`) },
+        { sucursalId: SUCURSAL, servicioId: servicios.gel.id, clientaId: otra.id, inicio: new Date(`${FECHA}T11:00:00-06:00`) },
         SISTEMA,
       );
 
@@ -364,7 +385,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       const { entra, crearClienta, citaRepo, ultimoTextoEnviado, servicios } = await preparar();
       const ana = await crearClienta('Ana');
 
-      const resultado = await entra(`quiero cita de gelish el ${FECHA} a las 13:00`);
+      const resultado = await entra(`quiero cita de gel el ${FECHA} a las 13:00`);
 
       expect(resultado.atendidaPorElBot).toBe(true);
       expect(resultado.escalada).toBe(false);
@@ -377,13 +398,13 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       const suya = citas.find((cita) => cita.clientaId === ana.id);
 
       expect(suya).toBeDefined();
-      expect(suya!.servicioId).toBe(servicios.gelish.id);
+      expect(suya!.servicioId).toBe(servicios.gel.id);
       // La hora de pared, no UTC: interpretarla como UTC desplazaría la cita seis horas, que es el
       // error silencioso más probable de todo el módulo.
       expect(suya!.rangoHorario.inicio.toISOString()).toBe('2027-03-08T19:00:00.000Z');
       // La duración la deriva el Catálogo (60 min), no el modelo.
       expect(suya!.rangoHorario.fin.toISOString()).toBe('2027-03-08T20:00:00.000Z');
-      expect(ultimoTextoEnviado()).toContain('Gelish manos');
+      expect(ultimoTextoEnviado()).toContain('Gel');
     });
 
     it('NO AGENDA si no puede identificar a la clienta: escala', async () => {
@@ -391,7 +412,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       // duplicados cuyo historial de incidentes quedaría partido.
       const { entra, conversacion, citaRepo } = await preparar();
 
-      await entra(`quiero cita de gelish el ${FECHA} a las 13:00`);
+      await entra(`quiero cita de gel el ${FECHA} a las 13:00`);
 
       expect((await conversacion()).modo).toBe('humano');
       const citas = await citaRepo.listarParaConsulta(
@@ -409,7 +430,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       await crearClienta('Mamá', TELEFONO);
       await crearClienta('Hija', TELEFONO);
 
-      await entra(`quiero cita de gelish el ${FECHA} a las 13:00`);
+      await entra(`quiero cita de gel el ${FECHA} a las 13:00`);
 
       expect((await conversacion()).modo).toBe('humano');
       const citas = await citaRepo.listarParaConsulta(
@@ -418,6 +439,127 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
         { limite: 50, desplazamiento: 0 },
       );
       expect(citas).toHaveLength(0);
+    });
+
+    describe('LA MATRIZ OFICIAL DE LA DUEÑA: los tiempos se absorben, no se suman', () => {
+      /**
+       * ## QUÉ SE ESTÁ PROBANDO AQUÍ, DE PUNTA A PUNTA
+       *
+       * Que una clienta pida tres servicios en una frase y acabe con **una** cita de **una hora** en
+       * `agenda.citas`. Antes de la matriz, *"rubber con gel y manicure"* resolvía —si resolvía— a
+       * una sola de las tres palabras, y la cita quedaba con el precio y la duración de ese trozo.
+       *
+       * Y el caso de tres horas es el que cuesta dinero si falla: `Extensiones` son 120 minutos y
+       * la combinación con retiro de acrílico son 180. Mapear mal mete la cita **encima de la
+       * siguiente**, y eso se descubre con dos clientas en la puerta.
+       */
+      it('TRES servicios en una frase son UNA cita de UNA hora', async () => {
+        const { entra, crearClienta, citaRepo, servicios, ultimoTextoEnviado } = await preparar();
+        await crearClienta('Ana');
+
+        const resultado = await entra(`quiero rubber con gel y manicure el ${FECHA} a las 13:00`);
+
+        expect(resultado.atendidaPorElBot).toBe(true);
+        expect(resultado.escalada).toBe(false);
+
+        const citas = await citaRepo.listarParaConsulta(
+          SUCURSAL,
+          { inicio: new Date(`${FECHA}T00:00:00-06:00`), fin: new Date(`${FECHA}T23:59:00-06:00`) },
+          { limite: 50, desplazamiento: 0 },
+        );
+        expect(citas).toHaveLength(1);
+        expect(citas[0]!.servicioId).toBe(servicios.combinado.id);
+        // UNA hora: 13:00 a 14:00. Ni tres citas, ni tres horas.
+        expect(citas[0]!.rangoHorario.inicio.toISOString()).toBe(new Date(`${FECHA}T13:00:00-06:00`).toISOString());
+        expect(citas[0]!.rangoHorario.fin.toISOString()).toBe(new Date(`${FECHA}T14:00:00-06:00`).toISOString());
+        expect(ultimoTextoEnviado()).toContain('Rubber + gel + manicure');
+      });
+
+      it('retiro de acrílico con baño de acrílico es el bloque de TRES horas', async () => {
+        const { entra, crearClienta, citaRepo, servicios } = await preparar();
+        await crearClienta('Ana');
+
+        // La sucursal de prueba abre siempre, así que el bloque de 3 h cabe a las 13:00.
+        await entra(`quiero retiro de acrilico y baño de acrilico el ${FECHA} a las 13:00`);
+
+        const citas = await citaRepo.listarParaConsulta(
+          SUCURSAL,
+          { inicio: new Date(`${FECHA}T00:00:00-06:00`), fin: new Date(`${FECHA}T23:59:00-06:00`) },
+          { limite: 50, desplazamiento: 0 },
+        );
+        expect(citas).toHaveLength(1);
+        expect(citas[0]!.servicioId).toBe(servicios.tresHoras.id);
+        expect(citas[0]!.rangoHorario.fin.toISOString()).toBe(new Date(`${FECHA}T16:00:00-06:00`).toISOString());
+      });
+
+      it('NO INVENTA una combinación que la tabla no junta: escala', async () => {
+        /**
+         * *"Extensiones con rubber"* son dos servicios que existen por separado y que la matriz
+         * **no junta**. Devolver el bloque de extensiones (120) o la suma (180) serían dos
+         * invenciones distintas, y una de las dos mete la cita encima de otra.
+         */
+        const { entra, crearClienta, conversacion, citaRepo } = await preparar();
+        await crearClienta('Ana');
+
+        await entra(`quiero extensiones con rubber el ${FECHA} a las 13:00`);
+
+        expect((await conversacion()).modo).toBe('humano');
+        const citas = await citaRepo.listarParaConsulta(
+          SUCURSAL,
+          { inicio: new Date(`${FECHA}T00:00:00-06:00`), fin: new Date(`${FECHA}T23:59:00-06:00`) },
+          { limite: 50, desplazamiento: 0 },
+        );
+        expect(citas).toHaveLength(0);
+      });
+    });
+
+    describe('LOS TRES DISEÑOS ESTÁNDAR vs. un diseño complejo (`DEC-033`)', () => {
+      it.each(['frances', 'puntos', 'ojo de gato'])('«gel con %s» el bot SÍ lo agenda', async (diseno) => {
+        /**
+         * Los tres diseños que la Dueña autorizó caben en la hora del servicio base, así que su
+         * precio y su duración están en una fila del catálogo y **no hace falta que nadie cotice**.
+         *
+         * El fixture de este archivo no tiene la fila `Gel + diseño estándar`, así que la matriz
+         * resuelve a un nombre que el catálogo no ofrece y el turno escala. Lo que esta prueba fija
+         * es **el motivo**: escala por falta de fila, NO por `cotizacion_compleja` — es decir, el
+         * bot reconoció el diseño como estándar en vez de tratarlo como complejo.
+         */
+        const { entra, crearClienta, conversacion } = await preparar();
+        await crearClienta('Ana');
+
+        await entra(`quiero gel con ${diseno} el ${FECHA} a las 13:00`);
+
+        expect((await conversacion()).motivoDeEscalamiento).not.toBe('cotizacion_compleja');
+      });
+
+      it.each([
+        'quiero gel con un diseño de mano alzada',
+        'quiero uñas con figuras en 3d',
+        'vi un diseño en instagram que quiero',
+        'quiero gel con encapsulado',
+      ])('«%s» escala con `cotizacion_compleja` SIN agendar', async (mensaje) => {
+        const { entra, crearClienta, conversacion, citaRepo } = await preparar();
+        await crearClienta('Ana');
+
+        await entra(`${mensaje} el ${FECHA} a las 13:00`);
+
+        expect((await conversacion()).motivoDeEscalamiento).toBe('cotizacion_compleja');
+        const citas = await citaRepo.listarParaConsulta(
+          SUCURSAL,
+          { inicio: new Date(`${FECHA}T00:00:00-06:00`), fin: new Date(`${FECHA}T23:59:00-06:00`) },
+          { limite: 50, desplazamiento: 0 },
+        );
+        expect(citas).toHaveLength(0);
+      });
+
+      it('pedir «diseño» sin decir cuál también escala: no se adivina entre una hora y tres', async () => {
+        const { entra, crearClienta, conversacion } = await preparar();
+        await crearClienta('Ana');
+
+        await entra(`quiero gel con diseño el ${FECHA} a las 13:00`);
+
+        expect((await conversacion()).motivoDeEscalamiento).toBe('cotizacion_compleja');
+      });
     });
 
     it('un servicio de COTIZACIÓN MANUAL no se agenda: escala con `cotizacion_compleja`', async () => {
@@ -436,7 +578,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       const { entra, crearClienta, conversacion, ultimoTextoEnviado } = await preparar();
       await crearClienta('Ana', TELEFONO, 'lista_roja');
 
-      await entra(`quiero cita de gelish el ${FECHA} a las 13:00`);
+      await entra(`quiero cita de gel el ${FECHA} a las 13:00`);
 
       // 40% de $450.00 = $180.00, calculado por Anticipos, no por el bot.
       expect(ultimoTextoEnviado()).toContain('$180.00');
@@ -449,11 +591,11 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       const otra = await crearClienta('Beatriz', '4429998877');
 
       await agendar.ejecutar(
-        { sucursalId: SUCURSAL, servicioId: servicios.gelish.id, clientaId: otra.id, inicio: new Date(`${FECHA}T13:00:00-06:00`) },
+        { sucursalId: SUCURSAL, servicioId: servicios.gel.id, clientaId: otra.id, inicio: new Date(`${FECHA}T13:00:00-06:00`) },
         SISTEMA,
       );
 
-      await entra(`quiero cita de gelish el ${FECHA} a las 13:00`);
+      await entra(`quiero cita de gel el ${FECHA} a las 13:00`);
 
       expect(ultimoTextoEnviado()).toContain('lista de espera');
       const fila = await listaEsperaRepo.listarFila(SUCURSAL, FECHA);
@@ -514,7 +656,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
       const ana = await crearClienta('Ana');
 
       const cita = await agendar.ejecutar(
-        { sucursalId: SUCURSAL, servicioId: servicios.gelish.id, clientaId: ana.id, inicio: new Date(`${FECHA}T15:00:00-06:00`) },
+        { sucursalId: SUCURSAL, servicioId: servicios.gel.id, clientaId: ana.id, inicio: new Date(`${FECHA}T15:00:00-06:00`) },
         SISTEMA,
       );
       // Por la vía real: es el caso de uso que invoca el barrido de recordatorios (`ADR-025`).
@@ -546,7 +688,7 @@ describe('Agente Conversacional (Bot IA) — integración con PostgreSQL real', 
 
       // Se inscribe y se le ofrece un hueco, como haría el barrido tras una cancelación.
       const solicitud = await inscribirEnFila.ejecutar(
-        { sucursalId: SUCURSAL, clientaId: ana.id, servicioId: servicios.gelish.id, fecha: FECHA },
+        { sucursalId: SUCURSAL, clientaId: ana.id, servicioId: servicios.gel.id, fecha: FECHA },
         SISTEMA,
       );
 
@@ -663,7 +805,7 @@ describe('Cortacircuitos de gasto de IA (`F-07`)', () => {
     // El modelo NO se invocó: el presupuesto estaba agotado.
     expect(interprete.interpretar).not.toHaveBeenCalled();
     // Y la clienta SÍ recibió los precios del catálogo real: el determinista entiende esto.
-    expect(preparado.ultimoTextoEnviado()).toContain('Gelish manos');
+    expect(preparado.ultimoTextoEnviado()).toContain('Gel');
     expect((await preparado.conversacion()).modo).toBe('bot');
   });
 
@@ -843,7 +985,7 @@ describe('GATILLOS CRÍTICOS — palabras clave que escalan sin tocar el modelo'
   it('el bot NO INTENTA AGENDAR cuando hay un gatillo crítico', async () => {
     /**
      * Es la parte menos obvia y la más importante: un mensaje puede traer **las dos cosas**. Una
-     * clienta enfadada que además pide hora —*"quiero que me reembolsen y agendar gelish el…"*—
+     * clienta enfadada que además pide hora —*"quiero que me reembolsen y agendar gel el…"*—
      * no debe acabar con una cita creada y la queja sin atender.
      *
      * El filtro corre **antes** de toda la capa de herramientas, así que no hay forma de que la
@@ -852,7 +994,7 @@ describe('GATILLOS CRÍTICOS — palabras clave que escalan sin tocar el modelo'
     const { preparado } = await conInterpreteEspia();
     const manana = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
 
-    await preparado.entra(`quiero mi reembolso y tambien agendar gelish el ${manana} a las 13:00`);
+    await preparado.entra(`quiero mi reembolso y tambien agendar gel el ${manana} a las 13:00`);
 
     const citas = await preparado.citaRepo.listarParaConsulta(
       SUCURSAL,

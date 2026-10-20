@@ -25,10 +25,10 @@
 | Consumidores | IA, Backend, Recepción, QA |
 | Dependencias | Depende de: RN-COT-02, RN-COT-03. Es dependencia de: RN-AGE-08 |
 | Fuente | Sesión 02 de Domain Discovery, reglas Q1/Q2/Q3; `mockup/js/data.js` (`tablaDuracionRetiro`, `tablaDuracionAplicacion`) |
-| Estado | Aprobada — estructura firme, tablas incompletas |
-| Versión | 1 |
-| Fecha de aprobación | 2026-07-12 |
-| Notas | Las tablas se transcribieron textualmente de lo aportado por la dueña, sin completar los huecos que ella misma dejó sin especificar. |
+| Estado | **Aprobada e implementada** — tabla completa recibida el 2026-10-19 |
+| Versión | 2 |
+| Fecha de aprobación | 2026-07-12 (estructura); 2026-10-19 (tabla completa) |
+| Notas | **La tabla ya no está incompleta (2026-10-19).** La Dueña entregó la matriz oficial de tiempos: 20 combinaciones en 5 categorías, todas en bloques de **60, 120 o 180 minutos**. Vive en `backend/src/database/seed/catalogo-de-blanc.ts` como filas de catálogo y en `backend/src/modules/agente/domain/resolutor-de-combinaciones.ts` como el mapa de lo que la clienta pide a la fila que le corresponde.<br><br>**Consecuencia de diseño:** `FL-COT-03` (el motor que sumaría duraciones) **ya no hace falta y no se va a construir**. Esta regla siempre dijo *"nunca la suma"*, y con la matriz real la duración es un **dato** de la fila —editable desde el Backoffice sin desplegar—, no un cálculo. Lo que antes era una carencia pasó a ser la arquitectura correcta.<br><br>La duración autoritativa es la columna `duracion_base_minutos` de `catalogo_cotizacion.servicios`, no el código: el mapa solo decide **qué fila** aplica. |
 
 ---
 
@@ -95,24 +95,24 @@
 | Rule ID | RN-COT-04 |
 | Nombre | Combinaciones de duración no listadas |
 | Objetivo | Completar el motor de duración con las combinaciones que las tablas originales no cubrían. |
-| Descripción | La Dueña aportó una tabla extensa con docenas de combinaciones de duración antes faltantes, más una regla nueva: el uso de drill en retiro de gel agrega 15 minutos. Persisten dos vacíos: (a) varias celdas específicas (ej. "Diseño Especial", "SP", "CF", "CC") siguen sin valor numérico o con valor cualitativo ("dentro de la hora dependiendo del diseño"); (b) **no está resuelto si "drill +15 min" reemplaza los valores fijos ya recibidos para combinaciones con drill, o si es un delta que se suma sobre ellos**. |
+| Descripción | **Resuelta el 2026-10-19.** La Dueña entregó la matriz definitiva, que resuelve los dos vacíos que quedaban: (a) el **método de retiro ya no cambia la duración** — el renglón oficial es *"Retiro de gel, acrílico o rubber (solo retiro, drill o acetona)"* → 60 minutos, así que la regla *"drill +15 min"* queda **superada por la tabla nueva**, no es un delta ni un reemplazo puntual: desapareció el caso; (b) *"Diseño Especial"* se modela como la **única fila de cotización manual** (`DEC-033`), que es lo que su valor cualitativo significaba. |
 | Categoría | Duración y Cotización |
 | Alcance | Global |
 | Disparador | La clienta solicita una combinación de retiro/aplicación. |
 | Precondiciones | La combinación no está cubierta por un valor exacto ya confirmado. |
 | Entradas requeridas | Tabla de combinaciones (parcialmente recibida), regla de modificador de drill. |
-| Lógica de negocio | **Parcial:** para combinaciones sin valor confirmado, usar el fallback aditivo ya definido (suma de tiempos individuales), marcado explícitamente como estimado — ver Notas sobre el detalle numérico pendiente. |
-| Resultado esperado | Cotización correcta para las combinaciones ya confirmadas; estimado marcado como tal para las que siguen sin valor. |
+| Lógica de negocio | Buscar la combinación en la matriz oficial. **Si no está, NO se estima: se escala a una persona.** El fallback aditivo que esta regla admitía quedó derogado — ver Notas. |
+| Resultado esperado | Cotización y duración exactas para las combinaciones de la matriz; escalamiento a una persona para cualquier otra. |
 | Ejemplos | `DISCOVERY_CHECKLIST.md` 1.9 (2026-08-04): *"retiro de gel con drill se agregan 15 minutos al usar el drill."* |
-| Excepciones | Celdas sin valor numérico (ver Descripción) — usar fallback aditivo marcado como estimado. |
+| Excepciones | Ninguna. Una combinación fuera de la matriz escala; no se aproxima. |
 | Prioridad | Critical |
 | Consumidores | IA, Backend, Recepción, QA |
 | Dependencias | Relacionada con: RN-COT-01 |
 | Fuente | Sesión 02 de Domain Discovery, pregunta abierta 5; `DISCOVERY_CHECKLIST.md` 1.9 |
-| Estado | Parcialmente aprobada — estructura y regla general recibidas, tabla detallada incompleta |
-| Versión | 1 |
-| Fecha de aprobación | N/A — pendiente de completar |
-| Notas | **Hallazgo de auditoría (2026-08-04), no resuelto en esta propagación:** el detalle numérico línea por línea de la tabla recibida **no está disponible en ninguna de las 4 fuentes autorizadas de este proceso** (`MASTER_PROPAGATION_PLAN.md`, `DISCOVERY_CHECKLIST.md`, `PLATFORM_ARCHITECTURE_MODEL.md`, `ADR-023`) — `DISCOVERY_CHECKLIST.md` solo resume que se recibió la tabla, sin reproducir los valores. Completar esta regla requiere recuperar el documento/imagen original de la reunión. La ambigüedad de "drill +15min" (delta vs. reemplazo) **requiere una decisión/aclaración explícita**, no se asume ninguna de las dos opciones aquí. |
+| Estado | **Aprobada** (2026-10-19) |
+| Versión | 2 |
+| Fecha de aprobación | 2026-10-19 |
+| Notas | **EL FALLBACK ADITIVO QUEDA DEROGADO, y es el cambio de fondo de esta versión.** La v1 admitía *"suma de tiempos individuales, marcada como estimada"* para lo que la tabla no cubriera. Con la matriz completa eso es justo lo que no se debe hacer: los tiempos de Blanc **se absorben** —*rubber + gel + manicure* es **una** hora, no tres— así que una suma no es un estimado conservador, es un error de hasta el triple que bloquea sillas vendibles. Y por abajo es peor: *retiro de acrílico + extensiones* son 180 minutos, y quedarse en los 120 de *extensiones* **mete la cita encima de la siguiente**.<br><br>Hoy una combinación fuera de la matriz **escala a una persona**. Lo impone `resolverCombinacion`, que devuelve `null` en vez de aproximar, y lo prueba *«NO INVENTA una combinación que la tabla no junta»*.<br><br>El detalle numérico que la v1 no tenía está ahora en `catalogo-de-blanc.ts`, versionado en el repositorio. |
 
 ---
 

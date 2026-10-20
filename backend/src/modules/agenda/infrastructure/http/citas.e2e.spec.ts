@@ -1569,6 +1569,120 @@ describe('Agenda — Citas E2E (HTTP) — Fase 2', () => {
       expect(garantia.cotizacionSnapshot.requiereCotizacionManual).toBe(false);
     });
 
+    describe('TENSIÓN 1 RESUELTA: qué pasa si la reposición no llega a hacerse', () => {
+      /**
+       * ## LA DECISIÓN DE NEGOCIO, Y POR QUÉ NO ES SIMÉTRICA
+       *
+       * La auditoría dejó esto abierto: *"¿una garantía cancelada deja la obligación en pie?"*. La
+       * Dueña resolvió que **sí**, y la distinción que eligió es por **quién falló**:
+       *
+       * - **`cancelada`** (y `expirada`): la reposición no se hizo, y la causa habitual es del
+       *   salón —una manicurista que falta, un cierre imprevisto—. La clienta **conserva su
+       *   derecho**: el trabajo sigue mal hecho y nadie se lo ha arreglado.
+       * - **`no_show`**: la clienta tenía su hueco y no vino. El salón apartó la silla, perdió la
+       *   hora y cumplió. No se le debe una segunda.
+       * - **`completada`**: ya se honró. Si el problema persiste, es un caso nuevo que revisa la
+       *   Dueña (`RN-GAR-04`), no una tercera reposición automática.
+       *
+       * Es una regla con dientes en los dos sentidos, y por eso se prueba en los dos.
+       */
+      /** Lleva la garantía al estado pedido y devuelve la cita original. */
+      const garantiaQueTermina = async (en: 'cancelar' | 'no-show' | 'completar') => {
+        const original = await citaCompletadaHace(1);
+        const { body: garantia } = await agendarGarantia(original.id).expect(201);
+
+        await request(app.getHttpServer())
+          .post(`${RUTA}/${garantia.id}/${en}`)
+          .set('Authorization', `Bearer ${encargada}`)
+          .send(en === 'cancelar' ? { motivo: 'La manicurista se reportó enferma' } : {})
+          .expect(200);
+
+        return original;
+      };
+
+      it('CANCELADA: la clienta conserva su derecho y se le puede agendar otra reposición', async () => {
+        const original = await garantiaQueTermina('cancelar');
+
+        const segunda = await agendarGarantia(original.id, { inicio: new Date(Date.now() + 3 * 86_400_000).toISOString() }).expect(201);
+
+        expect(segunda.body).toMatchObject({ esGarantia: true, citaGarantizadaId: original.id });
+        expect(segunda.body.cotizacionSnapshot.totalCentavos).toBe(0);
+      });
+
+      it('NO SHOW: la clienta tenía su hueco y no vino. No hay segunda', async () => {
+        const original = await garantiaQueTermina('no-show');
+
+        const respuesta = await agendarGarantia(original.id, { inicio: new Date(Date.now() + 3 * 86_400_000).toISOString() }).expect(409);
+
+        expect(respuesta.body.error.code).toBe('GARANTIA_YA_OTORGADA');
+      });
+
+      it('COMPLETADA: ya se honró, y una tercera la decide la Dueña fuera del sistema', async () => {
+        const original = await garantiaQueTermina('completar');
+
+        await agendarGarantia(original.id, { inicio: new Date(Date.now() + 3 * 86_400_000).toISOString() }).expect(409);
+      });
+
+      it('y después de cancelar DOS veces sigue pudiendo agendarse: el derecho no se agota por fallos del salón', async () => {
+        /**
+         * Es la consecuencia lógica de la regla, y conviene que esté fijada: si el motivo de que no
+         * se haya hecho es del salón, no hay un contador que se agote. Lo que lo cierra es que la
+         * reposición **ocurra** (`completada`) o que la clienta **no venga** (`no_show`).
+         */
+        const original = await garantiaQueTermina('cancelar');
+
+        const { body: segunda } = await agendarGarantia(original.id, {
+          inicio: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+        }).expect(201);
+        await request(app.getHttpServer())
+          .post(`${RUTA}/${segunda.id}/cancelar`)
+          .set('Authorization', `Bearer ${encargada}`)
+          .send({ motivo: 'Cierre por mantenimiento' })
+          .expect(200);
+
+        await agendarGarantia(original.id, { inicio: new Date(Date.now() + 4 * 86_400_000).toISOString() }).expect(201);
+      });
+    });
+
+    it('TENSIÓN 2 RESUELTA: una clienta BLOQUEADA sí recibe su garantía', async () => {
+      /**
+       * ## POR QUÉ EL BLOQUEO NO ALCANZA A LAS GARANTÍAS
+       *
+       * `AgendarCitaUseCase` rechaza a una clienta `bloqueada` con `CLIENTA_BLOQUEADA`
+       * (`RN-CRM-04`), y aquí **deliberadamente no hay esa comprobación**. La Dueña lo ratificó, y
+       * el argumento es de riesgo, no de cortesía: el bloqueo frena **ventas nuevas**, y una
+       * garantía no es una venta — es reparar un trabajo **que ya se cobró**.
+       *
+       * Negarse a arreglarlo porque la clienta acumuló incidentes *después* sería quedarse con su
+       * dinero y con el problema, y es exactamente la clase de caso que acaba en PROFECO. El filtro
+       * determinista del bot ya trata esa palabra como gatillo crítico; no hace falta además darle
+       * motivos.
+       *
+       * Sigue necesitando **acción humana explícita** (`RN-GAR-03`): esto solo lo puede crear una
+       * persona autorizada desde el panel, y el bot no puede.
+       */
+      const original = await citaCompletadaHace(1);
+
+      // Se bloquea a la clienta DESPUÉS de que el servicio se realizara y se cobrara.
+      await request(app.getHttpServer())
+        .post(`/v1/crm/clientas/${CLIENTA}/estado-de-riesgo`)
+        .set('Authorization', `Bearer ${dueña}`)
+        .send({ accion: 'marcar_bloqueada', motivo: 'Incidentes acumulados' })
+        .expect(200);
+
+      const garantia = await agendarGarantia(original.id).expect(201);
+
+      expect(garantia.body).toMatchObject({ esGarantia: true, estado: 'agendada' });
+      expect(garantia.body.cotizacionSnapshot.totalCentavos).toBe(0);
+
+      // Y la prueba de que el bloqueo SÍ sigue vigente para una venta normal.
+      await request(app.getHttpServer())
+        .post(RUTA)
+        .set('Authorization', `Bearer ${encargada}`)
+        .send({ sucursalId, servicioId: servicio.id, clientaId: CLIENTA, inicio: new Date(Date.now() + 5 * 86_400_000).toISOString() })
+        .expect(409);
+    });
+
     it('LA MANICURISTA TAMBIÉN VE `esGarantia`: tiene que saber que repone un trabajo', async () => {
       /**
        * Va en el objeto `base` del presenter, así que llega a su vista de iPad. Es deliberado:

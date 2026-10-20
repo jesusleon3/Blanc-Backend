@@ -46,13 +46,17 @@ export function ModificadoresAdmin() {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-aviso/30 bg-aviso-suave px-4 py-3 text-xs text-aviso">
-        <p className="font-semibold">Los modificadores todavía no se suman solos a la cita.</p>
+      <div className="rounded-lg border border-info/30 bg-info-suave px-4 py-3 text-xs text-info">
+        <p className="font-semibold">Las combinaciones ya no se calculan aquí: son renglones del catálogo.</p>
         <p className="mt-1">
-          Hoy una cita cobra y ocupa la duración <strong>base</strong> del servicio. Estos minutos y precios quedan configurados y
-          sirven de referencia para cotizar a mano, pero el cálculo automático de combinaciones (FL-COT-03) no está construido.
-          Cuando un diseño lleve tiempo extra, hay que agendarlo con un servicio cuya duración ya lo contemple o reservar el hueco
-          a mano.
+          Los tiempos de la Dueña <strong>se absorben, no se suman</strong>: «rubber + gel + manicure» es una hora y «retiro de
+          acrílico + extensiones» son tres. Eso no se puede calcular sumando minutos, así que cada combinación es{' '}
+          <strong>su propio renglón</strong> en Catálogo y tiempos, con su duración exacta. Ahí se editan.
+        </p>
+        <p className="mt-1">
+          Estos modificadores <strong>no se suman solos a una cita</strong> y siguen siendo informativos, para cotizar a mano. Los
+          tres diseños que el bot sí agenda por su cuenta —francés, puntos y ojo de gato— ya están dentro de los renglones de
+          «Diseños y efectos»; cualquier otro diseño el bot lo pasa a una persona.
         </p>
       </div>
 

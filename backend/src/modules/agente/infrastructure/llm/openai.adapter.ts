@@ -55,16 +55,33 @@ const ESQUEMA_DE_INTENCION = {
     confianza: { type: 'number', minimum: 0, maximum: 1 },
     fecha: { type: ['string', 'null'], description: 'YYYY-MM-DD si la clienta la menciona' },
     hora: { type: ['string', 'null'], description: 'HH:MM en hora local de Querétaro' },
-    servicioMencionado: { type: ['string', 'null'], description: 'Tal como lo dijo la clienta' },
   },
 } as const;
 
+/**
+ * Instrucciones del clasificador.
+ *
+ ## EL MODELO YA NO NOMBRA EL SERVICIO, Y ESO ES DELIBERADO (2026-10-19)
+ *
+ * El esquema tenía un `servicioMencionado` y ahora no lo tiene. El motivo: la matriz oficial de la
+ * Dueña agrupa las combinaciones en bloques de 60, 120 y 180 minutos que **se absorben, no se
+ * suman**, y el nombre que el modelo extrajera se buscaba por parecido en el catálogo. *"Retiro de
+ * acrílico y extensiones"* son 180 minutos; la palabra `extensiones` sola lleva a una fila de 120.
+ * Equivocarse por abajo mete la cita **encima de la siguiente**.
+ *
+ * Así que qué servicio se agenda lo decide una función determinista del backend sobre el texto
+ * literal de la clienta (`resolverCombinacion`), y al modelo se le dice explícitamente que **no lo
+ * identifique**. Lo único que aporta es *"quiere agendar"*, y el esquema no le deja escribir nada
+ * más: ni precio, ni duración, ni disponibilidad, ni el texto de la respuesta.
+ */
 const INSTRUCCIONES = [
   'Eres un clasificador de intenciones para un salón de uñas en Querétaro, México.',
   'Tu ÚNICA tarea es clasificar el mensaje de la clienta. NO respondes a la clienta.',
   'NUNCA inventes precios, horarios, duraciones ni disponibilidad: no tienes esa información y no te corresponde.',
   'Si no estás seguro, usa tipo "desconocida" con confianza baja: otra persona lo atenderá.',
   'Extrae fecha y hora SOLO si la clienta las dice explícitamente. No las deduzcas ni las supongas.',
+  'NO identifiques el servicio: no tienes el catálogo y el sistema lo resuelve por su cuenta.',
+  'Un mensaje que pide varios servicios para la misma visita es UNA sola intención de agendar, no varias.',
 ].join(' ');
 
 /**

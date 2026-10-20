@@ -1,5 +1,10 @@
 import { crearBaseDeDatosDePrueba } from '../test-utils/postgres-de-prueba';
-import { ESTADOS_CITA, ESTADOS_LISTA_ESPERA, ESTADOS_QUE_LIBERAN_HORARIO } from './agenda.schema';
+import {
+  ESTADOS_CITA,
+  ESTADOS_LISTA_ESPERA,
+  ESTADOS_QUE_LIBERAN_HORARIO,
+  ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA,
+} from './agenda.schema';
 
 /**
  * DETECTOR DE DERIVA entre los arrays de TypeScript y las restricciones escritas a mano en las
@@ -91,8 +96,33 @@ describe('Deriva de restricciones de `agenda.citas` (bloqueo 2)', () => {
       expect(unaGarantia).toBeDefined();
       expect(unaGarantia!.indexdef).toContain('UNIQUE');
       expect(unaGarantia!.indexdef).toContain('es_garantia');
-      // La exclusión de `reprogramada`, que es lo que hace reprogramable una garantía.
-      expect(unaGarantia!.indexdef).toMatch(/estado <> 'reprogramada'::text/);
+      /**
+       * El `WHERE` tiene que coincidir **exactamente** con `ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA`.
+       *
+       * Es la misma clase de deriva que vigila el `CHECK` de estados, y con las mismas dos formas
+       * de salir mal: si el índice **excluye más** estados de los que el array dice, se conceden
+       * segundas reposiciones que nadie autorizó; si excluye **menos**, una clienta a la que el
+       * salón le canceló su reposición se queda sin ella. La segunda es la que acaba en PROFECO.
+       *
+       * Se compara como conjunto: el orden en que PostgreSQL imprime los literales no es deriva.
+       */
+      expect(literales(unaGarantia!.indexdef).sort()).toEqual([...ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA].sort());
+      // Y sigue siendo una NEGACIÓN: con `= ANY` la misma lista significaría lo contrario —que solo
+      // esos tres estados consumen el derecho—, que es justo al revés.
+      expect(unaGarantia!.indexdef).toContain('<> ALL');
+      expect(unaGarantia!.indexdef).not.toContain('= ANY');
+    });
+
+    it('`no_show` y `completada` NO están entre los estados que perdonan la garantía', () => {
+      /**
+       * Guardia explícita sobre el fondo de la decisión de la Dueña, y no sobre su implementación:
+       * el derecho se conserva cuando **el salón** no cumplió, no cuando la clienta no vino. Si
+       * alguien añadiera `no_show` al array, el sistema regalaría una reposición a quien dejó la
+       * silla vacía — y lo haría en silencio, porque todo lo demás seguiría pasando.
+       */
+      expect(ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA).not.toContain('no_show');
+      expect(ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA).not.toContain('completada');
+      expect([...ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA].sort()).toEqual(['cancelada', 'expirada', 'reprogramada']);
     });
   });
 

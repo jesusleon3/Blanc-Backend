@@ -1209,6 +1209,139 @@ Ninguna es un error: las tres se derivan correctamente de decisiones que la Due�
 
 > Bitácora por sesión para el equipo asíncrono. Cada entrada responde tres cosas: **qué toqué**, **qué queda probado** y **con qué te vas a tropezar**. La más reciente arriba.
 
+### 2026-10-19 — Catálogo oficial de la Dueña, resolución de combinaciones en el bot y cierre de las tensiones de Garantías
+
+**Backend: 1361 pruebas en 81 suites** (+77). **Frontend: 234 pruebas en 14 suites** (+1). Los seis controles del backend y los cuatro del frontend en verde. Migración nueva: `0018_garantia_tras_cancelacion.sql`.
+
+> **El cambio de fondo:** `FL-COT-03` —el motor que sumaría duraciones, diferido desde la Fase 2— **ya no hace falta y no se va a construir.** Con la matriz real de la Dueña, la duración de una combinación es un **dato de una fila editable**, no un cálculo. Lo que llevaba meses marcado como carencia era en realidad la arquitectura correcta esperando la tabla.
+
+---
+
+#### 1. La matriz oficial: 21 renglones en 5 categorías
+
+| Categoría | Renglones | Bloque |
+|---|---|---|
+| **Retiro** | Retiro de gel, acrílico o rubber *(solo retiro, drill o acetona)* | 60 min |
+| **Servicios individuales** | Gel · Rubber · Rubber + gel · Manicure · Rubber + gel + manicure | 60 min |
+| **Extensiones y cobertura** | Extensiones · Baño de acrílico · (+ gel) · (+ gel + manicure) | 120 min |
+| **Combinaciones con retiro** | Retiro de **gel** + rubber, gel o manicure | **60 min** |
+| | Retiro de **acrílico o rubber** + rubber, gel o manicure | 120 min |
+| | Retiro de acrílico o rubber + extensiones o baño de acrílico *(± manicure)* | 180 min |
+| **Diseños y efectos** | Gel / Rubber / Manicure + rubber, **+ diseño estándar** | 60 min |
+| | Extensiones o baño de acrílico + diseño estándar | 180 min |
+| | Diseño especial *(cotización manual)* | 60 min |
+
+Son los **19 renglones numerados** de la orden, más la **variante de +60 min** del bloque de diseño sobre extensiones (el renglón de 180), más `Diseño especial`, que se conserva. Veinte oficiales y uno de escape.
+
+**La propiedad que hay que entender antes de tocar cualquier cosa: los tiempos se absorben, no se suman.** `Rubber + gel + manicure` es **una** hora. El retiro de **gel** se absorbe dentro de esa hora; el de **acrílico o rubber** añade su propio bloque. No hay fórmula que produzca eso — y por eso `RN-COT-01` siempre dijo *"nunca la suma"*.
+
+**Por qué `Diseño especial` sobrevive al reemplazo.** Es la única fila de cotización manual, y existe **para el mostrador**: cuando el bot escala un diseño complejo, alguien tiene que poder agendarlo con un precio que fije una persona en vez de inventarlo. Sin ella, la Encargada elegiría una combinación estándar y cobraría un encapsulado a precio de francés.
+
+**Los tres diseños estándar NO se sembraron como `ModificadorDiseno`,** y es deliberado: su tiempo ya está dentro de los renglones 17 a 20. Tres filas con `minutosAdicionales` que nadie suma —el propio Backoffice lo advierte— contradirían la duración que sí es autoritativa. El registro oficial es la constante `DISENOS_ESTANDAR` del catálogo, que es lo que el resolutor consulta.
+
+> ⚠️ **Los tiempos son oficiales; los precios siguen siendo provisionales.** La Dueña entregó la matriz de **tiempos**. Los importes son estimaciones por bloque y hay que confirmarlos antes de cobrar. Está marcado en el seed, en la salida del CLI, en `/admin` y en el runbook §2.2.
+>
+> Y un aviso que no es lo mismo: **cuatro renglones cubren varias combinaciones a la vez** (los de "retiro + …"), porque comparten bloque. Para el tiempo es exacto; para el **precio** significa un solo importe para tres combinaciones que probablemente no cuesten lo mismo. Se desdoblan desde el Backoffice cuando dé los precios — lo único que habría que tocar en código es el mapa del resolutor.
+
+---
+
+#### 2. Cómo resuelve el bot las combinaciones
+
+`modules/agente/domain/resolutor-de-combinaciones.ts`. Corre **en el backend, sobre el texto literal de la clienta**, y es determinista.
+
+**No busca el nombre del servicio: detecta componentes y consulta una matriz.** El texto se descompone en piezas (`retiro_gel`, `retiro_acrilico`, `gel`, `rubber`, `manicure`, `extensiones`, `bano_acrilico`, `diseno_estandar`) y el **conjunto** de piezas es la clave de la fila. Así *"quiero manicure, rubber y gel"* y *"rubber con gel y manicure"* dan la misma fila sin depender del orden.
+
+**La detección consume el texto a medida que reconoce**, y eso no es un detalle: *"retiro de gel y manicure"* contiene la palabra `gel`, y sin borrar primero la frase del retiro se detectarían `retiro_gel` **y** `gel` **y** `manicure` — tres componentes que no corresponden a ninguna fila, para una combinación que sí existe. Igual con *"baño de acrílico"*, que contiene `acrilico`.
+
+**Los tres diseños estándar vs. los demás (`DEC-033`):**
+
+| La clienta pide | El bot |
+|---|---|
+| `francés`, `puntos` / `polka dots`, `ojo de gato` | **Agenda**, con la fila de diseño correspondiente |
+| mano alzada, figuras, 3D, encapsulado, pedrería, *"uno que vi en Instagram"*… | **Escala** con `cotizacion_compleja` |
+| *"quiero gel con diseño"*, sin decir cuál | **Escala**: puede ser un francés de una hora o un encapsulado de tres, y elegir sería adivinar el precio y el bloque a la vez |
+| un diseño complejo **aunque la base sea válida** | **Escala.** *"Retiro de acrílico, extensiones y un diseño en 3D"* es una combinación que la matriz sabría mapear a tres horas, y aun así escala: agendarla sería cobrar un diseño complejo a precio de combinación estándar |
+
+**Lo que la matriz no junta, no se inventa.** *"Extensiones con rubber"* son dos servicios que existen por separado y que la tabla **no combina**: devolver 120 (el de extensiones) o 180 (sumando) serían dos invenciones distintas, y la segunda mete la cita encima de la siguiente. Se devuelve `null`, el turno escala, y una persona decide.
+
+---
+
+#### 3. Dos cosas que se QUITARON, y las dos son correcciones
+
+> 🐛 **Se eliminó el respaldo de "buscar por nombre en el catálogo", y lo destapó una prueba.**
+>
+> Había un segundo camino: si la matriz no resolvía, se buscaba un servicio cuyo nombre contuviera la palabra que la clienta dijo. Con el catálogo oficial **ese camino es el peligroso**: *"extensiones con rubber"* no está en la matriz, pero la palabra `extensiones` aparece dentro de `Retiro de acrílico o rubber + extensiones o baño de acrílico`. El respaldo encontraba **una** coincidencia y agendaba **tres horas** para quien pidió dos servicios de una.
+>
+> Que en el catálogo completo haya cinco filas con esa palabra —y que el respaldo devolviera `null` por ambigüedad— **no es una protección: es una casualidad del número de filas.** Dar de baja tres la haría desaparecer. Hoy, si la matriz no reconoce la combinación, el turno escala.
+
+> **Se quitó `servicioMencionado` de `Intencion`.** Era el campo donde el LLM escribía el nombre del servicio *"tal como lo dijo la clienta"*, y alimentaba justo el respaldo que se eliminó. Al no quedar nadie que lo lea, desapareció — y con él la última vía por la que el modelo participaba en elegir el servicio. **La frontera determinista de `ADR-026` es más estrecha que antes.** Al modelo se le dice ahora explícitamente que *no* identifique el servicio.
+
+**Dónde queda la frontera, en una frase:** el LLM dice *"quiere agendar"*; **qué** se agenda lo decide una función determinista contra una tabla; **cuánto dura** lo decide la fila del catálogo en PostgreSQL, que la Dueña edita desde `/admin` sin desplegar nada.
+
+El intérprete determinista también creció: reconoce *"quiero…"*, *"me gustaría…"*, *"me pongo…"* como intención de agendar. En WhatsApp casi nadie escribe *"quiero agendar"* — escribe *"quiero rubber con gel"*, y sin esas formas el intérprete sin coste clasificaba `desconocida` y escalaba. Con el presupuesto de IA agotado (`ADR-030`) eso dejaba al bot incapaz de agendar nada justo cuando más falta hacía.
+
+---
+
+#### 4. El bloque de tres horas contra el corte de las 12:00 (`RN-AGE-10`)
+
+Los bloques de 60/120/180 no son una elección estética: son lo que hace que la tabla **encaje** con el horario (L-V 09:00–12:00 y 15:00–18:00, bloques de exactamente tres horas).
+
+| Intento | Resultado |
+|---|---|
+| 180 min a las **09:00** → 09:00–12:00 | ✅ Cabe exacto. El rango es `[inicio, fin)`, así que terminar en el instante del corte no lo invade |
+| 180 min a las **10:00** → 10:00–13:00 | ❌ `FUERA_DEL_HORARIO_DE_SUCURSAL` |
+| 180 min a las **15:00** → 15:00–18:00 | ✅ Cabe exacto |
+| **Sábado** a las 09:00 **y** a las 12:00 | ✅ Las dos: su bloque es 09:00–15:00, seis horas |
+
+**Consecuencia operativa que conviene anticipar antes del go-live:** una cita de tres horas se agenda a las 9:00 o a las 15:00, **y a ninguna otra hora** de lunes a viernes. Quien atienda el mostrador va a ver ese `409` cada vez que lo intente a las 10:00, y es correcto: no es un hueco que el sistema se niegue a vender, es un hueco que no existe.
+
+---
+
+#### 5. Las dos tensiones de Garantías, cerradas
+
+**Tensión 1 — ¿una garantía cancelada deja la obligación en pie?** Sí. Migración `0018`: el índice único parcial pasa a excluir `reprogramada`, **`cancelada` y `expirada`**. La distinción que la Dueña eligió es por **quién falló**:
+
+| Estado de la reposición | ¿Conserva el derecho? | Por qué |
+|---|---|---|
+| `cancelada`, `expirada` | **Sí** | No se hizo, y la causa habitual es del salón. El trabajo sigue mal hecho y nadie lo arregló |
+| `reprogramada` | **Sí** | No es un final: es la misma garantía movida de hora. La fila nueva es la que cuenta |
+| `no_show` | **No** | El salón apartó la silla y la clienta no vino. Cumplió |
+| `completada` | **No** | Ya se repuso. Si el problema persiste, lo revisa la Dueña (`RN-GAR-04`) |
+
+Y **el derecho no se agota por fallos del salón**: cancelar dos veces sigue permitiendo agendar. Lo que lo cierra es que la reposición **ocurra** o que la clienta **no venga**.
+
+El predicado vive en `ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA`, **no se reutilizó `ESTADOS_QUE_LIBERAN_HORARIO`** —coinciden casi del todo, y son dos preguntas distintas: *"¿consume capacidad?"* y *"¿gasta la garantía?"*; compartir el array ataría dos decisiones de negocio independientes— y `existeGarantiaDe` usa el **mismo** array que el índice: si la consulta del caso de uso fuera más estricta, rechazaría con `GARANTIA_YA_OTORGADA` antes de que la base tuviera ocasión de permitirlo, y la regla nueva no serviría de nada. El detector de deriva compara los dos y además fija que `no_show` y `completada` **no** están en la lista.
+
+**Tensión 2 — ¿una clienta `bloqueada` tiene derecho a garantía?** Sí, ratificado y documentado en `AgendarGarantiaUseCase`. El bloqueo frena **ventas nuevas** (`RN-CRM-04`); una garantía no es una venta, es reparar un trabajo **que ya se cobró**. Negarse porque acumuló incidentes *después* sería quedarse con su dinero y con el problema — y es exactamente la clase de caso que acaba en PROFECO, palabra que el filtro determinista del bot ya trata como gatillo crítico. Sigue exigiendo acción humana explícita (`RN-GAR-03`): solo la crea una persona autorizada, y el bot no puede.
+
+---
+
+#### 6. Documentos de dominio actualizados
+
+| Documento | Cambio |
+|---|---|
+| `RN-COT-01` → **v2** | De *"Aprobada, tablas incompletas"* a **implementada**. Registra que `FL-COT-03` no se construirá y por qué |
+| `RN-COT-04` → **v2** | De *"parcialmente aprobada"* a **Aprobada**. **El fallback aditivo queda derogado**: ver abajo |
+| `PA-02` (Checklist y 99-open-questions) | ✅ **Cerrada**. El *"drill +15 min"* queda **superado** —el método de retiro no cambia la duración— y *"Diseño Especial"* se modela como cotización manual |
+| `GO_LIVE_RUNBOOK.md` §2.2/§2.3 | La tabla completa, la nota de absorción, la consecuencia del bloque de 3 h y la separación tiempos-oficiales / precios-provisionales |
+
+> **La derogación del fallback aditivo merece leerse.** `RN-COT-04` v1 admitía *"suma de tiempos individuales, marcada como estimada"* para lo que la tabla no cubriera. Con la matriz completa eso es justo lo que no se debe hacer: una suma no es un estimado conservador, es un error de **hasta el triple** que bloquea sillas vendibles. Y por abajo es peor — quedarse en los 120 de *extensiones* cuando la combinación son 180 **mete la cita encima de la siguiente**.
+
+---
+
+#### 7. Con qué te vas a tropezar
+
+| Si vas a… | Ten en cuenta |
+|---|---|
+| Cambiar la duración de un servicio | Hazlo en **`/admin`**, no en el seed. El seed no reimpone lo que alguien ya corrigió, y el bot respeta la fila desde la siguiente cita |
+| Renombrar una fila oficial desde `/admin` | ⚠️ **El vínculo entre la matriz y el catálogo es por nombre.** Renombrar deja al bot sin resolver esa combinación: escala en vez de agendar. Queda un `warn` en el log diciendo qué fila falta. Resolverlo de raíz pediría una clave estable en `servicios`, que hoy no existe |
+| Añadir una combinación nueva | Dos sitios: la fila en el catálogo (desde `/admin`) **y** su entrada en `MATRIZ`. Sin la segunda, el bot no la reconoce — pero el mostrador sí puede agendarla |
+| Añadir un cuarto diseño estándar | `DISENOS_ESTANDAR` (el registro oficial) **y** `DISENOS_ESTANDAR_EN_TEXTO` (el vocabulario). Hay una prueba que recorre el primero y falla si el resolutor no sabe leerlo entero |
+| Cambiar qué estados perdonan la garantía | `ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA` **y** una migración que recree el índice. El detector de deriva compara los dos |
+| Agendar una cita de 3 horas | Solo cabe a las 9:00 o a las 15:00 de lunes a viernes; el sábado también a las 10:00, 11:00 y 12:00 |
+
+---
+
 ### 2026-10-17 (b) — Auditoría adversarial de extremo a extremo: 9 defectos cazados en las costuras
 
 **Backend: 1284 pruebas en 80 suites** (+32). **Frontend: 233 pruebas en 14 suites** (+5). Los seis controles del backend y los cuatro del frontend en verde. Migración nueva: `0017_garantia_reprogramable.sql`.

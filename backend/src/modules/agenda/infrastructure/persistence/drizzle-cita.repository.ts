@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, gte, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import { Database } from '../../../../database/connection';
 import { DATABASE_CONNECTION } from '../../../../database/database.module';
-import { citas, ESTADOS_QUE_LIBERAN_HORARIO, ESTADOS_VISIBLES_EN_AGENDA, EstadoCita, RangoHorario } from '../../../../database/schema';
+import { citas, ESTADOS_QUE_LIBERAN_HORARIO, ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA, ESTADOS_VISIBLES_EN_AGENDA, EstadoCita, RangoHorario } from '../../../../database/schema';
 import { Cita } from '../../domain/entities/cita.entity';
 import { CitaRepository } from '../../domain/ports/cita.repository';
 import { TransactionContext } from '../../../../shared/persistence/transaction-context';
@@ -162,19 +162,33 @@ export class DrizzleCitaRepository implements CitaRepository {
   }
 
   /**
-   * ¿Este servicio completado ya tiene una garantía?
+   * ¿Este servicio completado ya tiene una garantía que **consuma el derecho**?
    *
-   * **Mira cualquier estado, a diferencia del índice único**, que desde la migración `0017` excluye
-   * `reprogramada`. La diferencia es deliberada y las dos son correctas para lo suyo: el índice
-   * impide que **dos filas vivas** reclamen la misma garantía (y por eso tiene que dejar pasar la
-   * fila muerta de una reprogramación); esta consulta responde *"¿ya se concedió?"*, y una garantía
-   * reprogramada sí se concedió — solo cambió de hora.
+   * ## EL PREDICADO ES EL MISMO QUE EL DEL ÍNDICE, Y AHORA SÍ TIENE QUE SERLO
+   *
+   * Hasta la migración `0018` esta consulta miraba **cualquier** estado a propósito, y estaba
+   * documentado: el índice solo excluía `reprogramada`, y aquí se quería responder *"¿ya se
+   * concedió?"* —una garantía reprogramada sí se concedió—.
+   *
+   * La decisión de la Dueña cambió la pregunta. Si una reposición `cancelada` **no gasta** el
+   * derecho, esta consulta tiene que dejar pasar ese caso: de lo contrario el caso de uso
+   * rechazaría con `GARANTIA_YA_OTORGADA` **antes** de que la base tuviera ocasión de permitirlo, y
+   * la regla nueva no serviría de nada. Las dos barreras tienen que decir lo mismo.
+   *
+   * Se comparte el array `ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA` con el `WHERE` de la migración, y
+   * `deriva-restricciones-agenda.spec.ts` comprueba que no se separen.
    */
   async existeGarantiaDe(citaGarantizadaId: string): Promise<boolean> {
     const filas = await this.db
       .select({ id: citas.id })
       .from(citas)
-      .where(and(eq(citas.citaGarantizadaId, citaGarantizadaId), eq(citas.esGarantia, true)))
+      .where(
+        and(
+          eq(citas.citaGarantizadaId, citaGarantizadaId),
+          eq(citas.esGarantia, true),
+          notInArray(citas.estado, [...ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA]),
+        ),
+      )
       .limit(1);
 
     return filas.length > 0;

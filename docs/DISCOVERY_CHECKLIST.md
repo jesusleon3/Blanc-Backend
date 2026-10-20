@@ -170,6 +170,14 @@
 - **Respuesta registrada:** tabla extensa con docenas de combinaciones de duración antes faltantes, más una regla nueva: *"retiro de gel con drill se agregan 15 minutos al usar el drill."*
 - **Qué queda resuelto:** la gran mayoría de las combinaciones que antes no tenían dato — avance muy grande frente al estado anterior.
 - **Qué sigue sin resolver:** (1) la regla "drill = +15 min" debe reconciliarse con los valores fijos ya recibidos previamente para combinaciones con drill — no está claro si esto reemplaza esos valores absolutos o es un delta aplicado sobre ellos; (2) varias celdas de la tabla recibida (ej. "Diseño Especial", "SP", "CF", "CC") quedaron sin valor numérico o con valor cualitativo ("dentro de la hora dependiendo del diseño").
+
+**→ Resultado segunda entrega (2026-10-19):** 🟢 **A — CERRADA.**
+- **Respuesta registrada:** la matriz oficial completa, con **20 combinaciones en 5 categorías**, todas en bloques de **60, 120 o 180 minutos**.
+- **Los dos vacíos que quedaban, resueltos:**
+  1. **"drill = +15 min" queda superado, no reconciliado.** El renglón oficial es *"Retiro de gel, acrílico o rubber (solo retiro, drill o acetona)"* → 60 minutos: **el método de retiro no cambia la duración**, así que el caso que generaba la ambigüedad dejó de existir. Lo que sí distingue la tabla es el **material**: el retiro de gel se absorbe dentro de la hora de la aplicación, el de acrílico o rubber añade su propio bloque.
+  2. **"Diseño Especial"** se modela como la única fila de **cotización manual** (`DEC-033`) — que es exactamente lo que su valor cualitativo *"dentro de la hora dependiendo del diseño"* quería decir. Y los **tres diseños estándar** que la Dueña autorizó (francés, puntos / polka dots, ojo de gato) sí tienen tiempo fijo y el bot los agenda solo.
+- **Dónde vive ahora:** `backend/src/database/seed/catalogo-de-blanc.ts` (las filas) y `backend/src/modules/agente/domain/resolutor-de-combinaciones.ts` (el mapa de lo que pide la clienta a la fila). Versionado en el repositorio, que era el problema de fondo del hallazgo de 2026-08-04.
+- **Lo que sigue provisional:** los **precios**. La Dueña entregó tiempos, no importes. Están puestos en un rango coherente con cada bloque y marcados como provisionales en el seed, en `/admin` y en el runbook.
 - **¿Se cierra oficialmente?** No completo — se cierra la mayoría de las combinaciones, se mantiene abierto el punto de reconciliación drill y las celdas faltantes.
 - **Riesgo de asumir sin resolver ese resto:** Alto si se despliega sin marcar visiblemente las celdas faltantes como estimadas — hay dinero real de por medio (ya lo advertía la recomendación original).
 

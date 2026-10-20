@@ -249,7 +249,7 @@ describe('Bot IA — flujo completo E2E (webhook de Meta → bot → PostgreSQL)
       await manicuristaRepo.asignarASucursal(registro.id, sucursalId);
     }
 
-    servicio = Servicio.crear({ nombre: 'Gelish manos', categoria: 'manos', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
+    servicio = Servicio.crear({ nombre: 'Gel', categoria: 'Servicios individuales', duracionBaseMinutos: 60, precioBaseCentavos: 45000 });
     await new DrizzleServicioRepository(dbDePrueba).guardar(servicio);
 
     clienta = Clienta.registrar({ nombre: 'Andrea Ramírez', telefono: TELEFONO });
@@ -289,7 +289,7 @@ describe('Bot IA — flujo completo E2E (webhook de Meta → bot → PostgreSQL)
 
       const [respuesta] = await salientesDelBot();
       // $450.00 y 60 min salen de la fila de `catalogo.servicios` sembrada arriba.
-      expect(respuesta.contenido).toContain('Gelish manos');
+      expect(respuesta.contenido).toContain('Gel');
       expect(respuesta.contenido).toContain('$450.00');
       expect(respuesta.contenido).toContain('60 min');
     });
@@ -307,7 +307,7 @@ describe('Bot IA — flujo completo E2E (webhook de Meta → bot → PostgreSQL)
     it('la cita queda en `agenda.citas` y aparece en la API de agenda', async () => {
       const manana = fechaLocal(new Date(Date.now() + 86_400_000));
 
-      await escribe(`quiero cita de gelish el ${manana} a las 13:00`);
+      await escribe(`quiero cita de gel el ${manana} a las 13:00`);
 
       // (1) En la base, por el repositorio.
       const citas = await new DrizzleCitaRepository(dbDePrueba).listarParaConsulta(
@@ -337,7 +337,7 @@ describe('Bot IA — flujo completo E2E (webhook de Meta → bot → PostgreSQL)
       expect(agenda.body.citas).toHaveLength(1);
 
       // (3) Y la clienta recibió la confirmación en el hilo.
-      expect((await salientesDelBot())[0].contenido).toContain('Gelish manos');
+      expect((await salientesDelBot())[0].contenido).toContain('Gel');
     });
   });
 

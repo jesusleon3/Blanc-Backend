@@ -66,6 +66,23 @@ export function CatalogoAdmin() {
 
   return (
     <div className="space-y-4">
+      {/* Lo que la orden de trabajo pide dejar escrito aquí: estos números son LOS de la Dueña y se
+          editan sin programar nada. Es la diferencia entre un catálogo que se mantiene y uno que
+          envejece esperando un despliegue. */}
+      <div className="rounded-lg border border-info/30 bg-info-suave px-4 py-3 text-xs text-info">
+        <p className="font-semibold">Estos tiempos son los oficiales, y se editan desde aquí.</p>
+        <p className="mt-1">
+          Cada renglón lleva la duración exacta que la Dueña definió, en bloques de <strong>60, 120 o 180 minutos</strong>, y los
+          tiempos de una combinación <strong>no son la suma de sus partes</strong>: «rubber + gel + manicure» es una hora, no tres.
+          Puedes cambiar la duración y el precio de cualquier renglón <strong>sin tocar código ni esperar un despliegue</strong>, y
+          el bot y el mostrador lo respetan desde la siguiente cita.
+        </p>
+        <p className="mt-1">
+          Los <strong>precios siguen siendo provisionales</strong>: hay que confirmarlos antes de cobrar. Los tiempos ya están
+          confirmados.
+        </p>
+      </div>
+
       <section className="rounded-lg border border-borde bg-fondo-elevado p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div>
@@ -314,7 +331,9 @@ export function FormularioDeServicio({
             onChange={(e) => setMinutos(e.target.value)}
             className={CLASES_DE_CAMPO}
           />
-          <p className="mt-1 text-[11px] text-texto-terciario">De aquí sale la hora en que termina la cita.</p>
+          <p className="mt-1 text-[11px] text-texto-terciario">
+            De aquí sale la hora en que termina la cita. Los bloques oficiales son 60, 120 y 180 minutos.
+          </p>
         </div>
 
         <div>

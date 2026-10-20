@@ -91,6 +91,36 @@ export const ESTADOS_QUE_LIBERAN_HORARIO = [
 ] as const satisfies readonly EstadoCita[];
 
 /**
+ * Estados en los que una cita de garantía **deja de consumir el derecho** de la clienta.
+ *
+ * ## LA REGLA, Y POR QUÉ NO ES SIMÉTRICA (decisión de la Dueña, 2026-10-19)
+ *
+ * Un servicio completado se honra con **una** reposición. La pregunta que esto responde es cuándo
+ * una reposición agendada *"gasta"* ese derecho, y la respuesta depende de **quién falló**:
+ *
+ * - **`cancelada`** y **`expirada`**: la reposición no se hizo, y la causa habitual es del salón —
+ *   una manicurista que falta, un cierre imprevisto. La clienta **conserva su derecho**: el trabajo
+ *   sigue mal hecho y nadie se lo ha arreglado.
+ * - **`reprogramada`**: no es un final, es la misma garantía movida de hora (`DEC-042` crea una
+ *   fila nueva en lugar de mover la existente). La fila nueva es la que cuenta.
+ * - **`no_show`** y **`completada`** NO están aquí, y es el centro de la regla: en el primer caso el
+ *   salón apartó la silla y la clienta no vino; en el segundo, ya se repuso. En los dos cumplió.
+ *
+ * ## POR QUÉ NO SE REUTILIZA `ESTADOS_QUE_LIBERAN_HORARIO`
+ *
+ * Coincide casi del todo, y aun así son dos preguntas distintas: *"¿esta cita consume capacidad?"*
+ * y *"¿esta cita gasta la garantía?"*. La prueba de que no son la misma es `en_espera_pago`, que
+ * libera horario y que una garantía nunca llega a tener (nace `agendada`, porque el 40 % de cero es
+ * cero). Compartir el array ataría dos decisiones de negocio independientes: el día que una cambie,
+ * la otra cambiaría con ella en silencio.
+ *
+ * ⚠️ **Es el `WHERE` del índice único parcial `citas_garantia_unica_por_origen`** (migración
+ * `0018`), que Drizzle no sabe expresar y no tiene en su snapshot. Cambiar este array obliga a
+ * escribir la migración que recrea el índice; lo vigila `deriva-restricciones-agenda.spec.ts`.
+ */
+export const ESTADOS_QUE_NO_CONSUMEN_LA_GARANTIA = ['reprogramada', 'cancelada', 'expirada'] as const satisfies readonly EstadoCita[];
+
+/**
  * `agenda.citas` — el aggregate central de la Fase 2.
  *
  * **Toda cita ocupa exactamente una silla, siempre** (`silla_id` es `NOT NULL`); la manicurista

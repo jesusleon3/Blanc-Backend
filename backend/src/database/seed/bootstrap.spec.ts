@@ -6,7 +6,7 @@ import { DrizzleSillaRepository } from '../../modules/agenda/infrastructure/pers
 import { DrizzleUsuarioRepository } from '../../modules/identidad-y-accesos/infrastructure/persistence/drizzle-usuario.repository';
 import { DrizzleConversacionRepository } from '../../modules/conversaciones/infrastructure/persistence/drizzle-conversacion.repository';
 import { DrizzleServicioRepository } from '../../modules/catalogo-y-cotizacion/infrastructure/persistence/drizzle-servicio.repository';
-import { SERVICIOS_DE_BLANC } from './catalogo-de-blanc';
+import { CATEGORIAS_DE_BLANC, SERVICIOS_DE_BLANC } from './catalogo-de-blanc';
 import { Rol } from '../../shared/auth/rol';
 
 /** El `sub` de Supabase es un **uuid**, y `usuarios.supabase_user_id` es una columna `uuid`. */
@@ -263,7 +263,7 @@ describe('Bootstrap de producción (idempotente)', () => {
   });
 
   describe('catálogo inicial', () => {
-    it('siembra los servicios base con sus duraciones y precios', async () => {
+    it('siembra el catálogo OFICIAL completo, en sus cinco categorías', async () => {
       const { db } = await repos();
       const servicioRepo = new DrizzleServicioRepository(db);
 
@@ -271,21 +271,71 @@ describe('Bootstrap de producción (idempotente)', () => {
 
       const servicios = await servicioRepo.listar();
       expect(servicios.length).toBe(SERVICIOS_DE_BLANC.length);
+      expect(servicios.every((servicio) => servicio.activo)).toBe(true);
 
-      const gelish = servicios.find((servicio) => servicio.nombre === 'Gelish');
-      expect(gelish).toBeDefined();
-      // La duración es lo que `AgendarCitaUseCase` usa para derivar el fin de la cita: si está mal,
-      // el sistema vende huecos del tamaño equivocado y nada falla.
-      expect(gelish!.duracionBaseMinutos).toBe(45);
-      expect(gelish!.precioBaseCentavos).toBe(35000);
-      expect(gelish!.activo).toBe(true);
+      // Las cinco categorías reales de la Dueña, ni una más.
+      expect([...new Set(servicios.map((servicio) => servicio.categoria))].sort()).toEqual([...CATEGORIAS_DE_BLANC].sort());
     });
 
-    it('«Diseño especial» nace con COTIZACIÓN MANUAL (`DEC-033`)', async () => {
+    /**
+     * ## LAS DURACIONES SON EL DATO CRÍTICO DE ESTA TABLA
+     *
+     * De `duracionBaseMinutos` deriva `AgendarCitaUseCase` el fin de cada cita, y de ahí el
+     * `tstzrange` y la `EXCLUDE`. Si una queda corta, el sistema **vende huecos que no existen y
+     * nada falla**: se descubre en el mostrador con dos clientas esperando.
+     *
+     * Los casos elegidos son los que demuestran que **los tiempos se absorben, no se suman**, que
+     * es la propiedad que estaba mal modelada antes de esta tabla.
+     */
+    it.each([
+      // Tres trabajos en la MISMA hora: la prueba de que no se suman.
+      ['Rubber + gel + manicure', 60],
+      // El retiro de gel se absorbe dentro de la hora...
+      ['Retiro de gel + rubber, gel o manicure', 60],
+      // ...pero el de acrílico o rubber añade su propio bloque.
+      ['Retiro de acrílico o rubber + rubber, gel o manicure', 120],
+      // Y sobre extensiones, el bloque completo de tres horas.
+      ['Retiro de acrílico o rubber + extensiones o baño de acrílico', 180],
+      // El manicure también se absorbe: sigue siendo 180, no 240.
+      ['Retiro de acrílico o rubber + extensiones o baño de acrílico + manicure', 180],
+      // Un diseño estándar cabe en la hora del servicio base...
+      ['Gel + diseño estándar', 60],
+      // ...pero sobre extensiones añade su hora: 120 + 60.
+      ['Extensiones o baño de acrílico + diseño estándar', 180],
+    ])('«%s» dura exactamente %i minutos', async (nombre, minutos) => {
+      const { db } = await repos();
+      await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      const servicio = (await new DrizzleServicioRepository(db).listar()).find((candidato) => candidato.nombre === nombre);
+
+      // `expect` de Jest no acepta mensaje: el nombre del caso ya lo dice.
+      expect(servicio).toBeDefined();
+      expect(servicio!.duracionBaseMinutos).toBe(minutos);
+    });
+
+    it('TODAS las duraciones caen en bloques de 60, 120 o 180 minutos', async () => {
       /**
-       * Corresponde a las celdas que `PA-02` dejó con valor cualitativo —*"dentro de la hora
-       * dependiendo del diseño"*— y es la forma honesta de representarlas: no un número inventado.
-       * Su cita nace con `totalCentavos: null` y el bot escala en vez de agendarla.
+       * No es una coincidencia estética: es lo que hace que la tabla encaje con `RN-AGE-10`. El
+       * horario de la sucursal son bloques de tres horas (9:00–12:00 y 15:00–18:00), y una cita
+       * tiene que caber **entera dentro de uno**. Una duración de 90 o de 150 minutos dejaría
+       * huecos imposibles de llenar con otra cita del catálogo.
+       */
+      const { db } = await repos();
+      await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
+
+      const duraciones = (await new DrizzleServicioRepository(db).listar()).map((servicio) => servicio.duracionBaseMinutos);
+
+      expect([...new Set(duraciones)].sort((a, b) => a - b)).toEqual([60, 120, 180]);
+    });
+
+    it('«Diseño especial» es la ÚNICA fila de cotización manual (`DEC-033`)', async () => {
+      /**
+       * Existe para el **mostrador**: cuando el bot escala un diseño complejo, alguien tiene que
+       * poder agendarlo con un precio que fije una persona en vez de inventarlo.
+       *
+       * Y es la única: los 20 renglones oficiales de la Dueña llevan
+       * `requiereCotizacionManual: false` a propósito, porque de lo contrario **el bot no podría
+       * agendar nada** — un servicio de cotización manual lo escala siempre (`DEC-033`).
        */
       const { db } = await repos();
       await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
@@ -312,16 +362,16 @@ describe('Bootstrap de producción (idempotente)', () => {
       await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       const servicioRepo = new DrizzleServicioRepository(db);
-      const gelish = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gelish')!;
-      gelish.actualizarDatos({ precioBaseCentavos: 42000, duracionBaseMinutos: 50 });
-      await servicioRepo.guardar(gelish);
+      const gel = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gel')!;
+      gel.actualizarDatos({ precioBaseCentavos: 42000, duracionBaseMinutos: 120 });
+      await servicioRepo.guardar(gel);
 
       const segunda = await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       expect(segunda.serviciosCreados).toBe(0);
-      const despues = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gelish')!;
+      const despues = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Gel')!;
       expect(despues.precioBaseCentavos).toBe(42000);
-      expect(despues.duracionBaseMinutos).toBe(50);
+      expect(despues.duracionBaseMinutos).toBe(120);
     });
 
     it('NO REACTIVA un servicio dado de baja', async () => {
@@ -330,14 +380,15 @@ describe('Bootstrap de producción (idempotente)', () => {
       await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       const servicioRepo = new DrizzleServicioRepository(db);
-      const retiro = (await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Retiro')!;
+      const nombre = 'Retiro de gel, acrílico o rubber';
+      const retiro = (await servicioRepo.listar()).find((servicio) => servicio.nombre === nombre)!;
       retiro.desactivar();
       await servicioRepo.guardar(retiro);
 
       const segunda = await ejecutarBootstrap(db, { superAdmin: SUPER_ADMIN });
 
       expect(segunda.serviciosCreados).toBe(0);
-      expect((await servicioRepo.listar()).find((servicio) => servicio.nombre === 'Retiro')!.activo).toBe(false);
+      expect((await servicioRepo.listar()).find((servicio) => servicio.nombre === nombre)!.activo).toBe(false);
     });
   });
 });

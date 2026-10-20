@@ -37,12 +37,21 @@ export interface Intencion {
   /** Hora mencionada `HH:MM`, en hora de pared del negocio. */
   hora?: string;
   /**
-   * Nombre del servicio **tal como lo dijo la clienta**, sin normalizar.
+   * ## AQUÍ HABÍA UN `servicioMencionado`, Y QUITARLO ES LA MEJORA (2026-10-19)
    *
-   * No se le pide al LLM que lo mapee a un id del catálogo: eso exige conocer el catálogo, y es
-   * una decisión. La resolución contra `Catálogo` la hace el orquestador con los datos reales.
+   * El modelo devolvía el nombre del servicio *"tal como lo dijo la clienta"* y el backend buscaba
+   * en el catálogo una fila cuyo nombre lo contuviera. Con la matriz oficial de la Dueña ese camino
+   * resultó **peligroso**: *"extensiones con rubber"* es una combinación que la tabla no junta, y
+   * la palabra `extensiones` aparece dentro de `Retiro de acrílico o rubber + extensiones o baño de
+   * acrílico` — el respaldo agendaba **tres horas** para quien pidió dos servicios de una.
+   *
+   * Hoy el servicio lo resuelve `resolverCombinacion` sobre el **texto literal** de la clienta,
+   * contra la matriz. El modelo ya no participa en esa decisión, así que el campo desapareció: **la
+   * frontera determinista es más estrecha que antes**, que es exactamente lo que `ADR-026` busca.
+   *
+   * Lo que queda de este tipo sigue sin poder transportar una decisión de negocio: no hay dónde
+   * escribir un precio, una duración, un hueco ni el texto de la respuesta.
    */
-  servicioMencionado?: string;
   /**
    * Confianza del modelo, 0 a 1. **Por debajo del umbral se escala** (`RN-CONV-05`, degradación a
    * humano ante baja confianza). El adaptador determinista devuelve 1 cuando acierta un patrón y

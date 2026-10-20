@@ -19,7 +19,30 @@ import { normalizarTexto } from '../../domain/deteccion-de-escalamiento';
 const PATRONES: Readonly<Record<string, readonly string[]>> = {
   consultar_servicios: ['que servicios', 'servicios tienen', 'precios', 'cuanto cuesta', 'cuanto sale', 'lista de precios', 'catalogo'],
   consultar_disponibilidad: ['tienes lugar', 'hay lugar', 'tienen espacio', 'disponibilidad', 'estaria disponible', 'hay cupo'],
-  agendar: ['agendar', 'quiero una cita', 'apartar', 'reservar', 'me das cita', 'quiero cita'],
+  /**
+   * `agendar` incluye las formas en que se pide un **servicio** sin usar la palabra "cita".
+   *
+   * En WhatsApp casi nadie escribe *"quiero agendar"*: escribe *"quiero rubber con gel"*. Sin estas
+   * formas, el intérprete sin coste clasificaba esos mensajes como `desconocida` y el turno
+   * escalaba — con el presupuesto de IA agotado (`ADR-030`), eso dejaba al bot incapaz de agendar
+   * nada justo cuando más falta hacía.
+   *
+   * **No decide qué servicio es**: eso lo resuelve `resolverCombinacion` en el backend contra la
+   * matriz oficial. Aquí solo se reconoce la intención.
+   */
+  agendar: [
+    'agendar',
+    'quiero una cita',
+    'apartar',
+    'reservar',
+    'me das cita',
+    'quiero cita',
+    'quiero',
+    'me gustaria',
+    'me pongo',
+    'necesito',
+    'puedo ir',
+  ],
   confirmar_cita: ['si confirmo', 'confirmo', 'si voy', 'ahi estare', 'ahi estaré', 'si, confirmo', 'confirmada'],
   aceptar_oferta: ['si lo quiero', 'me lo quedo', 'si acepto', 'lo tomo', 'si me sirve'],
   // Último: ver la nota de arriba.
@@ -83,29 +106,25 @@ export class AgenteDeterministicoAdapter implements AgenteConversacionalPort {
     return texto.trim().length <= 12 && /^(si|sí|ok|va|claro|dale|perfecto|sale)\b/.test(texto.trim());
   }
 
-  /** Extrae fecha y hora si el mensaje las trae en formato reconocible. */
+  /**
+   * Extrae fecha y hora si el mensaje las trae en formato reconocible.
+   *
+   * **No extrae el servicio**, y antes sí lo hacía. Desde la matriz oficial de la Dueña, qué
+   * servicio se agenda lo decide `resolverCombinacion` sobre el texto completo de la clienta: una
+   * combinación como *"rubber con gel y manicure"* no cabe en una palabra, y elegir una de las tres
+   * agendaba el bloque de tiempo equivocado.
+   */
   private conDatos(tipo: TipoDeIntencion, textoOriginal: string): Intencion {
     const fecha = /\b(\d{4}-\d{2}-\d{2})\b/.exec(textoOriginal)?.[1];
     // `HH:MM` o `H:MM`, con o sin `hrs`. Deliberadamente estricto: adivinar "mañana por la tarde"
     // sería inventar una hora, y una cita a una hora inventada es peor que un escalamiento.
     const hora = /\b(\d{1,2}:\d{2})\b/.exec(textoOriginal)?.[1];
 
-    /**
-     * El servicio mencionado se toma tal cual: resolverlo contra el catálogo es del backend.
-     *
-     * La lista es de **palabras que suelen nombrar un servicio**, no del catálogo: este adaptador
-     * no conoce el catálogo, y meterlo aquí duplicaría una fuente de verdad que vive en
-     * PostgreSQL. Si la palabra no resuelve a un servicio activo, `resolverServicio` devuelve
-     * `null` y el turno escala — que es el lado seguro.
-     */
-    const servicio = /\b(gelish|acrilico|acrílico|diseño|diseno|retiro|pedicure|manicure|uñas|unas)\b/i.exec(textoOriginal)?.[1];
-
     return {
       tipo,
       confianza: 1,
       ...(fecha ? { fecha } : {}),
       ...(hora ? { hora: hora.padStart(5, '0') } : {}),
-      ...(servicio ? { servicioMencionado: servicio } : {}),
     };
   }
 }

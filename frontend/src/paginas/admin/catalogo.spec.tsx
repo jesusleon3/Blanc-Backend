@@ -20,6 +20,26 @@ const contexto = (servicios = [servicio()]) =>
   );
 
 describe('Backoffice — Catálogo y tiempos', () => {
+  it('DEJA ESCRITO que los tiempos son oficiales y editables sin tocar código', async () => {
+    /**
+     * Es un requisito explícito de la orden de trabajo, y no es decorativo: si la Dueña no sabe que
+     * puede cambiar una duración desde aquí, va a pedir un despliegue para cada ajuste — o peor, va
+     * a convivir con un tiempo equivocado, que es el que decide si una cita cabe.
+     *
+     * El aviso dice además que los **precios** siguen siendo provisionales y los **tiempos** no, que
+     * es la distinción que importa antes de cobrarle a alguien.
+     */
+    contexto();
+
+    montar(<CatalogoAdmin />);
+
+    expect(await screen.findByText('Estos tiempos son los oficiales, y se editan desde aquí.')).toBeInTheDocument();
+    expect(screen.getByText(/60, 120 o 180 minutos/)).toBeInTheDocument();
+    expect(screen.getByText(/no son la suma de sus partes/)).toBeInTheDocument();
+    expect(screen.getByText(/sin tocar código ni esperar un despliegue/)).toBeInTheDocument();
+    expect(screen.getByText(/precios siguen siendo provisionales/)).toBeInTheDocument();
+  });
+
   it('muestra la DURACIÓN de cada servicio en la tabla, no escondida en un detalle', async () => {
     /**
      * De `duracionBaseMinutos` sale el fin de cada cita (`DEC-033`), y de ahí el `tstzrange` que
@@ -174,23 +194,30 @@ describe('Backoffice — Modificadores de diseño', () => {
     servidor.use(http.get(MODIFICADORES, () => HttpResponse.json({ modificadoresDiseno: modificadores })));
   };
 
-  it('DICE que los modificadores todavía no se suman solos a la cita', async () => {
+  it('EXPLICA que las combinaciones son renglones del catálogo, no una suma de modificadores', async () => {
     /**
-     * ## ESTA PRUEBA PROTEGE UNA AUSENCIA, NO UNA FUNCIÓN
+     * ## ESTA PRUEBA PROTEGE UNA EXPLICACIÓN, Y CAMBIÓ DE FONDO (2026-10-19)
      *
-     * `AgendarCitaUseCase` cotiza con `incluyeModificadores: false`: el motor de combinaciones
-     * (`FL-COT-03`) está deliberadamente diferido. Una pantalla que presentara estos minutos como
-     * si ya afectaran al cobro haría que la Dueña configurara precios confiando en una suma que
-     * nadie hace, y la diferencia la pagaría ella en cada cita de diseño.
+     * Antes protegía un aviso de *función que falta*: los modificadores no se sumaban y el motor de
+     * combinaciones (`FL-COT-03`) estaba diferido, así que un diseño con tiempo extra no se podía
+     * agendar bien.
      *
-     * El aviso es el entregable de esta pestaña mientras el motor no exista.
+     * Con la matriz oficial de la Dueña eso dejó de ser una carencia: **los tiempos se absorben, no
+     * se suman**, así que no hay nada que sumar. Cada combinación es un renglón del catálogo con su
+     * duración exacta, y ahí se edita. El aviso tiene que decir eso, porque lo contrario —dejar el
+     * texto viejo— mandaría a la Dueña a buscar un cálculo que ya no hace falta.
+     *
+     * Los modificadores siguen sin sumarse, y eso también se dice: son informativos.
      */
     conModificadores();
 
     montar(<ModificadoresAdmin />);
 
-    expect(await screen.findByText('Los modificadores todavía no se suman solos a la cita.')).toBeInTheDocument();
-    expect(screen.getByText(/el cálculo automático de combinaciones \(FL-COT-03\) no está construido/)).toBeInTheDocument();
+    expect(await screen.findByText('Las combinaciones ya no se calculan aquí: son renglones del catálogo.')).toBeInTheDocument();
+    expect(screen.getByText(/se absorben, no se suman/)).toBeInTheDocument();
+    expect(screen.getByText(/no se suman solos a una cita/)).toBeInTheDocument();
+    // Y los tres diseños que el bot sí agenda, nombrados: es la regla de `DEC-033` en la pantalla.
+    expect(screen.getByText(/francés, puntos y ojo de gato/)).toBeInTheDocument();
   });
 
   it('crea un modificador con sus minutos y precio adicionales', async () => {

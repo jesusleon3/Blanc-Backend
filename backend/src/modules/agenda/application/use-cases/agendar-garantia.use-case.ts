@@ -62,19 +62,23 @@ export interface AgendarGarantiaInput {
  * de la ventana (`RN-GAR-01`); que no se haya honrado ya; y que haya hueco real. **No valida si el
  * reclamo es legítimo** — eso es el juicio humano que `RN-GAR-03` reserva a una persona.
  *
- * ## LO QUE NO COMPRUEBA, Y ES UNA TENSIÓN ABIERTA (auditoría 2026-10-17)
+ * ## UNA CLIENTA `bloqueada` SÍ RECIBE SU GARANTÍA — RATIFICADO (2026-10-19)
  *
- * **No consulta el estado de riesgo de la clienta.** `AgendarCitaUseCase` rechaza a una clienta
- * `bloqueada` con `CLIENTA_BLOQUEADA` (`RN-CRM-04`); aquí no hay esa comprobación, y la divergencia
- * era silenciosa hasta que la auditoría la nombró.
+ * **No se consulta el estado de riesgo de la clienta, y es deliberado.** `AgendarCitaUseCase`
+ * rechaza a una clienta `bloqueada` con `CLIENTA_BLOQUEADA` (`RN-CRM-04`); aquí no hay esa
+ * comprobación. La auditoría del 2026-10-17 lo dejó como tensión abierta y la Dueña lo resolvió:
+ * **la garantía se concede igual.**
  *
- * El argumento para dejarlo así es fuerte: el bloqueo frena **ventas nuevas**, y una garantía no es
- * una venta — es reparar un trabajo que ya se cobró. Negarse a arreglar unas uñas mal hechas porque
- * la clienta acumuló incidentes después sería quedarse con su dinero y con el problema.
+ * El argumento es de riesgo, no de cortesía: el bloqueo frena **ventas nuevas**, y una garantía no
+ * es una venta — es reparar un trabajo **que ya se cobró**. Negarse a arreglarlo porque la clienta
+ * acumuló incidentes *después* sería quedarse con su dinero y con el problema, y es exactamente la
+ * clase de caso que acaba en PROFECO. El filtro determinista del bot ya trata esa palabra como
+ * gatillo crítico; no hace falta además darle motivos.
  *
- * Pero la lectura contraria también es defendible, y **no es una decisión del sistema**: queda
- * registrada en `PROJECT_STATUS.md` §16 como pendiente de la Dueña. Si decide que sí debe frenar,
- * esto gana un `ContextoClientaPort` como el de `AgendarCitaUseCase`.
+ * Sigue exigiendo **acción humana explícita** (`RN-GAR-03`): esto solo lo crea una persona
+ * autorizada desde el panel, y el bot no puede. Si alguna vez se decidiera lo contrario, esto
+ * ganaría un `ContextoClientaPort` como el de `AgendarCitaUseCase` — pero haría falta cambiar antes
+ * la decisión, no el código.
  *
  * Lo mismo con la clienta en `lista_roja`: su garantía nace `agendada` y **sin anticipo**, que no
  * es una excepción a `RN-ANT-01` — el anticipo es el 40 % del servicio y el servicio cuesta cero.
